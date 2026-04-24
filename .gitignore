@@ -1,0 +1,86 @@
+# ===========================================
+# Aim Expense V2 — .gitignore
+# ===========================================
+
+# ----- Dependencies -----
+node_modules/
+.pnp
+.pnp.js
+.yarn/install-state.gz
+
+# ----- Next.js -----
+.next/
+out/
+build/
+dist/
+
+# ----- Production builds -----
+*.tsbuildinfo
+next-env.d.ts
+
+# ----- Environment Variables (สำคัญ! อย่า commit) -----
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env*.local
+
+# ----- Vercel -----
+.vercel
+
+# ----- Logs -----
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# ----- Testing -----
+coverage/
+.nyc_output
+
+# ----- IDE / Editor -----
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ----- OS -----
+.DS_Store
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Desktop.ini
+
+# ----- Misc -----
+*.pem
+.cache/
+.tmp/
+tmp/
+
+# ----- Prisma -----
+# keep schema.prisma in repo, ignore generated client
+# (postinstall script generates it fresh)
+
+# ----- Project-specific -----
+# Tesseract OCR training data (ใหญ่มาก — ไม่ต้อง commit)
+eng.traineddata
+tha.traineddata
+
+# Handoff docs ที่ใช้ระหว่าง session (เก็บใน repo ได้ถ้าต้องการ อันนี้ comment ไว้)
+# HANDOFF.md
+# SESSION*.md
+
+# Large test files
+*.pdf
+*.xlsm
+*.xlsx
+!AimExpense-*.xlsx
+
+# Zip archives
+*.zip
+*.tar.gz
