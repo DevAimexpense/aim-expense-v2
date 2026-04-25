@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { trpc } from "@/lib/trpc/client";
 import SearchableSelect, { type SearchableSelectOption } from "@/components/searchable-select";
+import { StatCard } from "@/components/shared";
 
 const PLAN_FEATURES: Record<string, { revenue: boolean; vat: boolean; pl: boolean }> = {
   free: { revenue: false, vat: false, pl: false },
@@ -452,31 +453,6 @@ export function DashboardClient({
 }
 
 // ===== Components =====
-
-function StatCard({
-  color,
-  icon,
-  label,
-  value,
-  sub,
-  compact = false,
-}: {
-  color: "blue" | "green" | "amber" | "rose" | "violet";
-  icon: string;
-  label: string;
-  value: string;
-  sub?: string;
-  compact?: boolean;
-}) {
-  return (
-    <div className={`app-stat-card gradient-${color}`}>
-      <div className={`app-stat-icon ${color}`}>{icon}</div>
-      <p className="app-stat-label">{label}</p>
-      <p className={compact ? "app-stat-value-sm" : "app-stat-value"}>{value}</p>
-      {sub && <p className="app-stat-sub">{sub}</p>}
-    </div>
-  );
-}
 
 function VatRow({
   label,
