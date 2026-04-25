@@ -1289,6 +1289,47 @@ body {
   font-size: 0.75rem;
 }
 
+/* ExportButton (shared component) */
+.app-export-menu {
+  position: absolute;
+  top: calc(100% + 0.375rem);
+  right: 0;
+  z-index: 50;
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.625rem;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1),
+    0 4px 6px -4px rgba(0, 0, 0, 0.05);
+  padding: 0.25rem;
+  display: flex;
+  flex-direction: column;
+  min-width: 180px;
+}
+
+.app-export-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background: transparent;
+  border: 0;
+  border-radius: 0.375rem;
+  cursor: pointer;
+  font-size: 0.875rem;
+  color: #0f172a;
+  text-align: left;
+  width: 100%;
+}
+
+.app-export-menu-item:hover {
+  background: #f1f5f9;
+}
+
+.app-export-menu-item:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
 /* Form */
 .app-form-group {
   margin-bottom: 1rem;
