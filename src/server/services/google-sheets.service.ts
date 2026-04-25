@@ -672,10 +672,52 @@ export class GoogleSheetsService {
   /**
    * ดึง EventID ทั้งหมดที่ user คนนี้ได้รับ assigned
    * ใช้สำหรับ filter project picker ใน LINE OA
+   *
+   * Resilient match: tries to match any of the user's identifiers (id/email/
+   * lineUserId/displayName) against the UserID column — recovers from cases
+   * where assignments were entered in the sheet using a friendlier label
+   * (email, LINE display name) instead of the canonical Prisma user.id.
+   *
+   * EventID is trimmed on read so trailing whitespace in the sheet doesn't
+   * break Set membership downstream.
    */
-  async getEventIdsAssignedToUser(userId: string): Promise<string[]> {
-    const all = await this.getFiltered(SHEET_TABS.EVENT_ASSIGNMENTS, "UserID", userId);
-    return all.map((a) => a.EventID).filter(Boolean);
+  async getEventIdsAssignedToUser(
+    user: string | { id: string; email?: string | null; lineUserId?: string | null; lineDisplayName?: string | null },
+  ): Promise<string[]> {
+    // Normalize to a list of candidate identifiers (lowercased + trimmed)
+    const candidates = new Set<string>();
+    const add = (v?: string | null) => {
+      if (!v) return;
+      const t = String(v).trim();
+      if (t) candidates.add(t.toLowerCase());
+    };
+    if (typeof user === "string") {
+      add(user);
+    } else {
+      add(user.id);
+      add(user.email);
+      add(user.lineUserId);
+      add(user.lineDisplayName);
+    }
+
+    const all = await this.getAll(SHEET_TABS.EVENT_ASSIGNMENTS);
+    const matched = all.filter((row) => {
+      const cell = String(row.UserID || "").trim().toLowerCase();
+      return cell.length > 0 && candidates.has(cell);
+    });
+
+    // Diagnostic log when we find nothing — helps surface UserID format mismatch
+    if (matched.length === 0 && all.length > 0) {
+      const sampleUserIds = [
+        ...new Set(all.slice(0, 5).map((r) => String(r.UserID || ""))),
+      ].map((v) => JSON.stringify(v));
+      console.warn(
+        `[Sheets] EventAssignments: 0 rows matched ${candidates.size} candidate identifier(s) ` +
+          `(of ${all.length} total rows). Sample UserIDs in sheet: ${sampleUserIds.join(", ")}`,
+      );
+    }
+
+    return matched.map((a) => String(a.EventID || "").trim()).filter(Boolean);
   }
 
   /**

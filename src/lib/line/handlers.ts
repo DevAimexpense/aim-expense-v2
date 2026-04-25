@@ -217,7 +217,16 @@ async function processMediaAsync(
   lineUserId: string,
   messageId: string,
   mimeType: string,
-  ctx: { user: { id: string }; orgId: string; orgName: string }
+  ctx: {
+    user: {
+      id: string;
+      email?: string | null;
+      lineUserId?: string | null;
+      lineDisplayName?: string | null;
+    };
+    orgId: string;
+    orgName: string;
+  },
 ): Promise<void> {
   // Download + OCR
   const buffer = await getMessageContent(messageId);
@@ -249,17 +258,21 @@ async function processMediaAsync(
 
   // Fetch projects + filter to ones the user is assigned to.
   // Carousel shows max 12 bubbles per LINE spec.
+  // Pass full user object so getEventIdsAssignedToUser can match against any
+  // identifier the org might have entered in the sheet (id/email/lineUserId/displayName).
   const [events, assignedEventIds] = await Promise.all([
     sheets.getEvents(),
-    sheets.getEventIdsAssignedToUser(ctx.user.id),
+    sheets.getEventIdsAssignedToUser(ctx.user),
   ]);
-  const assignedSet = new Set(assignedEventIds);
+  // Trim both sides of the EventID match — sheet entries often have trailing
+  // whitespace from copy-paste that breaks Set membership.
+  const assignedSet = new Set(assignedEventIds.map((id) => id.trim()));
 
   const activeAssignedEvents = events
     .filter(
       (e) =>
         (e.Status || "").trim().toLowerCase() === "active" &&
-        assignedSet.has(e.EventID),
+        assignedSet.has((e.EventID || "").trim()),
     )
     .slice(0, 12);
 

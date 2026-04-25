@@ -8,6 +8,7 @@ import { prisma } from "@/lib/prisma";
 export interface LineUserContext {
   user: {
     id: string;
+    email: string | null;
     lineUserId: string;
     lineDisplayName: string;
     onboardingStep: string;
@@ -27,6 +28,7 @@ export async function resolveLineContext(
     where: { lineUserId },
     select: {
       id: true,
+      email: true,
       lineUserId: true,
       lineDisplayName: true,
       onboardingStep: true,
