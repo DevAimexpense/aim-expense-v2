@@ -13,12 +13,14 @@ import {
   type LineQuickReplyItem,
 } from "@/lib/line/messaging";
 import { parseReceipt, type OcrParsedReceipt } from "@/lib/ocr";
+import { findBestMatch, similarity } from "@/lib/ocr/text-similarity";
 import { resolveLineContext } from "@/lib/line/user-org";
 import { ensureLineDefaults } from "@/lib/line/defaults";
 import {
   buildOcrConfirmFlex,
   buildSavedFlex,
 } from "@/lib/line/flex/payment-confirm";
+import { buildProjectPickerCarousel } from "@/lib/line/flex/project-picker";
 import {
   GoogleSheetsService,
   SHEET_TABS,
@@ -171,6 +173,46 @@ export async function handleMedia(event: LineWebhookEvent): Promise<void> {
 
 export const handleImage = handleMedia;
 
+/**
+ * Auto-correct OCR-extracted buyer info using org-level Config sheet.
+ *
+ * Config keys (all optional):
+ *   BUYER_NAME      — canonical company name (e.g. "บริษัท อาร์โด จำกัด")
+ *   BUYER_TAX_ID    — 13-digit tax ID
+ *   BUYER_BRANCH    — "สำนักงานใหญ่" or "สาขา 00001"
+ *   BUYER_ADDRESS   — full address
+ *
+ * Match priority: tax ID exact → fuzzy name (≥0.7). On match, all 4 fields are
+ * overridden with Config values (Config is source of truth for own company).
+ * Mutates the OCR result in-place.
+ */
+async function applyBuyerAutoCorrect(
+  ocr: OcrParsedReceipt,
+  sheets: { getConfigMap: () => Promise<Record<string, string>> },
+): Promise<void> {
+  const config = await sheets.getConfigMap();
+  const cfgName = config.BUYER_NAME?.trim();
+  const cfgTaxId = config.BUYER_TAX_ID?.trim();
+  if (!cfgName && !cfgTaxId) return; // org hasn't configured buyer info — skip
+
+  const taxIdMatches = !!(cfgTaxId && ocr.buyerTaxId && ocr.buyerTaxId === cfgTaxId);
+  const nameMatch = cfgName && ocr.buyerName ? similarity(ocr.buyerName, cfgName) : 0;
+  const nameFuzzyMatches = nameMatch >= 0.7;
+
+  if (!taxIdMatches && !nameFuzzyMatches) return;
+
+  const before = ocr.buyerName;
+  if (cfgName) ocr.buyerName = cfgName;
+  if (cfgTaxId) ocr.buyerTaxId = cfgTaxId;
+  if (config.BUYER_BRANCH) ocr.buyerBranch = config.BUYER_BRANCH.trim();
+  if (config.BUYER_ADDRESS) ocr.buyerAddress = config.BUYER_ADDRESS.trim();
+
+  console.log(
+    `[LINE] Buyer auto-corrected: "${before}" → "${ocr.buyerName}"` +
+      ` (taxId match: ${taxIdMatches}, name score: ${nameMatch.toFixed(2)})`,
+  );
+}
+
 async function processMediaAsync(
   lineUserId: string,
   messageId: string,
@@ -180,6 +222,16 @@ async function processMediaAsync(
   // Download + OCR
   const buffer = await getMessageContent(messageId);
   const ocr = await parseReceipt(buffer, mimeType, "receipt");
+
+  // Auto-correct buyer info from Config sheet (graceful — silently skips if no Config rows).
+  // OCR mis-reads Thai chars on small fonts (ร↔ซ, ด↔อ); the Config-stored
+  // buyer name/taxId is the source of truth for the org's own company.
+  const sheets = await getSheetsService(ctx.orgId);
+  try {
+    await applyBuyerAutoCorrect(ocr, sheets);
+  } catch (err) {
+    console.warn("[LINE] Buyer auto-correct skipped:", err);
+  }
 
   // Save draft
   const expiresAt = new Date(Date.now() + DRAFT_TTL_HOURS * 3600 * 1000);
@@ -195,41 +247,29 @@ async function processMediaAsync(
     },
   });
 
-  // Fetch active projects for Quick Reply
-  const sheets = await getSheetsService(ctx.orgId);
-  const events = await sheets.getEvents();
-  const activeEvents = events
-    .filter((e) => e.Status === "active" || e.Status === "Active")
-    .slice(0, 13); // LINE Quick Reply max 13 items
+  // Fetch projects + filter to ones the user is assigned to.
+  // Carousel shows max 12 bubbles per LINE spec.
+  const [events, assignedEventIds] = await Promise.all([
+    sheets.getEvents(),
+    sheets.getEventIdsAssignedToUser(ctx.user.id),
+  ]);
+  const assignedSet = new Set(assignedEventIds);
 
-  if (activeEvents.length === 0) {
-    // No projects — use default and go straight to confirm
-    const defaults = await ensureLineDefaults(sheets);
-    await prisma.lineDraft.update({
-      where: { id: draft.id },
-      data: { eventId: defaults.eventId, eventName: "LINE (ไม่ระบุโปรเจกต์)" } as Record<string, unknown>,
-    });
-    await pushMessage(lineUserId, [
-      buildOcrConfirmFlex(draft, ocr, {
-        orgName: ctx.orgName,
-        projectName: "LINE (ไม่ระบุโปรเจกต์)",
-        appBaseUrl: APP_BASE_URL,
-      }),
-    ]);
-    return;
-  }
+  const activeAssignedEvents = events
+    .filter(
+      (e) =>
+        (e.Status || "").trim().toLowerCase() === "active" &&
+        assignedSet.has(e.EventID),
+    )
+    .slice(0, 12);
 
-  // Build Quick Reply items
-  const quickReplyItems: LineQuickReplyItem[] = activeEvents.map((ev) => ({
-    type: "action" as const,
-    action: {
-      type: "postback" as const,
-      label: (ev.EventName || "ไม่ระบุ").slice(0, 20), // LINE label max 20 chars
-      data: `action=select_project&id=${draft.id}&eventId=${ev.EventID}&eventName=${encodeURIComponent((ev.EventName || "").slice(0, 50))}`,
-      displayText: `${ev.EventName || "ไม่ระบุ"}`,
-    },
-  }));
+  console.log(
+    `[LINE] Project picker: ${activeAssignedEvents.length} assigned-active` +
+      ` (of ${events.length} events, ${assignedEventIds.length} assignments)` +
+      ` — statuses: ${[...new Set(events.map((e) => JSON.stringify(e.Status || "")))].join(", ")}`,
+  );
 
+  // Build summary text (sent BEFORE the carousel so the user sees what was read)
   const vendor = ocr.vendorName || "ไม่ระบุ";
   const total = ocr.totalAmount ?? ocr.subtotal ?? 0;
   const fmtTotal = total.toLocaleString("th-TH", { minimumFractionDigits: 2 });
@@ -250,16 +290,37 @@ async function processMediaAsync(
     docDate ? `วันที่: ${docDate}` : "",
     ocr.vendorTaxId ? `Tax ID: ${ocr.vendorTaxId}` : "",
     ocr.buyerName ? `ผู้ซื้อ: ${ocr.buyerName}` : "",
-    ``,
-    `กรุณาเลือกโปรเจกต์:`,
   ].filter(Boolean).join("\n");
 
+  // No assigned-active projects → fallback to default + confirm flex
+  if (activeAssignedEvents.length === 0) {
+    const defaults = await ensureLineDefaults(sheets);
+    await prisma.lineDraft.update({
+      where: { id: draft.id },
+      data: { eventId: defaults.eventId, eventName: "LINE (ไม่ระบุโปรเจกต์)" } as Record<string, unknown>,
+    });
+    await pushMessage(lineUserId, [
+      { type: "text", text: summaryLines },
+      buildOcrConfirmFlex(draft, ocr, {
+        orgName: ctx.orgName,
+        projectName: "LINE (ไม่ระบุโปรเจกต์)",
+        appBaseUrl: APP_BASE_URL,
+      }),
+    ]);
+    return;
+  }
+
+  // Show summary text first, then the carousel — NO Quick Reply (removes the
+  // shortcut bar that confused users).
   await pushMessage(lineUserId, [
-    {
-      type: "text",
-      text: summaryLines,
-      quickReply: { items: quickReplyItems },
-    },
+    { type: "text", text: summaryLines + "\n\nกรุณาเลือกโปรเจกต์:" },
+    buildProjectPickerCarousel(
+      draft.id,
+      activeAssignedEvents.map((ev) => ({
+        eventId: ev.EventID,
+        eventName: ev.EventName || "ไม่ระบุ",
+      })),
+    ),
   ]);
 }
 
@@ -414,15 +475,33 @@ async function confirmDraftAsync(draft: {
   let vendorBranchInfo = "";
 
   if (ocr.vendorName) {
-    // Try to find existing payee by name or taxId
+    // Try to find existing payee — TaxID exact match wins, otherwise fuzzy on name.
+    // Fuzzy match recovers from OCR misreads of Thai chars (ร↔ซ, ด↔อ, etc).
     const payees = await sheets.getPayees();
     const matchByTax = ocr.vendorTaxId
       ? payees.find((p) => p.TaxID === ocr.vendorTaxId)
       : null;
-    const matchByName = payees.find(
-      (p) => p.PayeeName?.toLowerCase().includes(ocr.vendorName!.toLowerCase())
-    );
-    const matched = matchByTax || matchByName;
+
+    let matched = matchByTax;
+    let fuzzyScore = 0;
+    if (!matched) {
+      const fuzzy = findBestMatch(
+        ocr.vendorName,
+        payees,
+        (p) => p.PayeeName,
+        { threshold: 0.7 },
+      );
+      if (fuzzy) {
+        matched = fuzzy.item;
+        fuzzyScore = fuzzy.score;
+        console.log(
+          `[LINE] Vendor fuzzy match: "${ocr.vendorName}" → "${fuzzy.item.PayeeName}" (score ${fuzzyScore.toFixed(2)})`,
+        );
+        // Override vendorName on the OCR result so downstream code, the saved
+        // draft and the Flex card all see the canonical name.
+        ocr.vendorName = fuzzy.item.PayeeName;
+      }
+    }
 
     if (matched) {
       payeeId = matched.PayeeID;

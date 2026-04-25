@@ -1,6 +1,137 @@
 # Aim Expense V2 — Handoff Notes
 
-## Last Updated: 2026-04-21 (Session 11 Round 1 — Phase 5 cleanup code-side เสร็จ)
+## Last Updated: 2026-04-24 02:00 ICT (Session 11 → Session 12 handoff — Deploy Vercel เสร็จ)
+
+---
+
+## ✅ Session 11 Round 2 สรุป — Deploy Vercel (2026-04-24)
+
+**Scope:** Deploy app แรกขึ้น Vercel (soft launch) เพื่อใช้ LINE webhook production + เตรียม Phase 4
+
+### 🌐 Production URL
+```
+https://aim-expense-v2.vercel.app
+```
+
+### 🔐 GitHub Repository
+- URL: `https://github.com/DevAimexpense/aim-expense-v2`
+- Branch: `main`
+- Visibility: Private
+- First commit: `4b27ee3` — Initial commit
+- Fix commit: `6b1dab8` — fix: wrap /login useSearchParams in Suspense boundary
+
+### 📦 Vercel Project
+- Team: `aim-expense`
+- Project: `aim-expense-v2`
+- Framework: Next.js (auto-detect)
+- Node: 24.x (default)
+- Plan: **Pro trial** (14 วัน) — ⚠️ expires ~2026-05-06 → **ต้อง downgrade เป็น Hobby** ก่อน trial หมด ถ้าไม่งั้นจะโดนหัก $20/เดือน
+  - Hobby = ฟรีตลอด, bandwidth 100GB/เดือน, function timeout 10s
+  - Pro = $20/เดือน, function timeout 60s
+
+### ✅ Deployment ที่สำเร็จ
+1. Round 1: Build fail ที่ `/login` — useSearchParams ไม่ wrap Suspense
+2. Round 2: แยกเป็น 2 ไฟล์ (page.tsx = Server + Suspense, login-form.tsx = Client) — Build OK
+3. Round 3: Update env 5 ตัวเป็น production URL → Redeploy → Ready
+
+### 🔧 Config ที่ทำเสร็จแล้ว
+
+**Vercel Environment Variables** — Import จาก .env.local (22 keys) + update 5 keys:
+- ✅ `APP_BASE_URL` = `https://aim-expense-v2.vercel.app`
+- ✅ `NEXT_PUBLIC_APP_URL` = `https://aim-expense-v2.vercel.app`
+- ✅ `NEXTAUTH_URL` = `https://aim-expense-v2.vercel.app`
+- ✅ `GOOGLE_REDIRECT_URI` = `https://aim-expense-v2.vercel.app/api/auth/google/callback`
+- ✅ `LINE_CALLBACK_URL` = `https://aim-expense-v2.vercel.app/api/auth/line/callback`
+
+**Google Cloud Console** (OAuth client: `Aim Expense Web`, ID prefix `409545544420-injh...`):
+- ✅ Authorized JavaScript origins: `http://localhost:3000` + `https://aim-expense-v2.vercel.app`
+- ✅ Authorized redirect URIs: `http://localhost:3000/api/auth/google/callback` + `https://aim-expense-v2.vercel.app/api/auth/google/callback`
+
+**LINE Login Channel** (ID: `2009801571`):
+- ✅ Callback URL: `http://localhost:3000/api/auth/line/callback` + `https://aim-expense-v2.vercel.app/api/auth/line/callback`
+
+**LINE Messaging Channel** (ID: `2009801545`, OA: `@064qycfu`):
+- ✅ Webhook URL: `https://aim-expense-v2.vercel.app/api/line/webhook`
+- ✅ **Verify: Success** (verify ผ่าน, webhook ยิงถึงได้)
+- ⏳ Use webhook: Enabled (user ตั้งอยู่)
+- ⏳ Auto-reply / Greeting: Disabled (user ตั้งอยู่)
+
+### 📄 ไฟล์ใหม่ที่เพิ่มใน Session 11 Round 2
+- `.gitignore` — กัน .env.local, node_modules, .next
+- `.env.example` — template env vars พร้อม comment
+- `vercel.json` — region sin1 + function timeout 30s (ต้องการ Pro plan)
+- `DEPLOYMENT-GUIDE.md` — คู่มือ deploy step-by-step (6 ขั้น)
+- `src/app/(auth)/login/login-form.tsx` — Client Component (logic เดิม)
+- `src/app/(auth)/login/page.tsx` — Server Component ห่อ Suspense (แก้ build)
+
+---
+
+## 🚀 แผน Session 12 (ลำดับความสำคัญ)
+
+### Priority 1 — Smoke Test Production (30 นาที)
+1. ทดสอบ LINE Login จริง → redirect callback ถูกต้องไหม
+2. ทดสอบ Google OAuth → token exchange ทำงานได้
+3. ทดสอบ LINE OA: ส่งรูปใบเสร็จ → รอ Flex card ตอบ (~10-15s)
+4. ทดสอบสร้าง payment + upload receipt บนเว็บ
+5. ตรวจ Google Sheets + Drive: row/file เพิ่มจริง
+6. ดู Vercel Logs ว่ามี error 4xx/5xx ไหม
+
+### Priority 2 — Vercel Plan Management (5 นาที)
+- ⚠️ **สำคัญ!** ตรวจสอบ plan และ downgrade เป็น Hobby ก่อน **2026-05-06**
+- ที่: Vercel → Settings (team-level) → Billing → Switch to Hobby
+- หมายเหตุ: ถ้า downgrade แล้ว function timeout จะเหลือ 10s → LINE webhook cold start อาจเกิน limit บ้าง (ดูใน logs)
+
+### Priority 3 — Phase 4 Dashboard (งานใหญ่ — แบ่งหลาย session ย่อย)
+
+**ตามที่คุยกับพี่**: แบ่ง Phase 4 เป็น 5 sessions ย่อย เพื่อไม่ให้ context ระเบิด
+
+- **Session 12A** — Shared components (StatCard, DataTable, DateRangePicker, ExportButton)
+- **Session 12B** — Dashboard แยก role (admin/manager/accountant/staff)
+- **Session 12C** — Weekly Payment + Bank Sheet Export
+- **Session 12D** — Clear Budget + Search Expenses (ใช้ filter ร่วมกัน)
+- **Session 12E** — Inactive Payees + Audit Logs UI
+
+### Priority 4 — Phase 6 (หลัง Phase 4 จบ)
+- Stripe integration
+- Subscription plans + credit
+- Landing page (สำหรับ public launch)
+- Migration tool
+
+---
+
+## ⚠️ Known Issues / Watch Out
+
+### 1. Function Timeout (Hobby plan)
+- Hobby = 10s; Pro = 60s
+- LINE webhook cold start + Prisma connect อาจใกล้ 10s
+- ถ้าเจอ timeout บ่อย → optimize: lazy import Prisma, ใช้ Supabase REST แทน
+
+### 2. Login page Suspense boundary
+- `/login/page.tsx` ต้องเป็น Server Component ห่อ Suspense (แก้แล้ว)
+- ถ้าจะเพิ่ม page ใหม่ที่ใช้ `useSearchParams()` — ต้อง pattern เดียวกัน
+
+### 3. Supabase Session Pooler vs Transaction Pooler
+- ตอนนี้ใช้ Session Pooler (port 5432)
+- ถ้าเจอ "too many connections" ใน logs → สลับเป็น Transaction Pooler (port 6543)
+
+### 4. Trial Pro plan expires
+- Add a payment method หรือ downgrade → ถ้าไม่ทำ Vercel อาจ suspend project
+
+---
+
+## 🧹 ยังค้างจาก Session 11 Round 1 (user ต้องลบเองใน VS Code/Finder)
+
+```bash
+cd "/Users/pimratraa./Desktop/Mac Cowork/Aim Expense V2/aim-expense"
+rm src/lib/ocr/pdf-to-png-server.ts           # dead code, ไม่มี ref
+rm -rf src/app/api/webhook                     # path เก่า (ใช้ /api/line/webhook แทน)
+rm -rf src/app/documents/wth-cert              # typo folder t-h (ที่ถูก = wht-cert)
+git add -A
+git commit -m "chore: remove dead Phase 5 files"
+git push
+```
+
+ไฟล์เหล่านี้ไม่กระทบการทำงาน ลบตอนสะดวก
 
 ---
 

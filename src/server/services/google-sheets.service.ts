@@ -669,6 +669,52 @@ export class GoogleSheetsService {
     return this.getFiltered(SHEET_TABS.EVENT_ASSIGNMENTS, "EventID", eventId);
   }
 
+  /**
+   * ดึง EventID ทั้งหมดที่ user คนนี้ได้รับ assigned
+   * ใช้สำหรับ filter project picker ใน LINE OA
+   */
+  async getEventIdsAssignedToUser(userId: string): Promise<string[]> {
+    const all = await this.getFiltered(SHEET_TABS.EVENT_ASSIGNMENTS, "UserID", userId);
+    return all.map((a) => a.EventID).filter(Boolean);
+  }
+
+  /**
+   * ดึง Config tab ทั้งหมด (Key → Value map)
+   * Config tab ใช้เก็บ org-level settings เช่น BUYER_NAME, BUYER_TAX_ID,
+   * BUYER_BRANCH, BUYER_ADDRESS — สำหรับ auto-correct buyer info จาก OCR
+   *
+   * Robust against:
+   *   - Missing tab (returns {})
+   *   - User-created tab without proper "Key"/"Value" headers
+   *   - Header row with case variations ("key"/"Key"/"KEY")
+   *   - Data starting on row 1 instead of row 2
+   */
+  async getConfigMap(): Promise<Record<string, string>> {
+    try {
+      const response = await this.sheets.spreadsheets.values.get({
+        spreadsheetId: this.spreadsheetId,
+        range: `${SHEET_TABS.CONFIG}!A:B`,
+      });
+      const rows = (response.data.values as string[][] | undefined) || [];
+      if (rows.length === 0) return {};
+
+      // Detect header row: if A1 looks like a header label, skip it.
+      const firstA = String(rows[0]?.[0] ?? "").trim().toLowerCase();
+      const startIdx = firstA === "key" || firstA === "keys" ? 1 : 0;
+
+      const map: Record<string, string> = {};
+      for (let i = startIdx; i < rows.length; i++) {
+        const key = String(rows[i]?.[0] ?? "").trim();
+        const value = String(rows[i]?.[1] ?? "").trim();
+        if (key) map[key] = value;
+      }
+      return map;
+    } catch (err) {
+      console.warn("[Sheets] getConfigMap failed (tab missing/no access):", err);
+      return {};
+    }
+  }
+
   // ===== ID GENERATION =====
 
   /**

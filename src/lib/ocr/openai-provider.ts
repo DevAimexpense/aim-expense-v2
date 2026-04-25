@@ -184,7 +184,7 @@ Extract ข้อมูลจากเอกสารนี้ตาม schema (
 // Image preprocessing for GPT Vision
 // ===========================================
 
-/** Resize image for GPT Vision — smaller = faster upload + faster processing */
+/** Resize image for GPT Vision — sharpen + normalize for better Thai OCR accuracy */
 async function prepareImageForGpt(imageBuffer: Buffer, mimeType: string): Promise<{ base64: string; mime: string }> {
   try {
     const sharpLib = await getSharp();
@@ -192,24 +192,30 @@ async function prepareImageForGpt(imageBuffer: Buffer, mimeType: string): Promis
     const w = metadata.width || 0;
     const h = metadata.height || 0;
 
-    // GPT-4o Vision works well at 1024-1200px — smaller = faster API call
-    const MAX_DIM = 1200;
-    if (w <= MAX_DIM && h <= MAX_DIM) {
-      // Still convert to JPEG for smaller payload
-      const optimized = await sharpLib(imageBuffer)
-        .jpeg({ quality: 85 })
-        .toBuffer();
-      return { base64: optimized.toString("base64"), mime: "image/jpeg" };
+    // GPT-4o Vision "high" detail mode samples up to ~1568px on the long edge.
+    // We push to 1600 to keep headroom; sharp will not enlarge if the source is smaller.
+    // Sharpen + normalize compensate for soft scans where Thai sara/tone marks
+    // (e.g. ร↔ซ, ด↔อ) collide on small fonts in receipts.
+    const MAX_DIM = 1600;
+    const longEdge = Math.max(w, h);
+
+    let pipeline = sharpLib(imageBuffer)
+      .rotate()           // honour EXIF rotation (LINE photos often need this)
+      .normalize()        // auto contrast — pulls black/white levels for crisper edges
+      .sharpen({ sigma: 0.8 });
+
+    if (longEdge > MAX_DIM) {
+      console.log(`[OCR] Resizing image for GPT: ${w}x${h} → long edge ${MAX_DIM}px`);
+      pipeline = pipeline.resize(MAX_DIM, MAX_DIM, { fit: "inside", withoutEnlargement: true });
     }
 
-    console.log(`[OCR] Resizing image for GPT: ${w}x${h} → max ${MAX_DIM}px`);
-    const resized = await sharpLib(imageBuffer)
-      .resize(MAX_DIM, MAX_DIM, { fit: "inside", withoutEnlargement: true })
-      .jpeg({ quality: 85 })
+    const optimized = await pipeline
+      .jpeg({ quality: 92 }) // 85 → 92: small extra bytes, big win on Thai legibility
       .toBuffer();
 
-    return { base64: resized.toString("base64"), mime: "image/jpeg" };
-  } catch {
+    return { base64: optimized.toString("base64"), mime: "image/jpeg" };
+  } catch (err) {
+    console.warn("[OCR] prepareImageForGpt fallback (no preprocessing):", err);
     const base64 = imageBuffer.toString("base64");
     return { base64, mime: mimeType };
   }
@@ -527,7 +533,7 @@ export class OpenAIOcrProvider implements OcrProvider {
             role: "user",
             content: [
               { type: "text", text: getParseUserPrompt(documentType) },
-              { type: "image_url", image_url: { url: imageDataUrl, detail: "auto" } },
+              { type: "image_url", image_url: { url: imageDataUrl, detail: "high" } },
             ],
           },
         ],
