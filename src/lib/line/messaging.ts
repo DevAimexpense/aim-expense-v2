@@ -9,6 +9,7 @@ const LINE_PUSH_URL = "https://api.line.me/v2/bot/message/push";
 const LINE_REPLY_URL = "https://api.line.me/v2/bot/message/reply";
 const LINE_PROFILE_URL = "https://api.line.me/v2/bot/profile";
 const LINE_CONTENT_URL = "https://api-data.line.me/v2/bot/message";
+const LINE_LOADING_URL = "https://api.line.me/v2/bot/chat/loading/start";
 
 export interface LineQuickReplyItem {
   type: "action";
@@ -99,6 +100,47 @@ export async function replyMessage(
   if (!res.ok) {
     const errorText = await res.text();
     throw new Error(`LINE reply message failed: ${res.status} ${errorText}`);
+  }
+}
+
+/**
+ * Show the "typing" loading animation (3 animated dots) in the user's chat.
+ *
+ * Behaviour (per LINE spec):
+ * - Animation is visible for `loadingSeconds` (5..60, in 5s increments).
+ * - Auto-dismissed when the bot sends the next message via push/reply, or
+ *   when the timeout expires (whichever comes first).
+ * - Best-effort: failures are logged but never thrown — UX nicety, not
+ *   critical to flow correctness.
+ */
+export async function showLoadingAnimation(
+  chatId: string,
+  loadingSeconds: number = 30,
+): Promise<void> {
+  const token = getChannelAccessToken();
+
+  // Clamp to LINE's 5..60 range and round up to the nearest 5s increment.
+  const clamped = Math.min(60, Math.max(5, loadingSeconds));
+  const rounded = Math.ceil(clamped / 5) * 5;
+
+  try {
+    const res = await fetch(LINE_LOADING_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ chatId, loadingSeconds: rounded }),
+    });
+
+    if (!res.ok) {
+      const errorText = await res.text().catch(() => "");
+      console.warn(
+        `[LINE] Loading animation request failed: ${res.status} ${errorText}`,
+      );
+    }
+  } catch (err) {
+    console.warn("[LINE] Loading animation request threw:", err);
   }
 }
 

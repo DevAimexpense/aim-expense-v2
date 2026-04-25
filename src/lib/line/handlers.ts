@@ -9,6 +9,7 @@ import {
   pushMessage,
   text,
   getMessageContent,
+  showLoadingAnimation,
   type LineMessage,
   type LineQuickReplyItem,
 } from "@/lib/line/messaging";
@@ -132,12 +133,13 @@ export async function handleText(event: LineWebhookEvent): Promise<void> {
       return;
     }
 
-    // Acknowledge immediately, then run picker flow asynchronously.
-    await replyMessage(event.replyToken, [
-      text(`รับรายการแล้วค่ะ ฿${parsed.amount.toLocaleString("th-TH", { minimumFractionDigits: 2 })}\nกำลังเตรียมรายชื่อโปรเจกต์...`),
-    ]);
+    // Show typing-dots animation (auto-dismisses on next push).
+    await showLoadingAnimation(lineUserId, 30);
 
-    void processTextExpenseAsync(lineUserId, parsed, ctx).catch((err) => {
+    // IMPORTANT: must `await` here, not `void`. On Vercel serverless,
+    // returning before the picker push completes causes the runtime to
+    // freeze the function and the Flex Carousel never reaches the user.
+    await processTextExpenseAsync(lineUserId, parsed, ctx).catch((err) => {
       console.error("[LINE webhook] text expense processing failed:", err);
       void pushMessage(lineUserId, [
         text("ไม่สามารถบันทึกรายการได้\n" + (err instanceof Error ? err.message : "เกิดข้อผิดพลาด")),
@@ -202,16 +204,16 @@ export async function handleMedia(event: LineWebhookEvent): Promise<void> {
     return;
   }
 
-  // Acknowledge
-  await replyMessage(event.replyToken, [
-    text(`${displayKind}ได้รับแล้วค่ะ กำลังอ่านข้อมูล...`),
-  ]);
+  // Acknowledge with the typing-dots loading animation (replaces the old
+  // text "received, reading..." reply so it feels like a person is typing).
+  // Animation auto-dismisses when our first push message arrives.
+  await showLoadingAnimation(lineUserId, 60);
 
   // Process OCR → then ask to select project
   await processMediaAsync(lineUserId, messageId, mimeType, ctx).catch((err) => {
     console.error("[LINE webhook] media processing failed:", err);
     void pushMessage(lineUserId, [
-      text("ไม่สามารถอ่านเอกสารได้\n" + (err instanceof Error ? err.message : "เกิดข้อผิดพลาด")),
+      text("ไม่สามารถอ่าน" + displayKind + "ได้\n" + (err instanceof Error ? err.message : "เกิดข้อผิดพลาด")),
     ]).catch(() => {});
   });
 }
