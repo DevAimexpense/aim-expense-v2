@@ -21,6 +21,7 @@ import {
   buildSavedFlex,
 } from "@/lib/line/flex/payment-confirm";
 import { buildProjectPickerCarousel } from "@/lib/line/flex/project-picker";
+import { parseTextExpense } from "@/lib/line/parse-text-expense";
 import {
   GoogleSheetsService,
   SHEET_TABS,
@@ -90,24 +91,68 @@ export async function handleFollow(event: LineWebhookEvent): Promise<void> {
 // TEXT
 // =====================================================
 export async function handleText(event: LineWebhookEvent): Promise<void> {
-  if (!event.replyToken) return;
-  const msg = (event.message?.text || "").trim().toLowerCase();
+  if (!event.replyToken || !event.source.userId) return;
+  const rawText = (event.message?.text || "").trim();
+  const lower = rawText.toLowerCase();
 
-  if (msg === "help" || msg === "ช่วย" || msg === "?") {
+  // Help command — explicit, must NOT trigger expense parsing.
+  if (lower === "help" || lower === "ช่วย" || lower === "?") {
     await replyMessage(event.replyToken, [
       text(
         "วิธีใช้งาน\n\n" +
-          "ส่งรูปใบเสร็จ/ใบกำกับภาษี\n" +
-          "→ ระบบอ่านข้อมูล → เลือกโปรเจกต์ → กดยืนยัน → บันทึกเข้าระบบ\n\n" +
+          "1) ส่งรูปใบเสร็จ/ใบกำกับภาษี\n" +
+          "   → ระบบ OCR → เลือกโปรเจกต์ → ยืนยัน → บันทึก\n\n" +
+          "2) บันทึกแบบรวดเร็วด้วยข้อความ\n" +
+          "   พิมพ์เช่น \"ค่ากาแฟ 100 บาท\" หรือ \"แท็กซี่ 250\"\n" +
+          "   → เลือกโปรเจกต์ → ยืนยัน → บันทึก (ไม่ต้องแนบไฟล์)\n\n" +
           "จัดการรายจ่ายเต็มรูปแบบ:\n" +
-          `${APP_BASE_URL}/expenses`
+          `${APP_BASE_URL}/expenses`,
       ),
     ]);
     return;
   }
 
+  // Quick text expense — message contains a number → treat as expense entry.
+  const parsed = parseTextExpense(rawText);
+  if (parsed) {
+    const lineUserId = event.source.userId;
+
+    // Resolve user + org (same gating as media handler).
+    const ctx = await resolveLineContext(lineUserId);
+    if (!ctx) {
+      await replyMessage(event.replyToken, [
+        text(`กรุณาสมัครและสร้างองค์กรในเว็บก่อนใช้งานค่ะ\n${APP_BASE_URL}/login`),
+      ]);
+      return;
+    }
+    if (ctx.user.onboardingStep !== "done") {
+      await replyMessage(event.replyToken, [
+        text(`กรุณาตั้งค่าบัญชีให้เสร็จก่อนใช้งานค่ะ\n${APP_BASE_URL}`),
+      ]);
+      return;
+    }
+
+    // Acknowledge immediately, then run picker flow asynchronously.
+    await replyMessage(event.replyToken, [
+      text(`รับรายการแล้วค่ะ ฿${parsed.amount.toLocaleString("th-TH", { minimumFractionDigits: 2 })}\nกำลังเตรียมรายชื่อโปรเจกต์...`),
+    ]);
+
+    void processTextExpenseAsync(lineUserId, parsed, ctx).catch((err) => {
+      console.error("[LINE webhook] text expense processing failed:", err);
+      void pushMessage(lineUserId, [
+        text("ไม่สามารถบันทึกรายการได้\n" + (err instanceof Error ? err.message : "เกิดข้อผิดพลาด")),
+      ]).catch(() => {});
+    });
+    return;
+  }
+
+  // Default — no number, not help.
   await replyMessage(event.replyToken, [
-    text("ส่งรูปใบเสร็จมาได้เลยค่ะ\nหรือพิมพ์ \"help\" เพื่อดูวิธีใช้งาน"),
+    text(
+      "ส่งรูปใบเสร็จมาได้เลยค่ะ\n" +
+        "หรือพิมพ์รายการพร้อมจำนวนเงิน เช่น \"ค่ากาแฟ 100 บาท\"\n" +
+        "พิมพ์ \"help\" เพื่อดูวิธีใช้งาน",
+    ),
   ]);
 }
 
@@ -338,6 +383,125 @@ async function processMediaAsync(
 }
 
 // =====================================================
+// TEXT QUICK ENTRY — pipe through the same picker + confirm UX as OCR
+// =====================================================
+async function processTextExpenseAsync(
+  lineUserId: string,
+  parsed: { amount: number; description: string },
+  ctx: {
+    user: {
+      id: string;
+      email?: string | null;
+      lineUserId?: string | null;
+      lineDisplayName?: string | null;
+    };
+    orgId: string;
+    orgName: string;
+  },
+): Promise<void> {
+  // Build a minimal OcrParsedReceipt from the user's typed text. Vendor info
+  // is intentionally left blank — user edits in web app if needed.
+  const today = new Date().toISOString().slice(0, 10);
+  const ocr: OcrParsedReceipt = {
+    vendorName: null,
+    vendorAddress: null,
+    vendorTaxId: null,
+    vendorBranch: null,
+    vendorPhone: null,
+    buyerName: null,
+    buyerAddress: null,
+    buyerTaxId: null,
+    buyerBranch: null,
+    invoiceNumber: null,
+    documentType: "receipt",
+    documentDate: today,
+    dueDate: null,
+    subtotal: parsed.amount,
+    vatAmount: null,
+    withholdingTax: null,
+    totalAmount: parsed.amount,
+    hasVat: false,
+    items: [],
+    confidence: 1, // user-typed → no OCR uncertainty
+    rawText: parsed.description,
+    provider: "manual",
+  };
+
+  // Save draft using a synthetic imageMessageId so the same LineDraft schema
+  // can be reused. confirmDraftAsync detects the "text:" prefix and skips
+  // the LINE content download + Drive upload.
+  const expiresAt = new Date(Date.now() + DRAFT_TTL_HOURS * 3600 * 1000);
+  const draft = await prisma.lineDraft.create({
+    data: {
+      lineUserId,
+      userId: ctx.user.id,
+      orgId: ctx.orgId,
+      imageMessageId: `text:${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+      mimeType: "text/plain",
+      ocrJson: ocr as unknown as object,
+      expiresAt,
+    },
+  });
+
+  // Same picker logic as processMediaAsync.
+  const sheets = await getSheetsService(ctx.orgId);
+  const [events, assignedEventIds] = await Promise.all([
+    sheets.getEvents(),
+    sheets.getEventIdsAssignedToUser(ctx.user),
+  ]);
+  const assignedSet = new Set(assignedEventIds.map((id) => id.trim()));
+  const activeAssignedEvents = events
+    .filter(
+      (e) =>
+        (e.Status || "").trim().toLowerCase() === "active" &&
+        assignedSet.has((e.EventID || "").trim()),
+    )
+    .slice(0, 12);
+
+  console.log(
+    `[LINE] (text) Project picker: ${activeAssignedEvents.length} assigned-active` +
+      ` (of ${events.length} events, ${assignedEventIds.length} assignments)`,
+  );
+
+  const fmtTotal = parsed.amount.toLocaleString("th-TH", { minimumFractionDigits: 2 });
+  const summaryLines = [
+    `บันทึกรายการ`,
+    ``,
+    `${parsed.description}`,
+    `฿${fmtTotal}`,
+    `วันที่: ${today}`,
+  ].join("\n");
+
+  if (activeAssignedEvents.length === 0) {
+    const defaults = await ensureLineDefaults(sheets);
+    await prisma.lineDraft.update({
+      where: { id: draft.id },
+      data: { eventId: defaults.eventId, eventName: "LINE (ไม่ระบุโปรเจกต์)" } as Record<string, unknown>,
+    });
+    await pushMessage(lineUserId, [
+      { type: "text", text: summaryLines },
+      buildOcrConfirmFlex(draft, ocr, {
+        orgName: ctx.orgName,
+        projectName: "LINE (ไม่ระบุโปรเจกต์)",
+        appBaseUrl: APP_BASE_URL,
+      }),
+    ]);
+    return;
+  }
+
+  await pushMessage(lineUserId, [
+    { type: "text", text: summaryLines + "\n\nกรุณาเลือกโปรเจกต์:" },
+    buildProjectPickerCarousel(
+      draft.id,
+      activeAssignedEvents.map((ev) => ({
+        eventId: ev.EventID,
+        eventName: ev.EventName || "ไม่ระบุ",
+      })),
+    ),
+  ]);
+}
+
+// =====================================================
 // POSTBACK — select_project / confirm / cancel
 // =====================================================
 export async function handlePostback(event: LineWebhookEvent): Promise<void> {
@@ -531,36 +695,56 @@ async function confirmDraftAsync(draft: {
   // Use selected project or default
   const finalEventId = eventId || defaults.eventId;
 
-  // Re-download content from LINE
-  const buffer = await getMessageContent(draft.imageMessageId);
+  // ----- Receipt source: text entry vs image/pdf -----
+  // Text entries skip Drive download/upload entirely — there's no file.
+  const isTextEntry = draft.imageMessageId.startsWith("text:");
 
-  // Upload to Google Drive
-  const ext = draft.mimeType === "application/pdf" ? "pdf"
-    : draft.mimeType === "image/png" ? "png"
-    : draft.mimeType === "image/webp" ? "webp"
-    : "jpg";
   const today = new Date().toISOString().slice(0, 10);
-
-  // Generate paymentId ก่อน upload เพื่อให้ชื่อไฟล์ embed paymentId ได้ (unique key)
   const paymentId = GoogleSheetsService.generateId("PMT");
-  const description = ocr.vendorName
-    ? `${ocr.vendorName}${ocr.invoiceNumber ? "-" + ocr.invoiceNumber : ""}`
-    : "LINE";
 
-  const upload = await drive.uploadPaymentFile({
-    receiptsFolderId,
-    orgName,
-    receiptDate: ocr.documentDate || today,
-    paymentId,
-    description,
-    projectName: eventName || "LINE",
-    payeeName: ocr.vendorName || "ไม่ระบุ",
-    invoiceNumber: ocr.invoiceNumber || undefined,
-    fileType: "receipt",
-    fileName: `line-${draft.id}.${ext}`,
-    mimeType: draft.mimeType,
-    fileBuffer: buffer,
-  });
+  let receiptUrl = "";
+  if (!isTextEntry) {
+    // Re-download content from LINE
+    const buffer = await getMessageContent(draft.imageMessageId);
+
+    // Upload to Google Drive
+    const ext = draft.mimeType === "application/pdf" ? "pdf"
+      : draft.mimeType === "image/png" ? "png"
+      : draft.mimeType === "image/webp" ? "webp"
+      : "jpg";
+
+    const description = ocr.vendorName
+      ? `${ocr.vendorName}${ocr.invoiceNumber ? "-" + ocr.invoiceNumber : ""}`
+      : "LINE";
+
+    const upload = await drive.uploadPaymentFile({
+      receiptsFolderId,
+      orgName,
+      receiptDate: ocr.documentDate || today,
+      paymentId,
+      description,
+      projectName: eventName || "LINE",
+      payeeName: ocr.vendorName || "ไม่ระบุ",
+      invoiceNumber: ocr.invoiceNumber || undefined,
+      fileType: "receipt",
+      fileName: `line-${draft.id}.${ext}`,
+      mimeType: draft.mimeType,
+      fileBuffer: buffer,
+    });
+    receiptUrl = upload.webViewLink;
+
+    // Persist Drive file refs back onto the draft (only when we uploaded one).
+    await prisma.lineDraft.update({
+      where: { id: draft.id },
+      data: {
+        driveFileId: upload.fileId,
+        driveFileUrl: upload.webViewLink,
+      },
+    });
+  } else {
+    // Mark explicitly so audit/analytics can distinguish manual entries.
+    console.log(`[LINE] Confirming text-entry draft ${draft.id} — skipping Drive upload`);
+  }
 
   // Calculate amounts (เหมือน browser)
   const totalAmount = ocr.totalAmount ?? ocr.subtotal ?? 0;
@@ -575,6 +759,17 @@ async function confirmDraftAsync(draft: {
     isVatPayee: !!ocr.hasVat,
   });
 
+  // Build Description — text entries put the user's typed message verbatim.
+  const paymentDescription = isTextEntry
+    ? `${ocr.rawText || "บันทึกจาก LINE"} (LINE - ข้อความ)`
+    : ocr.vendorName
+      ? `${ocr.vendorName}${ocr.invoiceNumber ? " - " + ocr.invoiceNumber : ""} (LINE)`
+      : "บันทึกจาก LINE";
+
+  const notes = isTextEntry
+    ? `Manual text entry | LINE draft ${draft.id}`
+    : `OCR confidence ${Math.round((ocr.confidence ?? 0) * 100)}% | LINE draft ${draft.id}`;
+
   // Create payment record (เหมือน browser payment.create mutation) — ใช้ paymentId ที่ generate ไว้แล้ว
   const now = new Date().toISOString();
 
@@ -586,9 +781,7 @@ async function confirmDraftAsync(draft: {
     CompanyBankID: "",
     InvoiceNumber: ocr.invoiceNumber || "",
     InvoiceFileURL: "",
-    Description: ocr.vendorName
-      ? `${ocr.vendorName}${ocr.invoiceNumber ? " - " + ocr.invoiceNumber : ""} (LINE)`
-      : "บันทึกจาก LINE",
+    Description: paymentDescription,
     CostPerUnit: Math.round(costPerUnit * 100) / 100,
     Days: 1,
     NoOfPPL: 1,
@@ -606,7 +799,7 @@ async function confirmDraftAsync(draft: {
     BatchID: "",
     IsCleared: "FALSE",
     ClearedAt: "",
-    ReceiptURL: upload.webViewLink,
+    ReceiptURL: receiptUrl,
     ReceiptNumber: ocr.invoiceNumber || "",
     ReceiptDate: ocr.documentDate || "",
     // Tax compliance — เหมือน browser
@@ -617,24 +810,25 @@ async function confirmDraftAsync(draft: {
     RequesterName: "LINE OA",
     VendorTaxIdSnapshot: vendorTaxIdSnapshot,
     VendorBranchInfo: vendorBranchInfo,
-    Notes: `OCR confidence ${Math.round((ocr.confidence ?? 0) * 100)}% | LINE draft ${draft.id}`,
+    Notes: notes,
     CreatedAt: now,
     CreatedBy: "LINE OA",
     CreatedByUserId: draft.userId,
     UpdatedAt: now,
   });
 
-  // Mark draft confirmed
+  // Mark draft confirmed (drive fields already saved earlier for image flow).
   await prisma.lineDraft.update({
     where: { id: draft.id },
-    data: {
-      status: "confirmed",
-      driveFileId: upload.fileId,
-      driveFileUrl: upload.webViewLink,
-    },
+    data: { status: "confirmed" },
   });
 
-  // Audit log
+  // Audit log — distinguish OCR vs manual text entry
+  const auditPrefix = isTextEntry ? "LINE Text" : "LINE OCR";
+  const auditLabel = isTextEntry
+    ? (ocr.rawText?.slice(0, 60) || "")
+    : (ocr.vendorName || "");
+
   await prisma.auditLog.create({
     data: {
       orgId: draft.orgId,
@@ -642,15 +836,20 @@ async function confirmDraftAsync(draft: {
       action: "create",
       entityType: "payment",
       entityRef: paymentId,
-      summary: `LINE OCR: ${ocr.vendorName || ""} ฿${totalAmount} | ${eventName || "ไม่ระบุโปรเจกต์"}`,
+      summary: `${auditPrefix}: ${auditLabel} ฿${totalAmount} | ${eventName || "ไม่ระบุโปรเจกต์"}`,
     },
   });
 
-  // Notify user
+  // Notify user — saved Flex card. For text entries, use the typed message
+  // (truncated) as the "vendor" label so the user recognizes the entry.
+  const savedLabel = isTextEntry
+    ? (ocr.rawText?.slice(0, 40) || "บันทึกจาก LINE")
+    : (ocr.vendorName || "บันทึกจาก LINE");
+
   await pushMessage(draft.lineUserId, [
     buildSavedFlex({
       paymentId,
-      vendor: ocr.vendorName || "บันทึกจาก LINE",
+      vendor: savedLabel,
       amount: totalAmount,
       projectName: eventName || "ไม่ระบุ",
       webUrl: `${APP_BASE_URL}/expenses`,
