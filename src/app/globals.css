@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "react-day-picker/style.css";
 
 /* Explicit sources for Tailwind v4 — include route groups with parentheses */
 @source "../**/*.tsx";
@@ -1206,6 +1207,86 @@ body {
   padding: 0.375rem 0.625rem !important;
   font-size: 0.8125rem !important;
   height: auto !important;
+}
+
+/* DateRangePicker (shared component) */
+.app-daterange-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  white-space: nowrap;
+}
+
+.app-daterange-popover {
+  position: absolute;
+  top: calc(100% + 0.5rem);
+  z-index: 50;
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.75rem;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1),
+    0 8px 10px -6px rgba(0, 0, 0, 0.05);
+  padding: 0.75rem;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: 1fr auto;
+  gap: 0.75rem;
+  min-width: 320px;
+}
+
+.app-daterange-presets {
+  grid-row: 1;
+  grid-column: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  border-right: 1px solid #f1f5f9;
+  padding-right: 0.75rem;
+  align-self: start;
+}
+
+.app-daterange-preset {
+  justify-content: flex-start !important;
+  text-align: left !important;
+  width: 100%;
+}
+
+.app-daterange-calendar {
+  grid-row: 1;
+  grid-column: 2;
+}
+
+.app-daterange-actions {
+  grid-row: 2;
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  border-top: 1px solid #f1f5f9;
+  padding-top: 0.75rem;
+}
+
+/* react-day-picker tweaks to match design system */
+.app-daterange-calendar .rdp-root {
+  --rdp-accent-color: #2563eb;
+  --rdp-accent-background-color: #dbeafe;
+  --rdp-day-height: 2.25rem;
+  --rdp-day-width: 2.25rem;
+  --rdp-day_button-height: 2.25rem;
+  --rdp-day_button-width: 2.25rem;
+  --rdp-day_button-border-radius: 0.5rem;
+  font-size: 0.875rem;
+}
+
+.app-daterange-calendar .rdp-caption_label {
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.app-daterange-calendar .rdp-weekday {
+  color: #94a3b8;
+  font-weight: 600;
+  font-size: 0.75rem;
 }
 
 /* Form */

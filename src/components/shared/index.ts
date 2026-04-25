@@ -19,3 +19,10 @@ export type { DataTableProps, ColumnDef } from "./DataTable";
 
 export { DataTablePagination } from "./DataTablePagination";
 export type { DataTablePaginationProps } from "./DataTablePagination";
+
+export { DateRangePicker, getPresetRange } from "./DateRangePicker";
+export type {
+  DateRangePickerProps,
+  DateRange,
+  DateRangePreset,
+} from "./DateRangePicker";
