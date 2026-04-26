@@ -79,14 +79,28 @@
 
 S18 ใส่ dead links `/reports/wht?tab=pnd3` + `/reports/wht?tab=pnd53` ไว้แล้ว → ตอนนี้ live (S19 implement หน้า) ✅
 
+### 4️⃣ Refactor: ตัด in-page tabs ออก (พี่ขอตอนปลาย S19)
+
+**ปัญหา:** หลัง smoke test แรก พี่สังเกตว่า sidebar แยก "ภงด.3" + "ภงด.53" ออกเป็น 2 link อยู่แล้ว → in-page tabs ซ้ำซ้อน + ทำให้ user งง
+
+**Fix:** Refactor `wht-client.tsx`:
+- ลบ in-page tabs UI ทั้งหมด (`<div className="app-tabs">...</div>`)
+- ลบ `useState<WhtTab>` + `handleTabChange`
+- Tab ตอนนี้ derive จาก URL `?tab=` โดยตรง (read-only) — sidebar คือ switcher
+- Title + subtitle เปลี่ยนตาม tab (`👤 รายงาน ภ.ง.ด.3 — บุคคลธรรมดา` / `🏢 รายงาน ภ.ง.ด.53 — นิติบุคคล`)
+- 4 StatCards แสดงเฉพาะของ tab ที่เลือก (ไม่ใช่ overall split)
+- ส่ง `type: tab` เข้า procedure → ลด data ที่ดึงกลับ (procedure return เฉพาะ bucket ที่ขอ)
+
+**Commit:** `refactor(reports/wht): remove in-page tabs - sidebar drives active bucket via ?tab= (S19)` — ปิดท้าย S19
+
 ---
 
 ## 📦 Commit Timeline (Session 19)
 
 | # | Subject | สถานะ |
 |---|---------|-------|
-| 1 | `chore(reports): remove orphan /reports/weekly-payment + bank-csv helper (S19)` | ⏳ รอพี่ commit |
-| 2 | `feat(reports): add /reports/wht + report.wht procedure (ภงด.3/53 Phase 1, S19)` | ⏳ รอพี่ commit |
+| 1 | `feat(reports): replace /reports/weekly-payment with /reports/wht (ภงด.3/53 Phase 1, S19)` | ✅ pushed |
+| 2 | `refactor(reports/wht): remove in-page tabs - sidebar drives active bucket via ?tab= (S19)` | ⏳ รอพี่ commit (ปิดท้าย S19) |
 
 ### Working tree ก่อนปิด S19
 
@@ -257,8 +271,9 @@ Org:
 ```
 สวัสดีค่ะเอม นี่คือ Session 20 ต่อจาก Session 19
 📂 Folder: ~/Code/Aim Expense V2/aim-expense
-📦 Latest commit: feat(reports): /reports/wht + report.wht procedure (S19)
-🎉 S19: WHT Phase 1 (page + procedure + 2 tabs + CSV/XLSX) เสร็จ + orphan weekly-payment ลบเรียบร้อย
+📦 Latest commit: refactor(reports/wht): remove in-page tabs - sidebar drives active bucket (S19)
+🎉 S19: WHT Phase 1 (page + procedure + sidebar-driven UI + CSV/XLSX) เสร็จ + orphan weekly-payment ลบเรียบร้อย
+🎉 Smoke test ผ่าน: /reports/wht ทำงาน + แยก sidebar 2 link (ภงด.3 / ภงด.53) ตามที่พี่ขอ
 ⚠️ /reports/vat ยังเป็น dead link — รอ implement
 
 🔴 อ่านก่อนเริ่ม (ตามลำดับ):
