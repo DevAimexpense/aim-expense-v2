@@ -118,6 +118,20 @@ const ClearanceInput = z.object({
   bucket: z.enum(["pending", "cleared"]).optional(),
 });
 
+const WeeklyPaymentInput = z.object({
+  /** ISO YYYY-MM-DD inclusive */
+  from: z.string().min(10),
+  /** ISO YYYY-MM-DD inclusive */
+  to: z.string().min(10),
+  /**
+   * "due"  → filter by DueDate (default — "what's due to be paid this week?")
+   * "paid" → filter by PaymentDate (audit — "what was actually paid this week?")
+   */
+  mode: z.enum(["due", "paid"]).default("due"),
+  /** Optional project filter */
+  eventId: z.string().optional(),
+});
+
 // -------------------------------------------------------------------
 // Router
 // -------------------------------------------------------------------
@@ -816,6 +830,244 @@ export const reportRouter = router({
         },
         pending: responsePending,
         cleared: responseCleared,
+      };
+    }),
+
+  /**
+   * Weekly Payment Report — used by /reports/weekly-payment
+   *
+   * "ชำระรายสัปดาห์" = the cash-out workflow planner. The accountant pulls
+   * approved payments grouped by ISO week (Mon-Sun) so they can prepare a
+   * single bank batch upload per week.
+   *
+   * Two viewing modes:
+   *   - "due"  (default) — filter by DueDate. Plan-ahead view: "what do we
+   *                        have to pay next week?" Includes status=approved
+   *                        only — already-paid rows are dropped.
+   *   - "paid"           — filter by PaymentDate. Audit view: "what did we
+   *                        actually pay last week?" Includes status=approved
+   *                        + paid (paid rows have a PaymentDate; approved
+   *                        without PaymentDate is filtered out by date).
+   *
+   * Date semantics:
+   *   - "due"  → require DueDate, fall back to PaymentDate if DueDate empty
+   *              (rare — shouldn't happen for approved rows but defensive)
+   *   - "paid" → require PaymentDate; rows without PaymentDate are excluded
+   *
+   * Week grouping:
+   *   - ISO 8601 (Mon-Sun) — matches Thai accounting workflow.
+   *
+   * Returns:
+   *   - stats: { totalCount, totalAmount, weekCount, payeeCount }
+   *   - weeks: [{ weekStart, weekEnd, weekLabel, count, amount, rows: [...] }]
+   *   - rows:  flat list of all rows (sorted by date asc) — for DataTable + Export
+   */
+  weeklyPayment: orgProcedure
+    .input(WeeklyPaymentInput)
+    .query(async ({ ctx, input }) => {
+      const sheets = await getSheetsService(ctx.org.orgId);
+      // NOTE: skip ensureAllTabsExist (read-only — same as other reports)
+
+      const [payments, events, payees] = await Promise.all([
+        sheets.getPayments(),
+        sheets.getEvents(),
+        sheets.getPayees(),
+      ]);
+
+      const eventMap = new Map(events.map((e) => [e.EventID, e.EventName]));
+      const payeeMap = new Map(
+        payees.map((p) => [
+          p.PayeeID,
+          {
+            name: p.PayeeName || "",
+            bankName: p.BankName || "",
+            bankAccount: p.BankAccount || "",
+            taxId: p.TaxID || "",
+          },
+        ]),
+      );
+
+      /** Pick the row date depending on viewing mode. */
+      function rowDateFor(p: Record<string, string>): string {
+        if (input.mode === "paid") {
+          // Strict: must have PaymentDate
+          if (p.PaymentDate) return p.PaymentDate;
+          if (p.PaidAt && p.PaidAt.length >= 10) return p.PaidAt.slice(0, 10);
+          return "";
+        }
+        // mode === "due"
+        if (p.DueDate) return p.DueDate;
+        if (p.PaymentDate) return p.PaymentDate;
+        return "";
+      }
+
+      /**
+       * Compute ISO 8601 week start (Mon) from any YYYY-MM-DD.
+       * Returns YYYY-MM-DD of the Monday of that week.
+       */
+      function isoWeekStart(ymd: string): string {
+        const d = new Date(ymd + "T00:00:00");
+        const day = d.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
+        // Distance back to Monday: Sun=6, Mon=0, Tue=1, ..., Sat=5
+        const diff = day === 0 ? 6 : day - 1;
+        d.setDate(d.getDate() - diff);
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, "0");
+        const dd = String(d.getDate()).padStart(2, "0");
+        return `${y}-${m}-${dd}`;
+      }
+
+      /** Add days to a YYYY-MM-DD date and return new YYYY-MM-DD. */
+      function addDays(ymd: string, days: number): string {
+        const d = new Date(ymd + "T00:00:00");
+        d.setDate(d.getDate() + days);
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, "0");
+        const dd = String(d.getDate()).padStart(2, "0");
+        return `${y}-${m}-${dd}`;
+      }
+
+      type Row = {
+        paymentId: string;
+        date: string; // YYYY-MM-DD (DueDate or PaymentDate per mode)
+        weekStart: string;
+        eventId: string;
+        eventName: string;
+        payeeId: string;
+        payeeName: string;
+        bankName: string;
+        bankAccount: string;
+        taxId: string;
+        description: string;
+        invoiceNumber: string;
+        amount: number; // GTTLAmount
+        wthAmount: number;
+        vatAmount: number;
+        status: string; // "approved" | "paid" (only)
+      };
+
+      const rows: Row[] = [];
+
+      for (const p of payments) {
+        // Status filter — accept approved + paid (paid is dropped for "due" mode below)
+        const status = p.Status || "";
+        if (status !== "approved" && status !== "paid") continue;
+
+        // Mode-specific status filter
+        if (input.mode === "due" && status === "paid") continue;
+
+        // Project filter
+        if (input.eventId && p.EventID !== input.eventId) continue;
+
+        // Date filter
+        const date = rowDateFor(p);
+        if (!date) continue;
+        if (date < input.from || date > input.to) continue;
+
+        const payee = payeeMap.get(p.PayeeID);
+
+        rows.push({
+          paymentId: p.PaymentID,
+          date,
+          weekStart: isoWeekStart(date),
+          eventId: p.EventID,
+          eventName: eventMap.get(p.EventID) || p.EventID || "—",
+          payeeId: p.PayeeID,
+          payeeName: payee?.name || p.PayeeID || "—",
+          bankName: payee?.bankName || "",
+          bankAccount: payee?.bankAccount || "",
+          taxId: payee?.taxId || "",
+          description: p.Description || "",
+          invoiceNumber: p.InvoiceNumber || "",
+          amount: num(p.GTTLAmount),
+          wthAmount: num(p.WTHAmount),
+          vatAmount: num(p.VATAmount),
+          status,
+        });
+      }
+
+      // Sort rows: date asc, then payeeName asc
+      rows.sort((a, b) => {
+        if (a.date !== b.date) return a.date < b.date ? -1 : 1;
+        return a.payeeName.localeCompare(b.payeeName, "th");
+      });
+
+      // Group by ISO week
+      type Week = {
+        weekStart: string; // YYYY-MM-DD (Monday)
+        weekEnd: string; // YYYY-MM-DD (Sunday)
+        weekLabel: string; // "1-7 เม.ย. 2569" — Thai short label
+        count: number;
+        amount: number;
+        rows: Row[];
+      };
+
+      const THAI_MONTHS_SHORT = [
+        "ม.ค.",
+        "ก.พ.",
+        "มี.ค.",
+        "เม.ย.",
+        "พ.ค.",
+        "มิ.ย.",
+        "ก.ค.",
+        "ส.ค.",
+        "ก.ย.",
+        "ต.ค.",
+        "พ.ย.",
+        "ธ.ค.",
+      ];
+
+      function formatWeekLabel(weekStart: string, weekEnd: string): string {
+        const ds = new Date(weekStart + "T00:00:00");
+        const de = new Date(weekEnd + "T00:00:00");
+        const yBE = de.getFullYear() + 543;
+        const startDay = ds.getDate();
+        const endDay = de.getDate();
+        const startMonth = THAI_MONTHS_SHORT[ds.getMonth()];
+        const endMonth = THAI_MONTHS_SHORT[de.getMonth()];
+        if (ds.getMonth() === de.getMonth()) {
+          return `${startDay}-${endDay} ${endMonth} ${yBE}`;
+        }
+        return `${startDay} ${startMonth} - ${endDay} ${endMonth} ${yBE}`;
+      }
+
+      const weekMap = new Map<string, Week>();
+      for (const r of rows) {
+        let w = weekMap.get(r.weekStart);
+        if (!w) {
+          const weekEnd = addDays(r.weekStart, 6);
+          w = {
+            weekStart: r.weekStart,
+            weekEnd,
+            weekLabel: formatWeekLabel(r.weekStart, weekEnd),
+            count: 0,
+            amount: 0,
+            rows: [],
+          };
+          weekMap.set(r.weekStart, w);
+        }
+        w.count += 1;
+        w.amount += r.amount;
+        w.rows.push(r);
+      }
+
+      const weeks: Week[] = Array.from(weekMap.values()).sort((a, b) =>
+        a.weekStart < b.weekStart ? -1 : a.weekStart > b.weekStart ? 1 : 0,
+      );
+
+      const totalCount = rows.length;
+      const totalAmount = rows.reduce((s, r) => s + r.amount, 0);
+      const payeeIds = new Set(rows.map((r) => r.payeeId));
+
+      return {
+        stats: {
+          totalCount,
+          totalAmount,
+          weekCount: weeks.length,
+          payeeCount: payeeIds.size,
+        },
+        weeks,
+        rows,
       };
     }),
 });

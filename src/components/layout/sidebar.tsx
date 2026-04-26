@@ -127,6 +127,12 @@ const NAV_GROUPS: NavGroup[] = [
         permission: "viewReports",
       },
       {
+        label: "ชำระรายสัปดาห์",
+        href: "/reports/weekly-payment",
+        icon: "💰",
+        permission: "viewReports",
+      },
+      {
         label: "รายงานภาษี (ภ.พ.30)",
         href: "/reports/vat",
         icon: "📈",
