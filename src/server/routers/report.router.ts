@@ -118,18 +118,20 @@ const ClearanceInput = z.object({
   bucket: z.enum(["pending", "cleared"]).optional(),
 });
 
-const WeeklyPaymentInput = z.object({
-  /** ISO YYYY-MM-DD inclusive */
+const WHTInput = z.object({
+  /** ISO YYYY-MM-DD inclusive — filtered by PaymentDate (date money actually went out) */
   from: z.string().min(10),
   /** ISO YYYY-MM-DD inclusive */
   to: z.string().min(10),
-  /**
-   * "due"  → filter by DueDate (default — "what's due to be paid this week?")
-   * "paid" → filter by PaymentDate (audit — "what was actually paid this week?")
-   */
-  mode: z.enum(["due", "paid"]).default("due"),
   /** Optional project filter */
   eventId: z.string().optional(),
+  /**
+   * Vendor type filter:
+   *   "pnd3"  → personal (บุคคลธรรมดา) — TaxID prefix not "0", or empty
+   *   "pnd53" → juristic (นิติบุคคล) — TaxID 13 digits starting with "0"
+   *   undefined → return both buckets
+   */
+  type: z.enum(["pnd3", "pnd53"]).optional(),
 });
 
 // -------------------------------------------------------------------
@@ -833,40 +835,50 @@ export const reportRouter = router({
       };
     }),
 
+  // NOTE: `weeklyPayment` procedure was removed in S19 (orphan cleanup).
+  // It lived alongside the now-deleted /reports/weekly-payment page +
+  // src/lib/utils/bank-csv.ts helper. The /payment-prep workflow page
+  // already covers per-bank batching + Excel export, so the duplicate
+  // was retired. See git history at commit e9ba6e8 if needed.
+
   /**
-   * Weekly Payment Report — used by /reports/weekly-payment
+   * Withholding Tax Report — used by /reports/wht (ภงด.3 + ภงด.53)
    *
-   * "ชำระรายสัปดาห์" = the cash-out workflow planner. The accountant pulls
-   * approved payments grouped by ISO week (Mon-Sun) so they can prepare a
-   * single bank batch upload per week.
+   * Filing context (Thai tax law):
+   *   - **ภ.ง.ด.3** (form PND3) = WHT certificate aggregator for **personal**
+   *     income recipients (บุคคลธรรมดา). Filed monthly with the Revenue Dept
+   *     within 7 days of month-end.
+   *   - **ภ.ง.ด.53** (form PND53) = same, but for **juristic** recipients
+   *     (นิติบุคคล — บริษัท / หจก. / มูลนิธิ). Same filing cadence.
    *
-   * Two viewing modes:
-   *   - "due"  (default) — filter by DueDate. Plan-ahead view: "what do we
-   *                        have to pay next week?" Includes status=approved
-   *                        only — already-paid rows are dropped.
-   *   - "paid"           — filter by PaymentDate. Audit view: "what did we
-   *                        actually pay last week?" Includes status=approved
-   *                        + paid (paid rows have a PaymentDate; approved
-   *                        without PaymentDate is filtered out by date).
+   * Vendor type detection (Thai TaxID rule):
+   *   - Juristic entities use a 13-digit Tax ID starting with "0".
+   *   - Individuals use their 13-digit national ID (starts with 1–8).
+   *   - We use `TaxID.startsWith("0") && length === 13` → juristic (pnd53).
+   *     Anything else (incl. empty TaxID) → personal (pnd3, the default
+   *     bucket — Revenue Dept treats no-TaxID payees as personal income).
    *
-   * Date semantics:
-   *   - "due"  → require DueDate, fall back to PaymentDate if DueDate empty
-   *              (rare — shouldn't happen for approved rows but defensive)
-   *   - "paid" → require PaymentDate; rows without PaymentDate are excluded
+   * Filter rules:
+   *   - status === "paid" only (Revenue Dept files are based on actual cash-out,
+   *     not approvals).
+   *   - WTHAmount > 0 (no point listing rows with no withholding).
+   *   - Date filter on PaymentDate (fall back to PaidAt slice).
    *
-   * Week grouping:
-   *   - ISO 8601 (Mon-Sun) — matches Thai accounting workflow.
+   * Read-only aggregation per SYSTEM_REQUIREMENTS principle 3 — no caching.
    *
    * Returns:
-   *   - stats: { totalCount, totalAmount, weekCount, payeeCount }
-   *   - weeks: [{ weekStart, weekEnd, weekLabel, count, amount, rows: [...] }]
-   *   - rows:  flat list of all rows (sorted by date asc) — for DataTable + Export
+   *   - stats:    overall { totalCount, totalIncome, totalWHT, payeeCount } across both buckets
+   *   - pnd3:     { stats: {...}, rows: [...] } — personal recipients
+   *   - pnd53:    { stats: {...}, rows: [...] } — juristic recipients
+   *
+   * The page can render either bucket via the `type` filter, or both at once
+   * (default — UI uses tabs to flip between them without refetching).
    */
-  weeklyPayment: orgProcedure
-    .input(WeeklyPaymentInput)
+  wht: orgProcedure
+    .input(WHTInput)
     .query(async ({ ctx, input }) => {
       const sheets = await getSheetsService(ctx.org.orgId);
-      // NOTE: skip ensureAllTabsExist (read-only — same as other reports)
+      // NOTE: skip ensureAllTabsExist (read-only — same as other reports).
 
       const [payments, events, payees] = await Promise.all([
         sheets.getPayments(),
@@ -879,195 +891,184 @@ export const reportRouter = router({
         payees.map((p) => [
           p.PayeeID,
           {
-            name: p.PayeeName || "",
-            bankName: p.BankName || "",
-            bankAccount: p.BankAccount || "",
+            name: p.PayeeName || p.PayeeID,
             taxId: p.TaxID || "",
+            branchType: p.BranchType || "",
+            branchNumber: p.BranchNumber || "",
+            address: p.Address || "",
+            isVAT: p.IsVAT || "",
           },
         ]),
       );
 
-      /** Pick the row date depending on viewing mode. */
-      function rowDateFor(p: Record<string, string>): string {
-        if (input.mode === "paid") {
-          // Strict: must have PaymentDate
-          if (p.PaymentDate) return p.PaymentDate;
-          if (p.PaidAt && p.PaidAt.length >= 10) return p.PaidAt.slice(0, 10);
-          return "";
-        }
-        // mode === "due"
-        if (p.DueDate) return p.DueDate;
+      /** Pick the date money went out (PaymentDate preferred, PaidAt fallback). */
+      function paidDateOf(p: Record<string, string>): string {
         if (p.PaymentDate) return p.PaymentDate;
+        if (p.PaidAt && p.PaidAt.length >= 10) return p.PaidAt.slice(0, 10);
         return "";
       }
 
       /**
-       * Compute ISO 8601 week start (Mon) from any YYYY-MM-DD.
-       * Returns YYYY-MM-DD of the Monday of that week.
+       * Classify a payee by Tax ID prefix per Thai standard.
+       *   - Juristic (นิติบุคคล) → 13-digit TaxID starting with "0" → ภงด.53
+       *   - Personal (บุคคลธรรมดา) → anything else (incl. empty TaxID) → ภงด.3
        */
-      function isoWeekStart(ymd: string): string {
-        const d = new Date(ymd + "T00:00:00");
-        const day = d.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
-        // Distance back to Monday: Sun=6, Mon=0, Tue=1, ..., Sat=5
-        const diff = day === 0 ? 6 : day - 1;
-        d.setDate(d.getDate() - diff);
-        const y = d.getFullYear();
-        const m = String(d.getMonth() + 1).padStart(2, "0");
-        const dd = String(d.getDate()).padStart(2, "0");
-        return `${y}-${m}-${dd}`;
+      function vendorTypeOf(taxId: string): "pnd3" | "pnd53" {
+        if (taxId && taxId.length === 13 && taxId.startsWith("0")) {
+          return "pnd53";
+        }
+        return "pnd3";
       }
 
-      /** Add days to a YYYY-MM-DD date and return new YYYY-MM-DD. */
-      function addDays(ymd: string, days: number): string {
-        const d = new Date(ymd + "T00:00:00");
-        d.setDate(d.getDate() + days);
-        const y = d.getFullYear();
-        const m = String(d.getMonth() + 1).padStart(2, "0");
-        const dd = String(d.getDate()).padStart(2, "0");
-        return `${y}-${m}-${dd}`;
+      /**
+       * Format a Thai branch label per Revenue Dept convention.
+       *   - HQ (สำนักงานใหญ่)   → "00000"
+       *   - Branch with number → 5-digit zero-padded
+       *   - Empty / unknown    → ""
+       */
+      function branchLabelOf(
+        branchType: string,
+        branchNumber: string,
+      ): string {
+        if (branchType === "HQ") return "00000";
+        if (branchType === "Branch" && branchNumber) {
+          // already 5 digits in spec but defensive pad
+          return branchNumber.padStart(5, "0");
+        }
+        return "";
       }
 
-      type Row = {
+      type WHTRow = {
+        // Identity
         paymentId: string;
-        date: string; // YYYY-MM-DD (DueDate or PaymentDate per mode)
-        weekStart: string;
-        eventId: string;
-        eventName: string;
+        paidDate: string; // YYYY-MM-DD
         payeeId: string;
         payeeName: string;
-        bankName: string;
-        bankAccount: string;
         taxId: string;
-        description: string;
+        branchLabel: string; // "00000" / "00001" / ""
+        address: string;
+        // Project context
+        eventId: string;
+        eventName: string;
+        // Form fields (per Revenue Dept ใบแนบ ภงด.3/53 spec)
+        incomeType: string; // ประเภทเงินได้ (Description / CategoryMain — user-facing label)
+        rate: number; // อัตราภาษีร้อยละ — derived from PctWTH
+        incomeAmount: number; // จำนวนเงินที่จ่าย (TTLAmount — pre-WHT base)
+        whtAmount: number; // ภาษีหัก ณ ที่จ่าย (WTHAmount)
+        condition: number; // เงื่อนไข — default 1 (หัก ณ ที่จ่าย); 2/3 not yet captured
+        // Auxiliary (for cross-reference)
         invoiceNumber: string;
-        amount: number; // GTTLAmount
-        wthAmount: number;
-        vatAmount: number;
-        status: string; // "approved" | "paid" (only)
+        description: string; // raw description (mirrors incomeType when no category set)
       };
 
-      const rows: Row[] = [];
+      const rowsAll: WHTRow[] = [];
 
       for (const p of payments) {
-        // Status filter — accept approved + paid (paid is dropped for "due" mode below)
-        const status = p.Status || "";
-        if (status !== "approved" && status !== "paid") continue;
+        // Status filter — paid only
+        if (p.Status !== "paid") continue;
 
-        // Mode-specific status filter
-        if (input.mode === "due" && status === "paid") continue;
+        const wth = num(p.WTHAmount);
+        if (wth <= 0) continue;
 
         // Project filter
         if (input.eventId && p.EventID !== input.eventId) continue;
 
-        // Date filter
-        const date = rowDateFor(p);
-        if (!date) continue;
-        if (date < input.from || date > input.to) continue;
+        const paidDate = paidDateOf(p);
+        if (!paidDate) continue;
+        if (paidDate < input.from || paidDate > input.to) continue;
 
-        const payee = payeeMap.get(p.PayeeID);
+        const info = payeeMap.get(p.PayeeID);
+        const taxId = info?.taxId || p.VendorTaxIdSnapshot || "";
 
-        rows.push({
+        const incomeAmount = num(p.TTLAmount);
+        const rate = num(p.PctWTH);
+        const incomeType =
+          p.CategoryMain ||
+          p.Description ||
+          "ค่าบริการ"; // safe default for Revenue Dept categorization
+
+        rowsAll.push({
           paymentId: p.PaymentID,
-          date,
-          weekStart: isoWeekStart(date),
+          paidDate,
+          payeeId: p.PayeeID,
+          payeeName: info?.name || p.PayeeID || "—",
+          taxId,
+          branchLabel: branchLabelOf(
+            info?.branchType || "",
+            info?.branchNumber || "",
+          ),
+          address: info?.address || "",
           eventId: p.EventID,
           eventName: eventMap.get(p.EventID) || p.EventID || "—",
-          payeeId: p.PayeeID,
-          payeeName: payee?.name || p.PayeeID || "—",
-          bankName: payee?.bankName || "",
-          bankAccount: payee?.bankAccount || "",
-          taxId: payee?.taxId || "",
-          description: p.Description || "",
+          incomeType,
+          rate,
+          incomeAmount,
+          whtAmount: wth,
+          condition: 1, // 1 = หัก ณ ที่จ่าย (default — system doesn't yet capture 2/3)
           invoiceNumber: p.InvoiceNumber || "",
-          amount: num(p.GTTLAmount),
-          wthAmount: num(p.WTHAmount),
-          vatAmount: num(p.VATAmount),
-          status,
+          description: p.Description || "",
         });
       }
 
-      // Sort rows: date asc, then payeeName asc
-      rows.sort((a, b) => {
-        if (a.date !== b.date) return a.date < b.date ? -1 : 1;
-        return a.payeeName.localeCompare(b.payeeName, "th");
-      });
+      // Split into pnd3 / pnd53 buckets by vendor type
+      const pnd3Rows: WHTRow[] = [];
+      const pnd53Rows: WHTRow[] = [];
+      for (const r of rowsAll) {
+        if (vendorTypeOf(r.taxId) === "pnd53") {
+          pnd53Rows.push(r);
+        } else {
+          pnd3Rows.push(r);
+        }
+      }
 
-      // Group by ISO week
-      type Week = {
-        weekStart: string; // YYYY-MM-DD (Monday)
-        weekEnd: string; // YYYY-MM-DD (Sunday)
-        weekLabel: string; // "1-7 เม.ย. 2569" — Thai short label
-        count: number;
-        amount: number;
-        rows: Row[];
+      // Sort: paidDate asc, then payeeName (Thai locale)
+      function sortRows(rows: WHTRow[]) {
+        rows.sort((a, b) => {
+          if (a.paidDate !== b.paidDate)
+            return a.paidDate < b.paidDate ? -1 : 1;
+          return a.payeeName.localeCompare(b.payeeName, "th");
+        });
+      }
+      sortRows(pnd3Rows);
+      sortRows(pnd53Rows);
+
+      function statsOf(rows: WHTRow[]) {
+        const totalIncome = rows.reduce((s, r) => s + r.incomeAmount, 0);
+        const totalWHT = rows.reduce((s, r) => s + r.whtAmount, 0);
+        const payeeIds = new Set(rows.map((r) => r.payeeId));
+        return {
+          totalCount: rows.length,
+          totalIncome,
+          totalWHT,
+          payeeCount: payeeIds.size,
+        };
+      }
+
+      const pnd3Stats = statsOf(pnd3Rows);
+      const pnd53Stats = statsOf(pnd53Rows);
+      const overallStats = {
+        totalCount: pnd3Stats.totalCount + pnd53Stats.totalCount,
+        totalIncome: pnd3Stats.totalIncome + pnd53Stats.totalIncome,
+        totalWHT: pnd3Stats.totalWHT + pnd53Stats.totalWHT,
+        payeeCount: new Set(rowsAll.map((r) => r.payeeId)).size,
       };
 
-      const THAI_MONTHS_SHORT = [
-        "ม.ค.",
-        "ก.พ.",
-        "มี.ค.",
-        "เม.ย.",
-        "พ.ค.",
-        "มิ.ย.",
-        "ก.ค.",
-        "ส.ค.",
-        "ก.ย.",
-        "ต.ค.",
-        "พ.ย.",
-        "ธ.ค.",
-      ];
-
-      function formatWeekLabel(weekStart: string, weekEnd: string): string {
-        const ds = new Date(weekStart + "T00:00:00");
-        const de = new Date(weekEnd + "T00:00:00");
-        const yBE = de.getFullYear() + 543;
-        const startDay = ds.getDate();
-        const endDay = de.getDate();
-        const startMonth = THAI_MONTHS_SHORT[ds.getMonth()];
-        const endMonth = THAI_MONTHS_SHORT[de.getMonth()];
-        if (ds.getMonth() === de.getMonth()) {
-          return `${startDay}-${endDay} ${endMonth} ${yBE}`;
-        }
-        return `${startDay} ${startMonth} - ${endDay} ${endMonth} ${yBE}`;
-      }
-
-      const weekMap = new Map<string, Week>();
-      for (const r of rows) {
-        let w = weekMap.get(r.weekStart);
-        if (!w) {
-          const weekEnd = addDays(r.weekStart, 6);
-          w = {
-            weekStart: r.weekStart,
-            weekEnd,
-            weekLabel: formatWeekLabel(r.weekStart, weekEnd),
-            count: 0,
-            amount: 0,
-            rows: [],
-          };
-          weekMap.set(r.weekStart, w);
-        }
-        w.count += 1;
-        w.amount += r.amount;
-        w.rows.push(r);
-      }
-
-      const weeks: Week[] = Array.from(weekMap.values()).sort((a, b) =>
-        a.weekStart < b.weekStart ? -1 : a.weekStart > b.weekStart ? 1 : 0,
-      );
-
-      const totalCount = rows.length;
-      const totalAmount = rows.reduce((s, r) => s + r.amount, 0);
-      const payeeIds = new Set(rows.map((r) => r.payeeId));
+      // If caller filtered to a specific bucket, return only that one's rows
+      // (the other bucket still ships its stats so badges render zero counts).
+      const filtered = {
+        pnd3:
+          input.type === "pnd53"
+            ? { stats: pnd3Stats, rows: [] as WHTRow[] }
+            : { stats: pnd3Stats, rows: pnd3Rows },
+        pnd53:
+          input.type === "pnd3"
+            ? { stats: pnd53Stats, rows: [] as WHTRow[] }
+            : { stats: pnd53Stats, rows: pnd53Rows },
+      };
 
       return {
-        stats: {
-          totalCount,
-          totalAmount,
-          weekCount: weeks.length,
-          payeeCount: payeeIds.size,
-        },
-        weeks,
-        rows,
+        stats: overallStats,
+        ...filtered,
       };
     }),
 });
