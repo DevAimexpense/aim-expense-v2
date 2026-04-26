@@ -1,18 +1,19 @@
 # Session 18 → Session 19 — Handoff
 
 > **Created:** 2026-04-26 (end of Session 18)
-> **Reason:** Cleanup + 12C Weekly Payment + Sidebar restructure (Section รายจ่าย + รายงาน) เสร็จ + type check ผ่าน → ปิด session
+> **Reason:** Cleanup + 12C Weekly Payment + Sidebar restructure (Section รายจ่าย + รายงาน) เสร็จ + type check ผ่าน + smoke test ผ่าน → ปิด session
 > **Repo:** `~/Code/Aim Expense V2/aim-expense`
 > **Type check:** ✅ 0 errors
-> **Smoke test:** ⏳ ยังไม่ได้ test บน dev/Vercel — รอพี่ confirm
+> **Smoke test:** ✅ พี่ test ผ่าน 26 เม.ย. (sidebar restructure + 12C + cleanup ทั้งหมด)
+> **Working tree:** ✅ clean (ทุกอย่าง pushed แล้ว)
 > **Commits ใน S18:**
 >   - `117fede` — perf(reports): combined query + defensive fallback + skip ensureAllTabsExist (S17 ที่ค้าง — push ต้น S18) ✅
 >   - `c79f254` — chore(cleanup): remove dead files webhook/line + pdf-to-png-server + wth-cert (stale 6 sessions, S18) ✅
 >   - `e9ba6e8` — feat(reports): /reports/weekly-payment + Bank CSV export (12C, S18) ✅
->   - `(TBD)` — chore(sidebar): restructure to Section รายจ่าย + ภงด.3/53 + remove duplicate weekly-payment menu ⚠️ พี่กำลังจะ commit
+>   - `039e423` — chore(sidebar): restructure to Section รายจ่าย + ภงด.3/53 + remove duplicate weekly-payment menu (S18) ✅
 >
 > **🔴 IMPORTANT — Sidebar restructure ใน S18 รอบ 2:**
-> หลัง commit `e9ba6e8` พี่ point ออกว่า "ชำระรายสัปดาห์" ที่เพิ่งเพิ่มใน sidebar **ซ้ำซ้อนกับ `/payment-prep` เดิม** (ซึ่งเป็น workflow page ที่ครบกว่ามาก: per-bank tabs + Mark paid batch + Excel export). พี่ขอ:
+> หลัง commit `e9ba6e8` พี่ point ออกว่า "ชำระรายสัปดาห์" ที่เพิ่งเพิ่มใน sidebar **ซ้ำซ้อนกับ `/payment-prep` เดิม** (ซึ่งเป็น workflow page ที่ครบกว่ามาก: per-bank tabs + Mark paid batch + Excel export). เอม:
 > - ลบเมนู "ชำระรายสัปดาห์" ออกจาก sidebar
 > - **เก็บไฟล์ /reports/weekly-payment + bank-csv.ts ไว้** เป็น orphan code (สามารถใช้เป็น report view-only ในอนาคต — ไม่มี sidebar link แต่ accessible ผ่าน URL)
 > - Restructure sidebar ใหม่ (รายละเอียดด้านล่าง)
@@ -123,20 +124,20 @@
 | `117fede` | perf(reports): combined query + defensive fallback + skip ensureAllTabsExist (S17) | ✅ pushed (ต้น S18) |
 | `c79f254` | chore(cleanup): remove dead files webhook/line + pdf-to-png-server + wth-cert (stale 6 sessions, S18) | ✅ pushed |
 | `e9ba6e8` | feat(reports): /reports/weekly-payment + Bank CSV export (12C, S18) | ✅ pushed |
-| TBD | chore(sidebar): restructure to Section รายจ่าย + ภงด.3/53 + remove duplicate weekly-payment menu (S18) | ⚠️ พี่กำลังจะ commit |
+| `039e423` | chore(sidebar): restructure to Section รายจ่าย + ภงด.3/53 + remove duplicate weekly-payment menu (S18) | ✅ pushed |
+| TBD | docs(session18): finalize handoff after smoke test | ⚠️ พี่กำลังจะ commit |
 
-### Working tree ค้างใน Session 18 (ก่อน commit รอบ 4)
+### Working tree ก่อนปิด S18
 ```
-M  src/components/layout/sidebar.tsx              (sidebar restructure)
-M  session18/handoff/HANDOFF_2026-04-26_END_CLEANUP-WEEKLY.md  (update handoff)
+M  session18/handoff/HANDOFF_2026-04-26_END_CLEANUP-WEEKLY.md  (final update — sidebar pushed + smoke test ผ่าน)
 ```
 
-### Commands ที่พี่ต้องรันก่อนปิด S18:
+### Commands ที่พี่ต้องรันก่อนปิด S18 (commit handoff สุดท้าย):
 ```bash
 cd ~/Code/Aim\ Expense\ V2/aim-expense
 rm -f .git/index.lock
 git add -A
-git commit -m "chore(sidebar): restructure to Section รายจ่าย + ภงด.3/53 + remove duplicate weekly-payment menu (S18)"
+git commit -m "docs(session18): finalize handoff after smoke test passed (S18)"
 git push
 ```
 
@@ -207,12 +208,12 @@ git push
 ```
 Repo path:       ~/Code/Aim Expense V2/aim-expense
 Branch:          main
-HEAD (local):    117fede + cleanup commit + working tree (12C ค้าง)
-HEAD (remote):   117fede + cleanup commit (sync แล้ว ✓)
-ก่อนปิด S18:     ต้อง commit + push 12C feature ที่ค้าง
+HEAD (local):    039e423 (sidebar restructure) + handoff finalize (รอ commit)
+HEAD (remote):   039e423 (sync แล้ว ✓)
+ก่อนปิด S18:     commit handoff finalize (1 commit เล็กๆ)
 Vercel:          deploy ใหม่ทุกครั้งที่ push
-Type check:      ✅ 0 errors (ทั้ง backend + frontend ของ 12C)
-Smoke test:      ⏳ พี่จะ test หลัง push (12C)
+Type check:      ✅ 0 errors
+Smoke test:      ✅ พี่ test ผ่าน 26 เม.ย. (sidebar restructure + 12C orphan + cleanup)
 ```
 
 ### ✅ Phase status overall
@@ -256,26 +257,29 @@ Org:
 สวัสดีค่ะเอม นี่คือ Session 19 ต่อจาก Session 18
 📂 Folder: ~/Code/Aim Expense V2/aim-expense
 📦 Latest commit: chore(sidebar): restructure to Section รายจ่าย + ภงด.3/53 (S18) บน main + push แล้ว
-🎉 ผลงาน S18: Cleanup 6 sessions stale (-1098 บรรทัด) + 12C Weekly Payment (orphan) + Sidebar restructure ใหม่
-⚠️ /reports/weekly-payment เป็น orphan page (code ค้าง บน main แต่ไม่มี sidebar link) — รอตัดสินใจ
-⚠️ Sidebar dead links เพิ่ม: /reports/vat + /reports/wht?tab=pnd3 + /reports/wht?tab=pnd53
+🎉 Smoke test S18: cleanup + 12C orphan + sidebar restructure ทำงานปกติ ✅
+⚠️ /reports/weekly-payment เป็น orphan page (code อยู่บน main แต่ไม่มี sidebar link) — รอตัดสินใจ
+⚠️ Sidebar dead links รอ implement: /reports/vat + /reports/wht?tab=pnd3 + /reports/wht?tab=pnd53
 
 🔴 อ่านก่อนเริ่ม (ตามลำดับ):
 1. SYSTEM_REQUIREMENTS.md  ← Single Source of Truth (4 core principles)
 2. session18/handoff/HANDOFF_2026-04-26_END_CLEANUP-WEEKLY.md  ← handoff หลัก
 3. session17/handoff/HANDOFF_2026-04-26_END_PERF-OPT.md  ← S17 context (ถ้าจำเป็น)
 
-🎯 งาน Session 19 (เลือก 1 sub-session ใหญ่):
+🎯 งาน Session 19 — เลือก 1 sub-session ใหญ่:
 
-🚀 ตัวเลือก (priority):
+🚀 ตัวเลือก (เรียงตามความเร่งด่วน):
 - /reports/wht (ภงด.3 + ภงด.53) — สำคัญที่สุด — sidebar dead link รอ implement (พี่ขอใหม่)
 - /reports/vat (ภพ.30) — dead link เก่า
 - 12E Inactive Payees + Audit Logs UI (admin tools)
 - Bank CSV bank-specific KBank/SCB (ถ้าพี่ส่ง spec)
-- 12B Dashboard role-specific (ใหญ่สุด)
+- 12B Dashboard role-specific (ใหญ่สุด — ทำหลังสุด)
 
 🤔 ตัดสินใจ:
 - /reports/weekly-payment orphan — ใช้ต่อ / ลบ / merge เข้า /payment-prep?
+
+🧹 Optional (ถ้า context เหลือ):
+- Cleanup รอบ 2: ลบ /reports/expense-summary + /reports/by-project + procedures เก่า (ถ้า unified สเถียรแล้ว 1-2 สัปดาห์)
 
 📋 ขั้นตอนแนะนำ:
 1. AskUserQuestion ก่อนเริ่ม: confirm sub-session + scope + decision เรื่อง weekly-payment
@@ -287,7 +291,9 @@ Org:
 - single-line commit messages เท่านั้น
 - Cowork sandbox ลบ files / push เองไม่ได้ → พี่ทำเอง
 - ห้ามเก็บ business data ใน Prisma (SYSTEM_REQUIREMENTS principle 2)
-- 🔴 Vercel Pro trial หมด ~6 พ.ค. — เตือนพี่ downgrade เป็น Hobby (เหลือ ~10 วัน)
+- ห้าม cache report aggregation นอก request เดียว (Reports = Read-only Aggregation)
+- เช็ค sidebar ก่อนเพิ่ม menu ใหม่ทุกครั้ง (S18 lesson learned!)
+- 🔴 Vercel Pro trial หมด ~6 พ.ค. — เตือนพี่ downgrade เป็น Hobby (เหลือ ~10 วัน!)
 ```
 
 ---
