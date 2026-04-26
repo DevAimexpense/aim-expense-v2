@@ -115,6 +115,12 @@ const NAV_GROUPS: NavGroup[] = [
     label: "รายงาน",
     items: [
       {
+        label: "ภาพรวมรายจ่าย",
+        href: "/reports",
+        icon: "📊",
+        permission: "viewReports",
+      },
+      {
         label: "เคลียร์งบ",
         href: "/reports/clearance",
         icon: "📑",

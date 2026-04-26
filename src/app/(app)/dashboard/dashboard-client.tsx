@@ -304,11 +304,20 @@ export function DashboardClient({
         <div className="app-card-header">
           <div>
             <h2 className="app-card-title">📋 รายละเอียดแยกโปรเจกต์</h2>
-            <p className="app-card-subtitle">เปรียบเทียบงบประมาณ vs รายจ่ายจริง</p>
+            <p className="app-card-subtitle">เปรียบเทียบงบประมาณ vs รายจ่ายจริง (ตลอดทั้งโปรเจกต์)</p>
           </div>
-          <a href="/events" className="app-btn app-btn-ghost app-btn-sm">
-            จัดการโปรเจกต์ →
-          </a>
+          <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+            <a
+              href="/reports?tab=by-project"
+              className="app-btn app-btn-ghost app-btn-sm"
+              title="รายงานแยกโปรเจกต์ (มี filter ตามช่วงวันที่)"
+            >
+              📊 ดูรายงานเต็ม →
+            </a>
+            <a href="/events" className="app-btn app-btn-ghost app-btn-sm">
+              จัดการโปรเจกต์ →
+            </a>
+          </div>
         </div>
 
         {filteredEvents.length === 0 ? (

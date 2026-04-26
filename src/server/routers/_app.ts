@@ -12,6 +12,7 @@ import { companyBankRouter } from "./company-bank.router";
 import { subscriptionRouter } from "./subscription.router";
 import { userRouter } from "./user.router";
 import { eventAssignmentRouter } from "./event-assignment.router";
+import { reportRouter } from "./report.router";
 
 export const appRouter = router({
   event: eventRouter,
@@ -23,6 +24,7 @@ export const appRouter = router({
   subscription: subscriptionRouter,
   user: userRouter,
   eventAssignment: eventAssignmentRouter,
+  report: reportRouter,
 });
 
 export type AppRouter = typeof appRouter;

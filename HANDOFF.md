@@ -4,6 +4,18 @@
 
 ---
 
+## 🔴 อ่านก่อนเริ่มงาน — System Requirements (CORE)
+
+> **ทุก session ต้องอ่าน [`SYSTEM_REQUIREMENTS.md`](./SYSTEM_REQUIREMENTS.md) ก่อนเขียน code ใดๆ**
+>
+> สรุปสั้นๆ:
+> 1. ข้อมูล user → Google Drive + Sheet ของ user **เท่านั้น** (ห้ามเก็บใน Prisma)
+> 2. ระบบ **Zero Data Retention** — Prisma เก็บได้แค่ infrastructure metadata (User, Org, Subscription, AuditLog)
+> 3. Reports ทุกประเภท → query สดจาก Google Sheet ของ user (ห้าม cache)
+> 4. ทุก menu / feature ต้องมี **permission gate** (role + plan) — pattern ดูใน SYSTEM_REQUIREMENTS.md
+
+---
+
 ## ✅ Session 11 Round 2 สรุป — Deploy Vercel (2026-04-24)
 
 **Scope:** Deploy app แรกขึ้น Vercel (soft launch) เพื่อใช้ LINE webhook production + เตรียม Phase 4

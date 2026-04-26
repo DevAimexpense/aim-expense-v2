@@ -1866,3 +1866,60 @@ body {
   .app-section.cols-2 { grid-template-columns: repeat(2, 1fr); }
   .app-section.cols-3 { grid-template-columns: repeat(3, 1fr); }
 }
+
+/* ===== Tabs (used in /reports view switcher) ===== */
+.app-tabs {
+  display: flex;
+  gap: 0.25rem;
+  border-bottom: 2px solid #e2e8f0;
+  margin-bottom: 1.25rem;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.app-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.625rem 1rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #64748b;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
+}
+
+.app-tab:hover:not(.app-tab-active) {
+  color: #2563eb;
+  background: #f8fafc;
+}
+
+.app-tab-active {
+  color: #2563eb;
+  border-bottom-color: #2563eb;
+  font-weight: 600;
+}
+
+.app-tab-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.25rem;
+  height: 1.25rem;
+  padding: 0 0.375rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  background: #e2e8f0;
+  color: #475569;
+  border-radius: 9999px;
+}
+
+.app-tab-active .app-tab-count {
+  background: #dbeafe;
+  color: #1e40af;
+}
