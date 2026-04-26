@@ -88,6 +88,21 @@ const ByVendorInput = z.object({
   expenseType: z.enum(["team", "account"]).optional(),
 });
 
+const ClearanceInput = z.object({
+  /** ISO YYYY-MM-DD inclusive — uses PaymentDate / PaidAt for "paid in range" */
+  from: z.string().min(10),
+  /** ISO YYYY-MM-DD inclusive */
+  to: z.string().min(10),
+  /** Optional project filter */
+  eventId: z.string().optional(),
+  /**
+   * "pending"  → only items waiting to be cleared (paid + not cleared)
+   * "cleared"  → only items already cleared
+   * undefined  → both groups (default)
+   */
+  bucket: z.enum(["pending", "cleared"]).optional(),
+});
+
 // -------------------------------------------------------------------
 // Router
 // -------------------------------------------------------------------
@@ -364,6 +379,198 @@ export const reportRouter = router({
       return {
         stats: { vendorCount, totalSpent, topVendorAmount, averagePerVendor },
         vendors,
+      };
+    }),
+
+  /**
+   * Clearance Report — used by /reports/clearance
+   *
+   * "เคลียร์งบ" = the reconciliation step for Team Expenses (cash advances).
+   * After a Team Expense is paid, the staff member must come back with
+   * receipts → mark as "cleared". This report tracks:
+   *   - what's still waiting to be cleared (status=paid, IsCleared!="TRUE")
+   *   - what's already cleared (status=cleared)
+   *
+   * Date semantics: filter by "PaymentDate || PaidAt slice 0-10" — i.e.
+   * when the cash advance was actually paid out, not when it was created.
+   * This matches the user's mental model: "ที่จ่ายไปเดือนนี้ เคลียร์ครบหรือยัง"
+   *
+   * NOTE: only Team Expenses (`ExpenseType="team"`) qualify — Account
+   * expenses are direct vendor transfers and don't need reconciliation.
+   *
+   * Returns:
+   *   - stats: { pendingCount, pendingAmount, clearedCount, clearedAmount,
+   *              overdueCount, overdueAmount, averageDaysToClear }
+   *   - pending:  rows waiting to be cleared (sorted by daysSincePaid desc)
+   *   - cleared:  rows already cleared (sorted by clearedAt desc)
+   */
+  clearance: orgProcedure
+    .input(ClearanceInput)
+    .query(async ({ ctx, input }) => {
+      const sheets = await getSheetsService(ctx.org.orgId);
+      await sheets.ensureAllTabsExist();
+
+      const [payments, events, payees] = await Promise.all([
+        sheets.getPayments(),
+        sheets.getEvents(),
+        sheets.getPayees(),
+      ]);
+
+      const eventMap = new Map(events.map((e) => [e.EventID, e.EventName]));
+      const payeeMap = new Map(payees.map((p) => [p.PayeeID, p.PayeeName]));
+
+      /** Use PaymentDate (preferred) → PaidAt slice → empty */
+      function paidDateOf(p: Record<string, string>): string {
+        if (p.PaymentDate) return p.PaymentDate;
+        if (p.PaidAt && p.PaidAt.length >= 10) return p.PaidAt.slice(0, 10);
+        return "";
+      }
+
+      /** Days between two YYYY-MM-DD dates (b - a). Negative if a > b. */
+      function daysBetween(a: string, b: string): number {
+        if (!a || !b) return 0;
+        const da = new Date(a + "T00:00:00").getTime();
+        const db = new Date(b + "T00:00:00").getTime();
+        return Math.floor((db - da) / 86_400_000);
+      }
+
+      // Today (server local) — used for daysSincePaid on pending rows
+      const today = (() => {
+        const d = new Date();
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, "0");
+        const day = String(d.getDate()).padStart(2, "0");
+        return `${y}-${m}-${day}`;
+      })();
+
+      type PendingRow = {
+        paymentId: string;
+        paidDate: string;
+        eventId: string;
+        eventName: string;
+        payeeId: string;
+        payeeName: string;
+        description: string;
+        amount: number;
+        daysSincePaid: number;
+        isOverdue: boolean; // > 14 days = overdue (configurable later)
+        notes: string;
+      };
+
+      type ClearedRow = {
+        paymentId: string;
+        paidDate: string;
+        clearedAt: string; // YYYY-MM-DD
+        eventId: string;
+        eventName: string;
+        payeeId: string;
+        payeeName: string;
+        description: string;
+        amount: number;
+        daysToClear: number;
+        receiptUrl: string;
+      };
+
+      const OVERDUE_THRESHOLD_DAYS = 14;
+
+      const pending: PendingRow[] = [];
+      const cleared: ClearedRow[] = [];
+
+      for (const p of payments) {
+        // Only Team Expenses qualify for clearance
+        if ((p.ExpenseType || "account") !== "team") continue;
+        // Apply project filter
+        if (input.eventId && p.EventID !== input.eventId) continue;
+
+        const paidDate = paidDateOf(p);
+        const isCleared =
+          p.IsCleared === "TRUE" || p.Status === "cleared";
+
+        // ----- Cleared bucket -----
+        if (isCleared) {
+          // Filter by clearance/payment date in range
+          if (!paidDate) continue;
+          if (paidDate < input.from || paidDate > input.to) continue;
+
+          const clearedAtRaw = p.ClearedAt || "";
+          const clearedAt =
+            clearedAtRaw.length >= 10 ? clearedAtRaw.slice(0, 10) : "";
+
+          cleared.push({
+            paymentId: p.PaymentID,
+            paidDate,
+            clearedAt,
+            eventId: p.EventID,
+            eventName: eventMap.get(p.EventID) || p.EventID || "—",
+            payeeId: p.PayeeID,
+            payeeName: payeeMap.get(p.PayeeID) || p.PayeeID || "—",
+            description: p.Description || "",
+            amount: num(p.GTTLAmount),
+            daysToClear: clearedAt ? daysBetween(paidDate, clearedAt) : 0,
+            receiptUrl: p.ReceiptURL || "",
+          });
+          continue;
+        }
+
+        // ----- Pending bucket: must be paid + NOT cleared -----
+        if (p.Status !== "paid") continue;
+        if (!paidDate) continue;
+        if (paidDate < input.from || paidDate > input.to) continue;
+
+        const days = daysBetween(paidDate, today);
+        pending.push({
+          paymentId: p.PaymentID,
+          paidDate,
+          eventId: p.EventID,
+          eventName: eventMap.get(p.EventID) || p.EventID || "—",
+          payeeId: p.PayeeID,
+          payeeName: payeeMap.get(p.PayeeID) || p.PayeeID || "—",
+          description: p.Description || "",
+          amount: num(p.GTTLAmount),
+          daysSincePaid: Math.max(0, days),
+          isOverdue: days > OVERDUE_THRESHOLD_DAYS,
+          notes: p.Notes || "",
+        });
+      }
+
+      // Sort: pending → most overdue first; cleared → most recent first
+      pending.sort((a, b) => b.daysSincePaid - a.daysSincePaid);
+      cleared.sort((a, b) =>
+        a.clearedAt < b.clearedAt ? 1 : a.clearedAt > b.clearedAt ? -1 : 0
+      );
+
+      // Stats
+      const pendingCount = pending.length;
+      const pendingAmount = pending.reduce((s, r) => s + r.amount, 0);
+      const clearedCount = cleared.length;
+      const clearedAmount = cleared.reduce((s, r) => s + r.amount, 0);
+      const overdue = pending.filter((r) => r.isOverdue);
+      const overdueCount = overdue.length;
+      const overdueAmount = overdue.reduce((s, r) => s + r.amount, 0);
+      const averageDaysToClear =
+        cleared.length > 0
+          ? cleared.reduce((s, r) => s + r.daysToClear, 0) / cleared.length
+          : 0;
+
+      // Apply optional bucket filter on response shape
+      const responsePending =
+        input.bucket === "cleared" ? [] : pending;
+      const responseCleared =
+        input.bucket === "pending" ? [] : cleared;
+
+      return {
+        stats: {
+          pendingCount,
+          pendingAmount,
+          clearedCount,
+          clearedAmount,
+          overdueCount,
+          overdueAmount,
+          averageDaysToClear,
+          overdueThresholdDays: OVERDUE_THRESHOLD_DAYS,
+        },
+        pending: responsePending,
+        cleared: responseCleared,
       };
     }),
 });

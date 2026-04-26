@@ -193,10 +193,10 @@ export function DataTable<TData>({
               visibleRows.map((row) => (
                 <tr
                   key={row.id}
+                  className={onRowClick ? "app-datatable-row-clickable" : undefined}
                   onClick={
                     onRowClick ? () => onRowClick(row.original) : undefined
                   }
-                  style={onRowClick ? { cursor: "pointer" } : undefined}
                 >
                   {row.getVisibleCells().map((cell) => (
                     <td key={cell.id}>

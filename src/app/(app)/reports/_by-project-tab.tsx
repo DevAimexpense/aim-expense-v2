@@ -41,6 +41,11 @@ interface Props {
   toIso: string;
   status?: PaymentStatus;
   expenseType?: ExpenseType;
+  /**
+   * Drill-down callback: called when user clicks a project row.
+   * Parent should switch to the overview tab and auto-filter by this eventId.
+   */
+  onDrillDown?: (eventId: string) => void;
 }
 
 export function ByProjectTab({
@@ -48,6 +53,7 @@ export function ByProjectTab({
   toIso,
   status,
   expenseType,
+  onDrillDown,
 }: Props) {
   const [includeEmpty, setIncludeEmpty] = useState<boolean>(false);
 
@@ -308,6 +314,18 @@ export function ByProjectTab({
         />
       </div>
 
+      {onDrillDown && (
+        <div
+          style={{
+            fontSize: "0.75rem",
+            color: "#64748b",
+            margin: "0 0.25rem 0.5rem",
+          }}
+        >
+          💡 กดที่แถวโปรเจกต์เพื่อดูรายการค่าใช้จ่ายทั้งหมดของโปรเจกต์นั้น
+        </div>
+      )}
+
       <DataTable<ProjectRow>
         columns={columns}
         data={projects}
@@ -315,6 +333,9 @@ export function ByProjectTab({
         searchable
         searchPlaceholder="ค้นหาชื่อโปรเจกต์..."
         loading={reportQuery.isLoading}
+        onRowClick={
+          onDrillDown ? (row) => onDrillDown(row.eventId) : undefined
+        }
         emptyMessage={
           includeEmpty
             ? "ยังไม่มีโปรเจกต์ในระบบ"

@@ -1163,6 +1163,18 @@ body {
   min-width: 220px;
 }
 
+/* Clickable row (drill-down) — visual cue + hover */
+.app-datatable-row-clickable {
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+.app-datatable-row-clickable:hover {
+  background-color: #f1f5f9;
+}
+.app-datatable-row-clickable:hover td {
+  color: #0f172a;
+}
+
 .app-table-pagination {
   display: flex;
   align-items: center;

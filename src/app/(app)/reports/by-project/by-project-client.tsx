@@ -24,6 +24,7 @@ import {
   type ColumnDef,
   type ExportColumn,
 } from "@/components/shared";
+import { toLocalDateString } from "../_components";
 
 type ProjectRow = {
   eventId: string;
@@ -142,8 +143,9 @@ export function ByProjectClient({ orgName }: { orgName: string }) {
   const [expenseType, setExpenseType] = useState<string>("all");
   const [includeEmpty, setIncludeEmpty] = useState<boolean>(false);
 
-  const fromIso = range.from.toISOString().slice(0, 10);
-  const toIso = range.to.toISOString().slice(0, 10);
+  // LOCAL timezone (not UTC) — fixes off-by-one day bug in ICT (UTC+7)
+  const fromIso = toLocalDateString(range.from);
+  const toIso = toLocalDateString(range.to);
 
   const reportQuery = trpc.report.byProject.useQuery({
     from: fromIso,

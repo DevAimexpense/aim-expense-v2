@@ -32,7 +32,12 @@ import {
   getPresetRange,
   type DateRange,
 } from "@/components/shared";
-import { formatThaiDate, type PaymentStatus, type ExpenseType } from "./_components";
+import {
+  formatThaiDate,
+  toLocalDateString,
+  type PaymentStatus,
+  type ExpenseType,
+} from "./_components";
 import { OverviewTab } from "./_overview-tab";
 import { ByProjectTab } from "./_by-project-tab";
 import { ByVendorTab } from "./_by-vendor-tab";
@@ -66,17 +71,46 @@ export function ReportsClient({ orgName }: { orgName: string }) {
 
   // ----- Shared filters -----
   // Default: this month, all projects, all statuses, all types
+  // eventId is sync'd with the URL so drill-down + share-link work after refresh.
+  const eventIdFromUrl = searchParams.get("eventId");
   const [range, setRange] = useState<DateRange>(getPresetRange("this-month"));
-  const [eventId, setEventId] = useState<string>("all");
+  const [eventId, setEventId] = useState<string>(eventIdFromUrl || "all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [typeFilter, setTypeFilter] = useState<string>("all");
+
+  /**
+   * Drill-down: when user clicks a project row in the by-project tab,
+   * switch to the overview tab and pre-filter by that project (eventId).
+   * URL is updated so the deep-link can be shared / refreshed.
+   */
+  function handleDrillDownToOverview(targetEventId: string) {
+    setEventId(targetEventId);
+    setTab("overview");
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("tab", "overview");
+    params.set("eventId", targetEventId);
+    router.replace(`/reports?${params.toString()}`, { scroll: false });
+  }
+
+  /** Keep ?eventId in URL in sync when the user changes the project filter manually. */
+  function handleEventIdChange(next: string) {
+    setEventId(next);
+    const params = new URLSearchParams(searchParams.toString());
+    if (next === "all") {
+      params.delete("eventId");
+    } else {
+      params.set("eventId", next);
+    }
+    router.replace(`/reports?${params.toString()}`, { scroll: false });
+  }
 
   // ----- Lookups -----
   const eventsQuery = trpc.event.list.useQuery();
   const events = eventsQuery.data || [];
 
-  const fromIso = range.from.toISOString().slice(0, 10);
-  const toIso = range.to.toISOString().slice(0, 10);
+  // Use LOCAL timezone (not UTC) — fixes off-by-one day bug in ICT (UTC+7)
+  const fromIso = toLocalDateString(range.from);
+  const toIso = toLocalDateString(range.to);
 
   const eventIdParam = eventId === "all" ? undefined : eventId;
   const statusParam =
@@ -117,7 +151,7 @@ export function ReportsClient({ orgName }: { orgName: string }) {
             ...events.map((e) => ({ value: e.eventId, label: e.eventName })),
           ]}
           value={eventId}
-          onChange={(v) => setEventId(v)}
+          onChange={handleEventIdChange}
           className="app-select"
           disabled={projectFilterDisabled}
         />
@@ -146,7 +180,7 @@ export function ReportsClient({ orgName }: { orgName: string }) {
         {hasFilterChanges && (
           <button
             onClick={() => {
-              setEventId("all");
+              handleEventIdChange("all");
               setStatusFilter("all");
               setTypeFilter("all");
             }}
@@ -189,6 +223,7 @@ export function ReportsClient({ orgName }: { orgName: string }) {
           toIso={toIso}
           status={statusParam}
           expenseType={typeParam}
+          onDrillDown={handleDrillDownToOverview}
         />
       )}
       {tab === "by-vendor" && (

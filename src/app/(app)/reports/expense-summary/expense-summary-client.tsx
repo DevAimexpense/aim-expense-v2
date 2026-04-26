@@ -29,6 +29,7 @@ import {
   type ColumnDef,
   type ExportColumn,
 } from "@/components/shared";
+import { toLocalDateString } from "../_components";
 
 // Row shape returned by report.expenseSummary
 type Row = {
@@ -95,9 +96,9 @@ export function ExpenseSummaryClient({ orgName }: { orgName: string }) {
   const [status, setStatus] = useState<string>("all");
   const [expenseType, setExpenseType] = useState<string>("all");
 
-  // Convert Date → ISO YYYY-MM-DD for the query
-  const fromIso = range.from.toISOString().slice(0, 10);
-  const toIso = range.to.toISOString().slice(0, 10);
+  // Convert Date → ISO YYYY-MM-DD for the query (LOCAL timezone, not UTC)
+  const fromIso = toLocalDateString(range.from);
+  const toIso = toLocalDateString(range.to);
 
   // Data
   const eventsQuery = trpc.event.list.useQuery();

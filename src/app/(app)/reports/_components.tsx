@@ -15,6 +15,23 @@ export function formatTHB(n: number): string {
   }).format(n || 0);
 }
 
+/**
+ * Format a Date as YYYY-MM-DD using LOCAL timezone (not UTC).
+ *
+ * Why: `date.toISOString().slice(0, 10)` converts to UTC first.
+ * In ICT (UTC+7), `new Date(2026, 3, 1)` (1 Apr 2026 ICT) becomes
+ * `"2026-03-31T17:00:00.000Z"` → slice gives `"2026-03-31"` ❌
+ *
+ * Use this helper anywhere we need a local-timezone YYYY-MM-DD string
+ * for date filters, sheet queries, etc.
+ */
+export function toLocalDateString(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 export function formatThaiDate(s: string): string {
   if (!s) return "-";
   try {
