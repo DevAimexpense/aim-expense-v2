@@ -5,7 +5,6 @@
 "use client";
 
 import { useMemo } from "react";
-import { trpc } from "@/lib/trpc/client";
 import {
   StatCard,
   DataTable,
@@ -13,12 +12,7 @@ import {
   type ColumnDef,
   type ExportColumn,
 } from "@/components/shared";
-import {
-  formatTHB,
-  formatThaiDate,
-  type PaymentStatus,
-  type ExpenseType,
-} from "./_components";
+import { formatTHB, formatThaiDate } from "./_components";
 
 type VendorRow = {
   payeeId: string;
@@ -30,36 +24,31 @@ type VendorRow = {
   lastPaymentDate: string;
 };
 
+export type ByVendorTabData = {
+  stats: {
+    vendorCount: number;
+    totalSpent: number;
+    topVendorAmount: number;
+    averagePerVendor: number;
+  };
+  vendors: VendorRow[];
+};
+
 interface Props {
   fromIso: string;
   toIso: string;
-  eventId?: string;
-  status?: PaymentStatus;
-  expenseType?: ExpenseType;
+  data: ByVendorTabData | undefined;
+  isLoading: boolean;
 }
 
-export function ByVendorTab({
-  fromIso,
-  toIso,
-  eventId,
-  status,
-  expenseType,
-}: Props) {
-  const reportQuery = trpc.report.byVendor.useQuery({
-    from: fromIso,
-    to: toIso,
-    eventId,
-    status,
-    expenseType,
-  });
-
-  const stats = reportQuery.data?.stats ?? {
+export function ByVendorTab({ fromIso, toIso, data, isLoading }: Props) {
+  const stats = data?.stats ?? {
     vendorCount: 0,
     totalSpent: 0,
     topVendorAmount: 0,
     averagePerVendor: 0,
   };
-  const vendors: VendorRow[] = reportQuery.data?.vendors ?? [];
+  const vendors: VendorRow[] = data?.vendors ?? [];
   const topVendor = vendors[0];
 
   const columns = useMemo<ColumnDef<VendorRow, unknown>[]>(
@@ -211,7 +200,7 @@ export function ByVendorTab({
         pageSize={25}
         searchable
         searchPlaceholder="ค้นหาชื่อผู้รับเงิน / เลขผู้เสียภาษี..."
-        loading={reportQuery.isLoading}
+        loading={isLoading}
         emptyMessage="ไม่มีผู้รับเงินที่มีรายการในช่วงเวลานี้"
       />
     </>

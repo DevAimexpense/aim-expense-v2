@@ -88,6 +88,21 @@ const ByVendorInput = z.object({
   expenseType: z.enum(["team", "account"]).optional(),
 });
 
+const CombinedInput = z.object({
+  /** ISO YYYY-MM-DD inclusive */
+  from: z.string().min(10),
+  /** ISO YYYY-MM-DD inclusive */
+  to: z.string().min(10),
+  /** Project filter (applies to summary + byVendor; ignored for byProject) */
+  eventId: z.string().optional(),
+  status: z
+    .enum(["pending", "approved", "paid", "rejected", "cleared"])
+    .optional(),
+  expenseType: z.enum(["team", "account"]).optional(),
+  /** byProject only — include events with no payments in the range */
+  includeEmpty: z.boolean().default(false),
+});
+
 const ClearanceInput = z.object({
   /** ISO YYYY-MM-DD inclusive — uses PaymentDate / PaidAt for "paid in range" */
   from: z.string().min(10),
@@ -120,7 +135,11 @@ export const reportRouter = router({
     .input(ExpenseSummaryInput)
     .query(async ({ ctx, input }) => {
       const sheets = await getSheetsService(ctx.org.orgId);
-      await sheets.ensureAllTabsExist();
+      // NOTE: skip ensureAllTabsExist — read-only reports rely on
+      // tabs existing from onboarding. Each call adds ~7 sequential
+      // Sheets API roundtrips (~3-7s). If a brand-new org somehow
+      // hits a report page before onboarding finishes, we'll just
+      // get an empty list, which is the correct behaviour.
 
       // Pull master tables in parallel (each is a single Sheets API call)
       const [payments, events, payees] = await Promise.all([
@@ -206,7 +225,11 @@ export const reportRouter = router({
     .input(ByProjectInput)
     .query(async ({ ctx, input }) => {
       const sheets = await getSheetsService(ctx.org.orgId);
-      await sheets.ensureAllTabsExist();
+      // NOTE: skip ensureAllTabsExist — read-only reports rely on
+      // tabs existing from onboarding. Each call adds ~7 sequential
+      // Sheets API roundtrips (~3-7s). If a brand-new org somehow
+      // hits a report page before onboarding finishes, we'll just
+      // get an empty list, which is the correct behaviour.
 
       const [payments, events] = await Promise.all([
         sheets.getPayments(),
@@ -293,7 +316,11 @@ export const reportRouter = router({
     .input(ByVendorInput)
     .query(async ({ ctx, input }) => {
       const sheets = await getSheetsService(ctx.org.orgId);
-      await sheets.ensureAllTabsExist();
+      // NOTE: skip ensureAllTabsExist — read-only reports rely on
+      // tabs existing from onboarding. Each call adds ~7 sequential
+      // Sheets API roundtrips (~3-7s). If a brand-new org somehow
+      // hits a report page before onboarding finishes, we'll just
+      // get an empty list, which is the correct behaviour.
 
       const [payments, payees] = await Promise.all([
         sheets.getPayments(),
@@ -383,6 +410,220 @@ export const reportRouter = router({
     }),
 
   /**
+   * Combined Reports — single-query aggregator used by /reports.
+   *
+   * Why: the unified /reports page has 3 tabs (overview/byProject/byVendor).
+   * Calling 3 separate procedures means 3× HTTP roundtrips and 3× duplicate
+   * Sheets API pulls of the same `getPayments()`. This procedure pulls master
+   * tables ONCE then aggregates all 3 views in-memory in a single response.
+   *
+   * Result: tab-switch on /reports is instant (data already in client cache),
+   * and initial load is roughly half the wall-clock time of the old approach.
+   *
+   * Returns: { summary, byProject, byVendor } — same shape as the individual
+   * procedures (intentional, so each tab component can keep its existing typings).
+   */
+  combined: orgProcedure
+    .input(CombinedInput)
+    .query(async ({ ctx, input }) => {
+      const sheets = await getSheetsService(ctx.org.orgId);
+      // NOTE: skip ensureAllTabsExist — read-only reports rely on
+      // tabs existing from onboarding. Each call adds ~7 sequential
+      // Sheets API roundtrips (~3-7s). If a brand-new org somehow
+      // hits a report page before onboarding finishes, we'll just
+      // get an empty list, which is the correct behaviour.
+
+      // Pull master tables ONCE in parallel (3 calls for the whole page)
+      const [payments, events, payees] = await Promise.all([
+        sheets.getPayments(),
+        sheets.getEvents(),
+        sheets.getPayees(),
+      ]);
+
+      // Lookup maps
+      const eventMap = new Map(events.map((e) => [e.EventID, e.EventName]));
+      const payeeMap = new Map(
+        payees.map((p) => [
+          p.PayeeID,
+          {
+            name: p.PayeeName || p.PayeeID,
+            taxId: p.TaxID || "",
+            branchType: p.BranchType || "",
+            branchNumber: p.BranchNumber || "",
+          },
+        ])
+      );
+
+      // Shared filter helpers — applied to "summary" + "byVendor"
+      function inDate(p: Record<string, string>): boolean {
+        const rowDate = pickRowDate(p);
+        if (!rowDate) return false;
+        return rowDate >= input.from && rowDate <= input.to;
+      }
+      function passStatus(p: Record<string, string>): boolean {
+        if (input.status) return p.Status === input.status;
+        return p.Status !== "rejected";
+      }
+      function passType(p: Record<string, string>): boolean {
+        if (!input.expenseType) return true;
+        return (p.ExpenseType || "account") === input.expenseType;
+      }
+
+      // ===== 1) Summary (overview) — eventId filter applies =====
+      const summaryFiltered = payments.filter((p) => {
+        if (!passStatus(p)) return false;
+        if (!passType(p)) return false;
+        if (input.eventId && p.EventID !== input.eventId) return false;
+        if (!inDate(p)) return false;
+        return true;
+      });
+
+      const summaryAmounts = summaryFiltered.map((p) => num(p.GTTLAmount));
+      const summaryTotal = summaryAmounts.reduce((s, x) => s + x, 0);
+      const summaryCount = summaryFiltered.length;
+      const summaryAverage = summaryCount > 0 ? summaryTotal / summaryCount : 0;
+      const summaryMax =
+        summaryAmounts.length > 0 ? Math.max(...summaryAmounts) : 0;
+
+      const summaryRows = summaryFiltered
+        .map((p) => ({
+          paymentId: p.PaymentID,
+          date: pickRowDate(p),
+          eventId: p.EventID,
+          eventName: eventMap.get(p.EventID) || p.EventID || "—",
+          payeeId: p.PayeeID,
+          payeeName: payeeMap.get(p.PayeeID)?.name || p.PayeeID || "—",
+          description: p.Description || "",
+          expenseType: (p.ExpenseType || "account") as "team" | "account",
+          amount: num(p.GTTLAmount),
+          status: (p.Status || "pending") as
+            | "pending"
+            | "approved"
+            | "paid"
+            | "rejected"
+            | "cleared",
+          categoryMain: p.CategoryMain || "",
+          categorySub: p.CategorySub || "",
+        }))
+        .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+
+      // ===== 2) By Project — eventId filter does NOT apply (each row IS a project) =====
+      const byProjectFiltered = payments.filter((p) => {
+        if (!passStatus(p)) return false;
+        if (!passType(p)) return false;
+        if (!inDate(p)) return false;
+        return true;
+      });
+
+      const byEvent = new Map<string, { count: number; total: number }>();
+      for (const p of byProjectFiltered) {
+        const cur = byEvent.get(p.EventID) || { count: 0, total: 0 };
+        cur.count += 1;
+        cur.total += num(p.GTTLAmount);
+        byEvent.set(p.EventID, cur);
+      }
+
+      const projects = events
+        .map((e) => {
+          const agg = byEvent.get(e.EventID) || { count: 0, total: 0 };
+          const budget = num(e.Budget);
+          const totalSpent = agg.total;
+          const remaining = budget - totalSpent;
+          const percentage = budget > 0 ? (totalSpent / budget) * 100 : 0;
+          return {
+            eventId: e.EventID,
+            eventName: e.EventName || e.EventID || "—",
+            status: e.Status || "active",
+            startDate: e.StartDate || "",
+            endDate: e.EndDate || "",
+            budget,
+            totalSpent,
+            remaining,
+            percentage,
+            isOverBudget: budget > 0 && totalSpent > budget,
+            paymentCount: agg.count,
+          };
+        })
+        .filter((p) => input.includeEmpty || p.paymentCount > 0)
+        .sort((a, b) => b.totalSpent - a.totalSpent);
+
+      const byProjectStats = {
+        projectCount: projects.length,
+        totalBudget: projects.reduce((s, p) => s + p.budget, 0),
+        totalSpent: projects.reduce((s, p) => s + p.totalSpent, 0),
+        overBudgetCount: projects.filter((p) => p.isOverBudget).length,
+      };
+
+      // ===== 3) By Vendor — eventId filter applies =====
+      // Reuse summaryFiltered (same filter rules: status + type + eventId + date)
+      type VendorAgg = { total: number; count: number; lastDate: string };
+      const byPayee = new Map<string, VendorAgg>();
+      for (const p of summaryFiltered) {
+        const cur = byPayee.get(p.PayeeID) || {
+          total: 0,
+          count: 0,
+          lastDate: "",
+        };
+        cur.total += num(p.GTTLAmount);
+        cur.count += 1;
+        const d = pickRowDate(p);
+        if (d > cur.lastDate) cur.lastDate = d;
+        byPayee.set(p.PayeeID, cur);
+      }
+
+      const vendors = Array.from(byPayee.entries())
+        .map(([payeeId, agg]) => {
+          const info = payeeMap.get(payeeId);
+          const branchInfo =
+            info?.branchType === "Branch" && info.branchNumber
+              ? `สาขา ${info.branchNumber}`
+              : info?.branchType === "HQ"
+              ? "สำนักงานใหญ่"
+              : "";
+          return {
+            payeeId,
+            payeeName: info?.name || payeeId,
+            taxId: info?.taxId || "",
+            branchInfo,
+            totalSpent: agg.total,
+            paymentCount: agg.count,
+            lastPaymentDate: agg.lastDate,
+          };
+        })
+        .sort((a, b) => b.totalSpent - a.totalSpent);
+
+      const byVendorStats = {
+        vendorCount: vendors.length,
+        totalSpent: vendors.reduce((s, v) => s + v.totalSpent, 0),
+        topVendorAmount: vendors[0]?.totalSpent ?? 0,
+        averagePerVendor:
+          vendors.length > 0
+            ? vendors.reduce((s, v) => s + v.totalSpent, 0) / vendors.length
+            : 0,
+      };
+
+      return {
+        summary: {
+          stats: {
+            total: summaryTotal,
+            count: summaryCount,
+            average: summaryAverage,
+            max: summaryMax,
+          },
+          rows: summaryRows,
+        },
+        byProject: {
+          stats: byProjectStats,
+          projects,
+        },
+        byVendor: {
+          stats: byVendorStats,
+          vendors,
+        },
+      };
+    }),
+
+  /**
    * Clearance Report — used by /reports/clearance
    *
    * "เคลียร์งบ" = the reconciliation step for Team Expenses (cash advances).
@@ -408,7 +649,11 @@ export const reportRouter = router({
     .input(ClearanceInput)
     .query(async ({ ctx, input }) => {
       const sheets = await getSheetsService(ctx.org.orgId);
-      await sheets.ensureAllTabsExist();
+      // NOTE: skip ensureAllTabsExist — read-only reports rely on
+      // tabs existing from onboarding. Each call adds ~7 sequential
+      // Sheets API roundtrips (~3-7s). If a brand-new org somehow
+      // hits a report page before onboarding finishes, we'll just
+      // get an empty list, which is the correct behaviour.
 
       const [payments, events, payees] = await Promise.all([
         sheets.getPayments(),

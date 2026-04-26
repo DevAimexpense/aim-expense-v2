@@ -4,8 +4,7 @@
 
 "use client";
 
-import { useMemo, useState } from "react";
-import { trpc } from "@/lib/trpc/client";
+import { useMemo } from "react";
 import {
   StatCard,
   DataTable,
@@ -18,8 +17,6 @@ import {
   formatThaiDate,
   ProgressBar,
   PROJECT_STATUS_LABEL,
-  type PaymentStatus,
-  type ExpenseType,
 } from "./_components";
 
 type ProjectRow = {
@@ -36,11 +33,24 @@ type ProjectRow = {
   paymentCount: number;
 };
 
+export type ByProjectTabData = {
+  stats: {
+    projectCount: number;
+    totalBudget: number;
+    totalSpent: number;
+    overBudgetCount: number;
+  };
+  projects: ProjectRow[];
+};
+
 interface Props {
   fromIso: string;
   toIso: string;
-  status?: PaymentStatus;
-  expenseType?: ExpenseType;
+  data: ByProjectTabData | undefined;
+  isLoading: boolean;
+  /** When true, parent re-fetches with includeEmpty so empty projects appear. */
+  includeEmpty: boolean;
+  onIncludeEmptyChange: (next: boolean) => void;
   /**
    * Drill-down callback: called when user clicks a project row.
    * Parent should switch to the overview tab and auto-filter by this eventId.
@@ -51,27 +61,19 @@ interface Props {
 export function ByProjectTab({
   fromIso,
   toIso,
-  status,
-  expenseType,
+  data,
+  isLoading,
+  includeEmpty,
+  onIncludeEmptyChange,
   onDrillDown,
 }: Props) {
-  const [includeEmpty, setIncludeEmpty] = useState<boolean>(false);
-
-  const reportQuery = trpc.report.byProject.useQuery({
-    from: fromIso,
-    to: toIso,
-    status,
-    expenseType,
-    includeEmpty,
-  });
-
-  const stats = reportQuery.data?.stats ?? {
+  const stats = data?.stats ?? {
     projectCount: 0,
     totalBudget: 0,
     totalSpent: 0,
     overBudgetCount: 0,
   };
-  const projects: ProjectRow[] = reportQuery.data?.projects ?? [];
+  const projects: ProjectRow[] = data?.projects ?? [];
 
   const overallPercentage =
     stats.totalBudget > 0
@@ -252,7 +254,7 @@ export function ByProjectTab({
           <input
             type="checkbox"
             checked={includeEmpty}
-            onChange={(e) => setIncludeEmpty(e.target.checked)}
+            onChange={(e) => onIncludeEmptyChange(e.target.checked)}
           />
           แสดงโปรเจกต์ที่ไม่มีรายการในช่วงนี้
         </label>
@@ -332,7 +334,7 @@ export function ByProjectTab({
         pageSize={25}
         searchable
         searchPlaceholder="ค้นหาชื่อโปรเจกต์..."
-        loading={reportQuery.isLoading}
+        loading={isLoading}
         onRowClick={
           onDrillDown ? (row) => onDrillDown(row.eventId) : undefined
         }

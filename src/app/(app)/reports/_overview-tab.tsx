@@ -5,7 +5,6 @@
 "use client";
 
 import { useMemo } from "react";
-import { trpc } from "@/lib/trpc/client";
 import {
   StatCard,
   DataTable,
@@ -39,36 +38,31 @@ type Row = {
   categorySub: string;
 };
 
+export type OverviewTabData = {
+  stats: {
+    total: number;
+    count: number;
+    average: number;
+    max: number;
+  };
+  rows: Row[];
+};
+
 interface Props {
   fromIso: string;
   toIso: string;
-  eventId?: string;
-  status?: PaymentStatus;
-  expenseType?: ExpenseType;
+  data: OverviewTabData | undefined;
+  isLoading: boolean;
 }
 
-export function OverviewTab({
-  fromIso,
-  toIso,
-  eventId,
-  status,
-  expenseType,
-}: Props) {
-  const reportQuery = trpc.report.expenseSummary.useQuery({
-    from: fromIso,
-    to: toIso,
-    eventId,
-    status,
-    expenseType,
-  });
-
-  const stats = reportQuery.data?.stats ?? {
+export function OverviewTab({ fromIso, toIso, data, isLoading }: Props) {
+  const stats = data?.stats ?? {
     total: 0,
     count: 0,
     average: 0,
     max: 0,
   };
-  const rows: Row[] = reportQuery.data?.rows ?? [];
+  const rows: Row[] = data?.rows ?? [];
 
   const columns = useMemo<ColumnDef<Row, unknown>[]>(
     () => [
@@ -223,7 +217,7 @@ export function OverviewTab({
         pageSize={25}
         searchable
         searchPlaceholder="ค้นหา..."
-        loading={reportQuery.isLoading}
+        loading={isLoading}
         emptyMessage="ไม่มีรายการในช่วงเวลาและตัวกรองที่เลือก"
       />
     </>

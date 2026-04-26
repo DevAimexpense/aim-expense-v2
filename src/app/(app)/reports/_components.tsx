@@ -84,13 +84,21 @@ export const PROJECT_STATUS_LABEL: Record<
   paused: { label: "พักไว้", class: "app-badge-warning" },
 };
 
+/** Fallback for unknown status values from old/dirty rows in the sheet. */
+const UNKNOWN_STATUS = { label: "—", class: "app-badge-neutral" } as const;
+const UNKNOWN_TYPE = {
+  label: "—",
+  class: "app-badge-neutral",
+  icon: "❓",
+} as const;
+
 export function StatusBadge({ status }: { status: PaymentStatus }) {
-  const s = STATUS_LABEL[status];
+  const s = STATUS_LABEL[status] ?? UNKNOWN_STATUS;
   return <span className={`app-badge ${s.class}`}>{s.label}</span>;
 }
 
 export function TypeBadge({ type }: { type: ExpenseType }) {
-  const t = TYPE_LABEL[type];
+  const t = TYPE_LABEL[type] ?? UNKNOWN_TYPE;
   return (
     <span className={`app-badge ${t.class}`}>
       {t.icon} {t.label}
