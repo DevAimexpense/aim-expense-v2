@@ -118,6 +118,14 @@ export function WhtClient({ orgName }: { orgName: string }) {
   const fromIso = toLocalDateString(range.from);
   const toIso = toLocalDateString(range.to);
 
+  // ----- Form PDF gating (ภงด.3/53 ฟอร์มจริง = 1 เดือน/ใบ) -----
+  // ปุ่ม "ดาวน์โหลด PDF (ใบแนบ/สรุป)" จะเปิดได้ก็ต่อเมื่อ range
+  // อยู่ในเดือนเดียวกัน — สรรพากรกำหนดยื่นเป็นรายเดือน
+  const fromMonthKey = fromIso.slice(0, 7); // "YYYY-MM"
+  const toMonthKey = toIso.slice(0, 7);
+  const isSingleMonth = fromMonthKey === toMonthKey;
+  const period = fromMonthKey; // ใช้เดือนของ from (ทั้งช่วงต้องเป็นเดือนเดียวกัน)
+
   // ----- Lookups -----
   const eventsQuery = trpc.event.list.useQuery();
   const events = eventsQuery.data || [];
@@ -391,25 +399,74 @@ export function WhtClient({ orgName }: { orgName: string }) {
         />
       </div>
 
-      {/* PDF export note (S20 deliverable) */}
+      {/* PDF form download (ใบแนบ + ใบสรุป ตามฟอร์มสรรพากร 100%) */}
       <div
         style={{
           padding: "0.75rem 1rem",
-          background: "#fef3c7",
-          border: "1px solid #fde68a",
+          background: isSingleMonth ? "#ecfdf5" : "#fef3c7",
+          border: isSingleMonth ? "1px solid #a7f3d0" : "1px solid #fde68a",
           borderRadius: "0.5rem",
-          fontSize: "0.8125rem",
-          color: "#92400e",
           marginBottom: "0.75rem",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: "1rem",
+          flexWrap: "wrap",
         }}
       >
-        ℹ️ <strong>หมายเหตุ:</strong> Export PDF ตามฟอร์มกรมสรรพากร 100%
-        (ใบแนบ + ใบสรุป {meta.title}) จะเปิดใช้งานใน Session
-        ถัดไป (ต้องการ TaxID + ที่อยู่บริษัทจาก Google Sheet ก่อน). ตอนนี้
-        รองรับ <strong>CSV / XLSX</strong> ที่ครบ column ตามฟอร์มแล้ว.
+        <div style={{ fontSize: "0.8125rem", color: isSingleMonth ? "#065f46" : "#92400e" }}>
+          {isSingleMonth ? (
+            <>
+              📄 <strong>ดาวน์โหลด PDF ตามฟอร์มกรมสรรพากร</strong> (เดือน{" "}
+              {formatThaiDate(`${period}-15`).replace(/^15 /, "")}) — เปิดในแท็บใหม่
+              เลือก "พิมพ์/บันทึกเป็น PDF"
+            </>
+          ) : (
+            <>
+              ⚠️ <strong>เลือกเดือนเดียว</strong> เพื่อดาวน์โหลด PDF ใบแนบ/ใบสรุป
+              {" "}({fromMonthKey} ↔ {toMonthKey}) — ฟอร์ม ภงด.3/53 ยื่นเป็นรายเดือนค่ะ
+            </>
+          )}
+        </div>
+        <div style={{ display: "flex", gap: "0.5rem" }}>
+          <a
+            href={`/documents/${tab}-attach/${period}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="app-btn app-btn-sm"
+            style={{
+              opacity: isSingleMonth && stats.totalCount > 0 ? 1 : 0.4,
+              pointerEvents: isSingleMonth && stats.totalCount > 0 ? "auto" : "none",
+              background: "#fff",
+              border: "1px solid #cbd5e1",
+              color: "#1e293b",
+              textDecoration: "none",
+            }}
+            aria-disabled={!isSingleMonth || stats.totalCount === 0}
+          >
+            📄 PDF ใบแนบ
+          </a>
+          <a
+            href={`/documents/${tab}/${period}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="app-btn app-btn-sm app-btn-primary"
+            style={{
+              opacity: isSingleMonth ? 1 : 0.4,
+              pointerEvents: isSingleMonth ? "auto" : "none",
+              background: "#2563eb",
+              border: "1px solid #2563eb",
+              color: "#fff",
+              textDecoration: "none",
+            }}
+            aria-disabled={!isSingleMonth}
+          >
+            📋 PDF ใบสรุป
+          </a>
+        </div>
       </div>
 
-      {/* Table + export */}
+      {/* Table + export (CSV/XLSX/generic PDF) */}
       <div
         style={{
           display: "flex",
