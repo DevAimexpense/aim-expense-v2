@@ -84,25 +84,27 @@ export function formatThaiDateLong(iso: string): string {
 }
 
 /**
- * Format number → Thai locale with 2 decimal places ("1,234.56")
+ * Format number → "1,234.56" — pure JS (no Intl) for SSR/CSR consistency.
+ * (Intl.NumberFormat may insert hidden Unicode chars differently between
+ *  Node.js and browser → causes React hydration mismatch.)
  * Empty / 0 → empty string (so blank cells stay blank)
  */
 export function formatMoney(n: number): string {
   if (!n || n === 0) return "";
-  return new Intl.NumberFormat("th-TH", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(n);
+  return formatMoneyAlways(n);
 }
 
 /**
- * Always show 2 decimals — for total/aggregate cells (must show "0.00" not blank)
+ * Always show 2 decimals — pure JS, ASCII-safe ("0.00" / "1,234.56")
  */
 export function formatMoneyAlways(n: number): string {
-  return new Intl.NumberFormat("th-TH", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(n || 0);
+  const v = Number.isFinite(n) ? n : 0;
+  const sign = v < 0 ? "-" : "";
+  const abs = Math.abs(v);
+  const fixed = abs.toFixed(2);
+  const [int, dec] = fixed.split(".");
+  const withCommas = int.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return `${sign}${withCommas}.${dec}`;
 }
 
 /**

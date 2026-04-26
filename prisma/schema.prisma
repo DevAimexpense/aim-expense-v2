@@ -1,12 +1,3 @@
-// ===========================================
-// Aim Expense — Prisma Schema (v2)
-// Server DB เก็บเฉพาะ: users, orgs, members, permissions, subscriptions
-// ข้อมูลธุรกิจทั้งหมดอยู่ใน Google Sheets ของ user
-//
-// Primary identity = LINE User ID
-// Onboarding flow: line_login → line_oa → google → company → done
-// ===========================================
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -16,273 +7,212 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// ===== USER ACCOUNT =====
 model User {
-  id String @id @default(uuid())
-
-  // --- LINE (Primary Identity) ---
-  lineUserId       String   @unique @map("line_user_id")
-  lineDisplayName  String   @map("line_display_name")
-  linePictureUrl   String?  @map("line_picture_url")
-  lineEmail        String?  @map("line_email") // from LINE OpenID (if user consents)
-  lineFollowedOAAt DateTime? @map("line_followed_oa_at")
-
-  // --- Profile ---
-  email     String? @unique
-  fullName  String? @map("full_name")
-  avatarUrl String? @map("avatar_url")
-
-  // --- Onboarding state machine ---
-  // line_login → line_oa → google → company → done
-  onboardingStep String @default("line_login") @map("onboarding_step")
-
-  // --- Legal consent (PDPA + ToS) ---
-  acceptedTermsAt      DateTime? @map("accepted_terms_at")
-  acceptedTermsVersion String?   @map("accepted_terms_version")
-
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-
-  // Relations
-  lineConnection   LineConnection?
-  googleConnection GoogleConnection?
-  orgMembers       OrgMember[]
-  permissions      UserPermission[]
-  ownedOrgs        Organization[]   @relation("OrgOwner")
-  auditLogs        AuditLog[]
-  invitesSent      OrgMember[]      @relation("InvitedBy")
+  id                   String            @id @default(uuid())
+  lineUserId           String            @unique @map("line_user_id")
+  lineDisplayName      String            @map("line_display_name")
+  linePictureUrl       String?           @map("line_picture_url")
+  lineEmail            String?           @map("line_email")
+  lineFollowedOAAt     DateTime?         @map("line_followed_oa_at")
+  email                String?           @unique
+  fullName             String?           @map("full_name")
+  avatarUrl            String?           @map("avatar_url")
+  onboardingStep       String            @default("line_login") @map("onboarding_step")
+  createdAt            DateTime          @default(now()) @map("created_at")
+  updatedAt            DateTime          @updatedAt @map("updated_at")
+  acceptedTermsAt      DateTime?         @map("accepted_terms_at")
+  acceptedTermsVersion String?           @map("accepted_terms_version")
+  auditLogs            AuditLog[]
+  googleConnection     GoogleConnection?
+  lineConnection       LineConnection?
+  invitesSent          OrgMember[]       @relation("InvitedBy")
+  orgMembers           OrgMember[]
+  ownedOrgs            Organization[]    @relation("OrgOwner")
+  permissions          UserPermission[]
 
   @@map("users")
 }
 
-// ===== LINE CONNECTION (Login + OA Messaging) =====
 model LineConnection {
-  id     String @id @default(uuid())
-  userId String @unique @map("user_id")
-
-  // LINE Login tokens (encrypted)
-  accessToken  String    @map("access_token")
-  refreshToken String?   @map("refresh_token")
-  tokenExpiry  DateTime? @map("token_expiry")
-  scopes       String[]  @default([])
-
-  // LINE OA status
-  isFollowingOA Boolean @default(false) @map("is_following_oa")
+  id            String    @id @default(uuid())
+  userId        String    @unique @map("user_id")
+  accessToken   String    @map("access_token")
+  refreshToken  String?   @map("refresh_token")
+  tokenExpiry   DateTime? @map("token_expiry")
+  scopes        String[]  @default([])
+  isFollowingOA Boolean   @default(false) @map("is_following_oa")
   oaLinkedAt    DateTime? @map("oa_linked_at")
-
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("line_connections")
 }
 
-// ===== GOOGLE OAUTH CONNECTION =====
 model GoogleConnection {
-  id          String    @id @default(uuid())
-  userId      String    @unique @map("user_id")
-  googleEmail String    @map("google_email")
-  accessToken String    @map("access_token") // encrypted
-  refreshToken String   @map("refresh_token") // encrypted
-  tokenExpiry DateTime? @map("token_expiry")
-  scopes      String[]  @default([])
-  isActive    Boolean   @default(true) @map("is_active")
-
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id           String    @id @default(uuid())
+  userId       String    @unique @map("user_id")
+  googleEmail  String    @map("google_email")
+  accessToken  String    @map("access_token")
+  refreshToken String    @map("refresh_token")
+  tokenExpiry  DateTime? @map("token_expiry")
+  scopes       String[]  @default([])
+  isActive     Boolean   @default(true) @map("is_active")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("google_connections")
 }
 
-// ===== ORGANIZATION =====
 model Organization {
-  id      String @id @default(uuid())
-  name    String
-  slug    String @unique
-  ownerId String @map("owner_id")
-
-  // Business info (กรอกตอน setup company — required)
-  taxId        String  @map("tax_id") // เลขประจำตัวผู้เสียภาษี 13 หลัก
-  branchType   String  @default("HQ") @map("branch_type")   // "HQ" | "Branch"
-  branchNumber String  @default("00000") @map("branch_number") // 5 หลัก: HQ="00000", Branch="00001"+
-  address      String
-  phone        String?
-  logoUrl      String? @map("logo_url")
-
-  // Google resource references (อยู่ใน Drive ของ owner)
-  googleSpreadsheetId String? @map("google_spreadsheet_id")
-  googleDriveFolderId String? @map("google_drive_folder_id")
-  driveReceiptsFolderId String? @map("drive_receipts_folder_id")
-  driveDocumentsFolderId String? @map("drive_documents_folder_id")
-  driveReportsFolderId String? @map("drive_reports_folder_id")
-
-  settings Json @default("{}")
-
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-
-  // Relations
-  owner        User             @relation("OrgOwner", fields: [ownerId], references: [id])
-  members      OrgMember[]
-  permissions  UserPermission[]
-  subscription Subscription?
-  auditLogs    AuditLog[]
-  invitations  Invitation[]
+  id                     String           @id @default(uuid())
+  name                   String
+  slug                   String           @unique
+  ownerId                String           @map("owner_id")
+  taxId                  String           @map("tax_id")
+  address                String
+  phone                  String?
+  logoUrl                String?          @map("logo_url")
+  googleSpreadsheetId    String?          @map("google_spreadsheet_id")
+  googleDriveFolderId    String?          @map("google_drive_folder_id")
+  driveReceiptsFolderId  String?          @map("drive_receipts_folder_id")
+  driveDocumentsFolderId String?          @map("drive_documents_folder_id")
+  driveReportsFolderId   String?          @map("drive_reports_folder_id")
+  settings               Json             @default("{}")
+  createdAt              DateTime         @default(now()) @map("created_at")
+  updatedAt              DateTime         @updatedAt @map("updated_at")
+  branchNumber           String           @default("00000") @map("branch_number")
+  branchType             String           @default("HQ") @map("branch_type")
+  auditLogs              AuditLog[]
+  invitations            Invitation[]
+  members                OrgMember[]
+  owner                  User             @relation("OrgOwner", fields: [ownerId], references: [id])
+  subscription           Subscription?
+  permissions            UserPermission[]
 
   @@map("organizations")
 }
 
-// ===== ORG MEMBERSHIP =====
 model OrgMember {
-  id     String @id @default(uuid())
-  orgId  String @map("org_id")
-  userId String @map("user_id")
-  role   String @default("staff") // admin, manager, accountant, staff
-  status String @default("pending") // active, pending, suspended
-
-  // Event scope (optional): ถ้า set → member เห็นเฉพาะ event ใน list นี้
-  // ถ้าเว้น (empty array) = เห็นทุก event (ตาม permission ปกติ)
-  eventScope String[] @default([]) @map("event_scope")
-
-  invitedById String?   @map("invited_by")
-  joinedAt    DateTime? @map("joined_at")
-  createdAt   DateTime  @default(now()) @map("created_at")
-
-  // Relations
-  org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  invitedBy User?        @relation("InvitedBy", fields: [invitedById], references: [id])
+  id          String       @id @default(uuid())
+  orgId       String       @map("org_id")
+  userId      String       @map("user_id")
+  role        String       @default("staff")
+  status      String       @default("pending")
+  invitedById String?      @map("invited_by")
+  joinedAt    DateTime?    @map("joined_at")
+  createdAt   DateTime     @default(now()) @map("created_at")
+  eventScope  String[]     @default([]) @map("event_scope")
+  invitedBy   User?        @relation("InvitedBy", fields: [invitedById], references: [id])
+  org         Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([orgId, userId])
   @@map("org_members")
 }
 
-// ===== INVITATION (via LINE link) =====
 model Invitation {
-  id     String @id @default(uuid())
-  orgId  String @map("org_id")
-  token  String @unique // random 32-char for /invite/{token}
-
-  displayName String @map("display_name") // ชื่อที่ admin ตั้งให้ (placeholder)
-  role        String @default("staff")
-  eventScope  String[] @default([]) @map("event_scope") // scope ที่ preset ไว้
-  permissions Json? // override (optional custom permissions)
-
-  status    String    @default("pending") // pending, accepted, expired, cancelled
-  expiresAt DateTime  @map("expires_at")
-  acceptedAt DateTime? @map("accepted_at")
-  acceptedByUserId String? @map("accepted_by_user_id")
-
-  invitedById String @map("invited_by")
-
-  createdAt DateTime @default(now()) @map("created_at")
-
-  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  id               String       @id @default(uuid())
+  orgId            String       @map("org_id")
+  token            String       @unique
+  displayName      String       @map("display_name")
+  role             String       @default("staff")
+  eventScope       String[]     @default([]) @map("event_scope")
+  permissions      Json?
+  status           String       @default("pending")
+  expiresAt        DateTime     @map("expires_at")
+  acceptedAt       DateTime?    @map("accepted_at")
+  acceptedByUserId String?      @map("accepted_by_user_id")
+  invitedById      String       @map("invited_by")
+  createdAt        DateTime     @default(now()) @map("created_at")
+  org              Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
 
   @@index([token])
   @@index([orgId, status])
   @@map("invitations")
 }
 
-// ===== USER PERMISSIONS (13 permissions — เหมือน Core 100%) =====
 model UserPermission {
-  id     String @id @default(uuid())
-  orgId  String @map("org_id")
-  userId String @map("user_id")
-
-  manageEvents      Boolean @default(false) @map("manage_events")
-  assignEvents      Boolean @default(false) @map("assign_events")
-  managePayees      Boolean @default(false) @map("manage_payees")
-  manageBanks       Boolean @default(false) @map("manage_banks")
-  updatePayments    Boolean @default(false) @map("update_payments")
-  deletePayments    Boolean @default(false) @map("delete_payments")
-  approvePayments   Boolean @default(false) @map("approve_payments")
-  editPaymentAfterApproval Boolean @default(false) @map("edit_payment_after_approval")
-  viewReports       Boolean @default(false) @map("view_reports")
-  printReports      Boolean @default(false) @map("print_reports")
-  dashboardEvent    Boolean @default(false) @map("dashboard_event")
-  dashboardSummary  Boolean @default(false) @map("dashboard_summary")
-  manageUsers       Boolean @default(false) @map("manage_users")
-  managePermissions Boolean @default(false) @map("manage_permissions")
-
-  isCustom Boolean @default(false) @map("is_custom")
-
-  updatedAt DateTime @updatedAt @map("updated_at")
-
-  org  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  user User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id                       String       @id @default(uuid())
+  orgId                    String       @map("org_id")
+  userId                   String       @map("user_id")
+  manageEvents             Boolean      @default(false) @map("manage_events")
+  assignEvents             Boolean      @default(false) @map("assign_events")
+  managePayees             Boolean      @default(false) @map("manage_payees")
+  manageBanks              Boolean      @default(false) @map("manage_banks")
+  updatePayments           Boolean      @default(false) @map("update_payments")
+  deletePayments           Boolean      @default(false) @map("delete_payments")
+  approvePayments          Boolean      @default(false) @map("approve_payments")
+  viewReports              Boolean      @default(false) @map("view_reports")
+  printReports             Boolean      @default(false) @map("print_reports")
+  dashboardEvent           Boolean      @default(false) @map("dashboard_event")
+  dashboardSummary         Boolean      @default(false) @map("dashboard_summary")
+  manageUsers              Boolean      @default(false) @map("manage_users")
+  managePermissions        Boolean      @default(false) @map("manage_permissions")
+  isCustom                 Boolean      @default(false) @map("is_custom")
+  updatedAt                DateTime     @updatedAt @map("updated_at")
+  editPaymentAfterApproval Boolean      @default(false) @map("edit_payment_after_approval")
+  org                      Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user                     User         @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([orgId, userId])
   @@map("user_permissions")
 }
 
-// ===== SUBSCRIPTION & BILLING =====
 model Subscription {
-  id    String @id @default(uuid())
-  orgId String @unique @map("org_id")
-
-  plan   String @default("free") // free, starter, pro, enterprise
-  status String @default("active") // active, past_due, canceled, trialing
-
-  stripeCustomerId     String? @map("stripe_customer_id")
-  stripeSubscriptionId String? @map("stripe_subscription_id")
-
-  maxMembers  Int @default(2) @map("max_members")
-  maxEvents   Int @default(3) @map("max_events")
-  scanCredits Int @default(8) @map("scan_credits")
-  creditsUsed Int @default(0) @map("credits_used")
-  bonusCredits Int @default(0) @map("bonus_credits")
-
-  billingPeriodStart DateTime? @map("billing_period_start")
-  billingPeriodEnd   DateTime? @map("billing_period_end")
-
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-
-  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  id                   String       @id @default(uuid())
+  orgId                String       @unique @map("org_id")
+  plan                 String       @default("free")
+  status               String       @default("active")
+  stripeCustomerId     String?      @map("stripe_customer_id")
+  stripeSubscriptionId String?      @map("stripe_subscription_id")
+  maxMembers           Int          @default(2) @map("max_members")
+  maxEvents            Int          @default(3) @map("max_events")
+  scanCredits          Int          @default(8) @map("scan_credits")
+  creditsUsed          Int          @default(0) @map("credits_used")
+  bonusCredits         Int          @default(0) @map("bonus_credits")
+  billingPeriodStart   DateTime?    @map("billing_period_start")
+  billingPeriodEnd     DateTime?    @map("billing_period_end")
+  createdAt            DateTime     @default(now()) @map("created_at")
+  updatedAt            DateTime     @updatedAt @map("updated_at")
+  org                  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
 
   @@map("subscriptions")
 }
 
-// ===== AUDIT LOG =====
 model AuditLog {
-  id         String  @id @default(uuid())
-  orgId      String  @map("org_id")
-  userId     String  @map("user_id")
+  id         String       @id @default(uuid())
+  orgId      String       @map("org_id")
+  userId     String       @map("user_id")
   action     String
-  entityType String  @map("entity_type")
-  entityRef  String? @map("entity_ref")
+  entityType String       @map("entity_type")
+  entityRef  String?      @map("entity_ref")
   summary    String?
-
-  createdAt DateTime @default(now()) @map("created_at")
-
-  org  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  user User         @relation(fields: [userId], references: [id])
+  createdAt  DateTime     @default(now()) @map("created_at")
+  org        Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user       User         @relation(fields: [userId], references: [id])
 
   @@index([orgId, createdAt(sort: Desc)])
   @@index([orgId, entityType, entityRef])
   @@map("audit_logs")
 }
 
-// ===== LINE DRAFT (Hybrid Flex OCR pending confirmation) =====
 model LineDraft {
-  id              String   @id @default(uuid())
-  lineUserId      String   @map("line_user_id")
-  userId          String   @map("user_id")
-  orgId           String   @map("org_id")
-  imageMessageId  String   @map("image_message_id") // LINE message id (re-fetch content if needed)
-  mimeType        String   @default("image/jpeg") @map("mime_type")
-  ocrJson         Json     @map("ocr_json")
-  eventId         String?  @map("event_id")          // Selected project (from Quick Reply)
-  eventName       String?  @map("event_name")        // Project name (for display in Flex)
-  driveFileId     String?  @map("drive_file_id")     // Once uploaded to Drive
-  driveFileUrl    String?  @map("drive_file_url")
-  status          String   @default("pending")       // pending | confirmed | cancelled | expired
-  createdAt       DateTime @default(now()) @map("created_at")
-  expiresAt       DateTime @map("expires_at")        // 24h after creation
+  id             String   @id @default(uuid())
+  lineUserId     String   @map("line_user_id")
+  userId         String   @map("user_id")
+  orgId          String   @map("org_id")
+  imageMessageId String   @map("image_message_id")
+  ocrJson        Json     @map("ocr_json")
+  driveFileId    String?  @map("drive_file_id")
+  driveFileUrl   String?  @map("drive_file_url")
+  status         String   @default("pending")
+  createdAt      DateTime @default(now()) @map("created_at")
+  expiresAt      DateTime @map("expires_at")
+  mimeType       String   @default("image/jpeg") @map("mime_type")
+  eventId        String?  @map("event_id")
+  eventName      String?  @map("event_name")
 
   @@index([lineUserId, createdAt(sort: Desc)])
   @@index([userId, status])

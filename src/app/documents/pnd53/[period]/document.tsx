@@ -306,15 +306,14 @@ function BoxRow({ values, groupSize }: { values: string[]; groupSize?: number[] 
 
 function SummaryStyles() {
   return (
-    <style>{`
-      @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap');
+    <style jsx global>{`
       :root { color-scheme: light; }
 
       .print-toolbar {
         position: sticky; top: 0; z-index: 10;
         background: #fff; border-bottom: 1px solid #e2e8f0;
         padding: 12px 24px; display: flex; align-items: center; justify-content: space-between;
-        font-family: 'Sarabun', sans-serif;
+        font-family: 'IBM Plex Sans Thai', 'Sarabun', sans-serif;
       }
       .pt-info { display: flex; align-items: center; gap: 16px; }
       .pt-info strong { font-size: 16px; }
@@ -331,7 +330,7 @@ function SummaryStyles() {
       .pt-btn-link { background: #f8fafc; color: #475569; }
 
       .doc.pnd-summary-doc {
-        font-family: 'Sarabun', sans-serif;
+        font-family: 'IBM Plex Sans Thai', 'Sarabun', sans-serif;
         background: #fff; color: #000;
         width: 210mm; min-height: 297mm;
         padding: 12mm 14mm; margin: 16px auto;

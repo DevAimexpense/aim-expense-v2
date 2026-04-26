@@ -284,16 +284,16 @@ function PND3Row({ seq, row }: { seq: number; row: PND3AttachRow | null }) {
       </tr>
     );
   }
-  const taxBoxes = splitTaxIdBoxes(row.taxId);
-  const branchBoxes = splitBranchBoxes(row.branchLabel);
+  // Row-level: ใช้ text format (กล่อง box เล็กเกินไป — ล้นช่อง)
+  const taxIdDisplay = formatTaxIdText(row.taxId);
+  const branchDisplay = row.branchLabel || "00000";
   return (
     <tr className="data-row">
       <td className="c-seq">{seq}</td>
       <td className="c-taxid">
-        <BoxRow values={taxBoxes} groupSize={[1, 4, 5, 2, 1]} small />
-        <div className="taxid-branch">
-          <span className="muted">สาขา</span>
-          <BoxRow values={branchBoxes} small />
+        <div className="taxid-text">{taxIdDisplay}</div>
+        <div className="taxid-branch-text">
+          <span className="muted">สาขา</span> {branchDisplay}
         </div>
       </td>
       <td className="c-name">
@@ -308,6 +308,13 @@ function PND3Row({ seq, row }: { seq: number; row: PND3AttachRow | null }) {
       <td className="c-cond">{row.condition}</td>
     </tr>
   );
+}
+
+// ----- Format helpers -----
+function formatTaxIdText(taxId: string): string {
+  const d = (taxId || "").replace(/\D/g, "");
+  if (d.length !== 13) return taxId || "—";
+  return `${d[0]}-${d.slice(1, 5)}-${d.slice(5, 10)}-${d.slice(10, 12)}-${d[12]}`;
 }
 
 // ----- Box-row helper (เลขประจำตัว / สาขาที่ — แสดงเป็นกรอบเล็ก) -----
@@ -354,7 +361,7 @@ function BoxRow({
 function EmptyState({ period, monthName, yearTH }: { period: string; monthName: string; yearTH: number }) {
   return (
     <div style={{
-      padding: "3rem 2rem", textAlign: "center", fontFamily: "Sarabun, sans-serif",
+      padding: "3rem 2rem", textAlign: "center", fontFamily: "'IBM Plex Sans Thai', sans-serif",
     }}>
       <h2 style={{ fontSize: "1.25rem", marginBottom: "0.5rem" }}>
         ไม่มีรายการหัก ณ ที่จ่าย (ภงด.3) ในเดือน {monthName} {yearTH}
@@ -370,16 +377,14 @@ function EmptyState({ period, monthName, yearTH }: { period: string; monthName: 
 // ----- CSS -----
 function DocStyles() {
   return (
-    <style>{`
-      @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap');
-
+    <style jsx global>{`
       :root { color-scheme: light; }
 
       .print-toolbar {
         position: sticky; top: 0; z-index: 10;
         background: #fff; border-bottom: 1px solid #e2e8f0;
         padding: 12px 24px; display: flex; align-items: center; justify-content: space-between;
-        font-family: 'Sarabun', sans-serif;
+        font-family: 'IBM Plex Sans Thai', 'Sarabun', sans-serif;
       }
       .pt-info { display: flex; align-items: center; gap: 16px; }
       .pt-info strong { font-size: 16px; }
@@ -396,7 +401,7 @@ function DocStyles() {
       .pt-btn-link { background: #f8fafc; color: #475569; }
 
       .doc.pnd3-attach-doc {
-        font-family: 'Sarabun', sans-serif;
+        font-family: 'IBM Plex Sans Thai', 'Sarabun', sans-serif;
         background: #fff; color: #000;
         width: 297mm;        /* A4 landscape */
         min-height: 210mm;
@@ -484,6 +489,14 @@ function DocStyles() {
       .cell-addr { font-size: 9px; color: #333; }
       .num { font-feature-settings: "tnum"; text-align: right; }
       .taxid-branch { display: flex; align-items: center; gap: 4px; margin-top: 2px; }
+      .taxid-text {
+        font-family: 'Courier New', monospace; font-size: 10px;
+        font-weight: 600; letter-spacing: 0.5px;
+      }
+      .taxid-branch-text {
+        font-family: 'Courier New', monospace; font-size: 9.5px;
+        margin-top: 2px; color: #333;
+      }
 
       /* Footer rows */
       .footer-row td { background: #f8fafc; height: 24px; }
