@@ -3,28 +3,29 @@
 //
 // "รายงานหัก ณ ที่จ่าย" (ภ.ง.ด.3 + ภ.ง.ด.53)
 //
+// The active tab (pnd3 or pnd53) is read from the URL `?tab=` query string.
+// The sidebar already provides two distinct entries — "ภงด.3" and "ภงด.53" —
+// so the page itself does NOT render an in-page tab switcher. It just shows
+// the report for whichever bucket the user landed on. (S19 user request)
+//
 // Layout
 // ------
-//   header   — title + ExportButton (top-right)
+//   header   — title + subtitle (per active tab)
 //   filters  — DateRangePicker + Project SearchableSelect
-//   stats    — 4 StatCards (รายการ / ยอดเงินได้ / ภาษีหัก / ผู้รับเงิน)
-//   tabs     — ภงด.3 (บุคคลธรรมดา) | ภงด.53 (นิติบุคคล)
-//   table    — DataTable for the active bucket
+//   stats    — 4 StatCards for the active tab only
+//   table    — DataTable + Export
 //
 // Data
 // ----
-//   trpc.report.wht({from, to, eventId?})  → returns both pnd3 + pnd53 buckets
-//   trpc.event.list                        → for project filter
+//   trpc.report.wht({from, to, eventId?, type})  → returns only the bucket
+//                                                  matching `type`
+//   trpc.event.list                              → for project filter
 //
 // Notes
 // -----
-//   - status === "paid" only (Revenue Dept files = actual cash-out, not approvals)
-//   - WTHAmount > 0 only — no point listing rows with no withholding
-//   - vendor split by TaxID prefix:
-//       * 13 digits starting with "0" → นิติบุคคล (pnd53)
-//       * else (incl. empty)          → บุคคลธรรมดา (pnd3)
-//   - PDF export per Revenue Dept form 100% is deferred to S20 (needs Org
-//     fields wired from Sheets `Config` tab — TaxID/Address/Branch).
+//   - status === "paid" only (Revenue Dept files = actual cash-out)
+//   - WTHAmount > 0 only
+//   - PDF export per Revenue Dept form 100% is deferred to S20.
 // ===========================================
 
 "use client";
@@ -51,10 +52,21 @@ import {
 
 type WhtTab = "pnd3" | "pnd53";
 
-const TABS: { key: WhtTab; label: string; icon: string; sub: string }[] = [
-  { key: "pnd3", label: "ภงด.3", icon: "👤", sub: "บุคคลธรรมดา" },
-  { key: "pnd53", label: "ภงด.53", icon: "🏢", sub: "นิติบุคคล" },
-];
+const TAB_META: Record<
+  WhtTab,
+  { title: string; sub: string; icon: string }
+> = {
+  pnd3: {
+    title: "รายงาน ภ.ง.ด.3",
+    sub: "หัก ณ ที่จ่าย — บุคคลธรรมดา",
+    icon: "👤",
+  },
+  pnd53: {
+    title: "รายงาน ภ.ง.ด.53",
+    sub: "หัก ณ ที่จ่าย — นิติบุคคล",
+    icon: "🏢",
+  },
+};
 
 type WhtRow = {
   paymentId: string;
@@ -79,21 +91,14 @@ export function WhtClient({ orgName }: { orgName: string }) {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  // ----- Tab state (sync to URL ?tab=pnd3|pnd53) -----
-  const tabFromUrl = searchParams.get("tab") as WhtTab | null;
-  const initialTab: WhtTab =
-    tabFromUrl && TABS.some((t) => t.key === tabFromUrl) ? tabFromUrl : "pnd3";
-  const [tab, setTab] = useState<WhtTab>(initialTab);
-
-  function handleTabChange(next: WhtTab) {
-    setTab(next);
-    const params = new URLSearchParams(searchParams.toString());
-    params.set("tab", next);
-    router.replace(`/reports/wht?${params.toString()}`, { scroll: false });
-  }
+  // ----- Active bucket (driven by sidebar — read-only here) -----
+  // Sidebar links to /reports/wht?tab=pnd3 or ?tab=pnd53. We don't render
+  // an in-page tab switcher — sidebar IS the switcher.
+  const tabFromUrl = searchParams.get("tab");
+  const tab: WhtTab = tabFromUrl === "pnd53" ? "pnd53" : "pnd3";
+  const meta = TAB_META[tab];
 
   // ----- Filters -----
-  // Default: this month + all projects (matches Revenue Dept monthly filing cadence)
   const eventIdFromUrl = searchParams.get("eventId");
   const [range, setRange] = useState<DateRange>(getPresetRange("this-month"));
   const [eventId, setEventId] = useState<string>(eventIdFromUrl || "all");
@@ -117,30 +122,26 @@ export function WhtClient({ orgName }: { orgName: string }) {
   const eventsQuery = trpc.event.list.useQuery();
   const events = eventsQuery.data || [];
 
+  // Pass `type` so the procedure only ships the bucket we need
   const reportQuery = trpc.report.wht.useQuery({
     from: fromIso,
     to: toIso,
     eventId: eventId === "all" ? undefined : eventId,
+    type: tab,
   });
 
-  const overallStats = reportQuery.data?.stats ?? {
+  const bucket =
+    tab === "pnd3"
+      ? reportQuery.data?.pnd3
+      : reportQuery.data?.pnd53;
+
+  const stats = bucket?.stats ?? {
     totalCount: 0,
     totalIncome: 0,
     totalWHT: 0,
     payeeCount: 0,
   };
-  const pnd3 = reportQuery.data?.pnd3 ?? {
-    stats: { totalCount: 0, totalIncome: 0, totalWHT: 0, payeeCount: 0 },
-    rows: [] as WhtRow[],
-  };
-  const pnd53 = reportQuery.data?.pnd53 ?? {
-    stats: { totalCount: 0, totalIncome: 0, totalWHT: 0, payeeCount: 0 },
-    rows: [] as WhtRow[],
-  };
-
-  // Active bucket
-  const activeRows: WhtRow[] = tab === "pnd3" ? pnd3.rows : pnd53.rows;
-  const activeStats = tab === "pnd3" ? pnd3.stats : pnd53.stats;
+  const rows: WhtRow[] = bucket?.rows ?? [];
 
   // ===== DataTable columns — mirror Revenue Dept ใบแนบ ภงด.3/53 layout =====
   const columns = useMemo<ColumnDef<WhtRow, unknown>[]>(
@@ -271,7 +272,6 @@ export function WhtClient({ orgName }: { orgName: string }) {
   );
 
   // ===== Export columns — mirrors ใบแนบ ภงด.3/53 spec =====
-  // (PDF export per gov form 100% is deferred to S20; CSV/XLSX uses these columns.)
   const exportColumns = useMemo<ExportColumn<WhtRow>[]>(
     () => [
       {
@@ -310,16 +310,17 @@ export function WhtClient({ orgName }: { orgName: string }) {
     [],
   );
 
-  const tabLabel = TABS.find((t) => t.key === tab);
-
   return (
     <div className="app-page">
       {/* Header */}
       <div className="app-page-header">
         <div>
-          <h1 className="app-page-title">📊 รายงานหัก ณ ที่จ่าย</h1>
+          <h1 className="app-page-title">
+            {meta.icon} {meta.title}
+          </h1>
           <p className="app-page-subtitle">
-            {orgName} • {formatThaiDate(fromIso)} – {formatThaiDate(toIso)}
+            {orgName} • {meta.sub} • {formatThaiDate(fromIso)} –{" "}
+            {formatThaiDate(toIso)}
             {" • "}
             <span style={{ color: "#94a3b8" }}>
               เฉพาะรายการที่จ่ายแล้ว (paid)
@@ -354,74 +355,40 @@ export function WhtClient({ orgName }: { orgName: string }) {
         )}
       </div>
 
-      {/* Stat cards (overall — sum of both buckets) */}
+      {/* Stat cards (active bucket only) */}
       <div className="app-stats-grid">
         <StatCard
           color="blue"
           icon="📋"
-          label="รายการรวม"
-          value={overallStats.totalCount.toLocaleString("th-TH")}
-          sub={`ภงด.3: ${pnd3.stats.totalCount.toLocaleString(
-            "th-TH",
-          )} • ภงด.53: ${pnd53.stats.totalCount.toLocaleString("th-TH")}`}
+          label="จำนวนรายการ"
+          value={stats.totalCount.toLocaleString("th-TH")}
+          sub={
+            tab === "pnd3"
+              ? "รายการบุคคลธรรมดา"
+              : "รายการนิติบุคคล"
+          }
         />
         <StatCard
           color="violet"
           icon="💵"
           label="ยอดเงินได้รวม"
-          value={`฿${formatTHB(overallStats.totalIncome)}`}
+          value={`฿${formatTHB(stats.totalIncome)}`}
           sub="ก่อนหักภาษี ณ ที่จ่าย"
         />
         <StatCard
           color="green"
           icon="🧾"
-          label="ภาษีหัก ณ ที่จ่ายรวม"
-          value={`฿${formatTHB(overallStats.totalWHT)}`}
+          label="ภาษีหัก ณ ที่จ่าย"
+          value={`฿${formatTHB(stats.totalWHT)}`}
           sub="นำส่งสรรพากร"
         />
         <StatCard
           color="amber"
           icon="👥"
           label="ผู้รับเงิน (unique)"
-          value={overallStats.payeeCount.toLocaleString("th-TH")}
+          value={stats.payeeCount.toLocaleString("th-TH")}
           sub="นับซ้ำกันไม่ได้"
         />
-      </div>
-
-      {/* Tabs */}
-      <div className="app-tabs" role="tablist">
-        {TABS.map((t) => {
-          const count =
-            t.key === "pnd3" ? pnd3.stats.totalCount : pnd53.stats.totalCount;
-          const wht =
-            t.key === "pnd3" ? pnd3.stats.totalWHT : pnd53.stats.totalWHT;
-          return (
-            <button
-              key={t.key}
-              role="tab"
-              aria-selected={tab === t.key}
-              className={`app-tab ${tab === t.key ? "app-tab-active" : ""}`}
-              onClick={() => handleTabChange(t.key)}
-            >
-              <span>{t.icon}</span>
-              <span>
-                {t.label}{" "}
-                <span style={{ fontSize: "0.75rem", color: "#94a3b8" }}>
-                  ({t.sub})
-                </span>
-              </span>
-              <span
-                style={{
-                  marginLeft: "0.5rem",
-                  fontSize: "0.75rem",
-                  color: tab === t.key ? "inherit" : "#94a3b8",
-                }}
-              >
-                {count.toLocaleString("th-TH")} รายการ • ฿{formatTHB(wht)}
-              </span>
-            </button>
-          );
-        })}
       </div>
 
       {/* PDF export note (S20 deliverable) */}
@@ -437,12 +404,12 @@ export function WhtClient({ orgName }: { orgName: string }) {
         }}
       >
         ℹ️ <strong>หมายเหตุ:</strong> Export PDF ตามฟอร์มกรมสรรพากร 100%
-        (ใบแนบ + ใบสรุป {tabLabel?.label}) จะเปิดใช้งานใน Session
+        (ใบแนบ + ใบสรุป {meta.title}) จะเปิดใช้งานใน Session
         ถัดไป (ต้องการ TaxID + ที่อยู่บริษัทจาก Google Sheet ก่อน). ตอนนี้
         รองรับ <strong>CSV / XLSX</strong> ที่ครบ column ตามฟอร์มแล้ว.
       </div>
 
-      {/* Active table + export */}
+      {/* Table + export */}
       <div
         style={{
           display: "flex",
@@ -452,17 +419,17 @@ export function WhtClient({ orgName }: { orgName: string }) {
         }}
       >
         <p style={{ fontSize: "0.875rem", color: "#475569", margin: 0 }}>
-          แสดง <strong>{activeRows.length.toLocaleString("th-TH")}</strong>{" "}
-          รายการ • ภาษีหักรวม{" "}
+          แสดง <strong>{rows.length.toLocaleString("th-TH")}</strong> รายการ •
+          ภาษีหักรวม{" "}
           <strong style={{ color: "#0f766e" }}>
-            ฿{formatTHB(activeStats.totalWHT)}
+            ฿{formatTHB(stats.totalWHT)}
           </strong>
         </p>
         <ExportButton
-          data={activeRows}
+          data={rows}
           columns={exportColumns}
           filename={`wht-${tab}_${fromIso}_${toIso}`}
-          pdfTitle={`รายงาน${tabLabel?.label} ${formatThaiDate(
+          pdfTitle={`${meta.title} ${formatThaiDate(
             fromIso,
           )} – ${formatThaiDate(toIso)}`}
           pdfOrientation="landscape"
@@ -471,7 +438,7 @@ export function WhtClient({ orgName }: { orgName: string }) {
       </div>
       <DataTable<WhtRow>
         columns={columns}
-        data={activeRows}
+        data={rows}
         pageSize={25}
         searchable
         searchPlaceholder="ค้นหาเลขผู้เสียภาษี / ชื่อ / โปรเจกต์..."
