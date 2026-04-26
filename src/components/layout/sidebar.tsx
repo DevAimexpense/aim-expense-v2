@@ -42,7 +42,7 @@ const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
-    label: "ค่าใช้จ่าย",
+    label: "รายจ่าย",
     items: [
       {
         label: "ตั้งเบิก",
@@ -62,10 +62,16 @@ const NAV_GROUPS: NavGroup[] = [
         permission: "approvePayments",
       },
       {
-        label: "การเตรียมจ่าย",
+        label: "เตรียมการจ่าย",
         href: "/payment-prep",
         icon: "💰",
         permission: "approvePayments",
+      },
+      {
+        label: "เคลียร์งบ",
+        href: "/reports/clearance",
+        icon: "📑",
+        permission: "viewReports",
       },
       {
         label: "เอกสาร / ใบเสร็จ",
@@ -121,26 +127,20 @@ const NAV_GROUPS: NavGroup[] = [
         permission: "viewReports",
       },
       {
-        label: "เคลียร์งบ",
-        href: "/reports/clearance",
-        icon: "📑",
-        permission: "viewReports",
-      },
-      {
-        label: "ชำระรายสัปดาห์",
-        href: "/reports/weekly-payment",
-        icon: "💰",
-        permission: "viewReports",
-      },
-      {
-        label: "รายงานภาษี (ภ.พ.30)",
+        label: "รายงาน ภพ.30",
         href: "/reports/vat",
         icon: "📈",
         permission: "viewReports",
       },
       {
-        label: "รายงานหัก ณ ที่จ่าย",
-        href: "/reports/wth",
+        label: "รายงาน ภงด.3",
+        href: "/reports/wht?tab=pnd3",
+        icon: "📊",
+        permission: "viewReports",
+      },
+      {
+        label: "รายงาน ภงด.53",
+        href: "/reports/wht?tab=pnd53",
         icon: "📊",
         permission: "viewReports",
       },

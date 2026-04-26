@@ -1,14 +1,21 @@
 # Session 18 → Session 19 — Handoff
 
 > **Created:** 2026-04-26 (end of Session 18)
-> **Reason:** Cleanup ไฟล์ค้าง 6 sessions + 12C Weekly Payment + Bank CSV (Phase 4 sub-session) เสร็จ + type check ผ่าน → ปิด session ก่อน context หมด เพื่อเริ่ม sub-session ที่เหลือ (12E / 12B) ใน fresh context
+> **Reason:** Cleanup + 12C Weekly Payment + Sidebar restructure (Section รายจ่าย + รายงาน) เสร็จ + type check ผ่าน → ปิด session
 > **Repo:** `~/Code/Aim Expense V2/aim-expense`
 > **Type check:** ✅ 0 errors
 > **Smoke test:** ⏳ ยังไม่ได้ test บน dev/Vercel — รอพี่ confirm
 > **Commits ใน S18:**
->   - `117fede` — perf(reports): combined query + defensive fallback + skip ensureAllTabsExist (S17 ที่ค้าง — push ต้น S18)
->   - `(TBD)` — chore(cleanup): remove dead files webhook/line + pdf-to-png-server + wth-cert (stale 6 sessions, S18) ✅ pushed แล้ว
->   - `(TBD)` — feat(reports): /reports/weekly-payment + Bank CSV export (12C, S18) ⚠️ พี่กำลังจะ commit
+>   - `117fede` — perf(reports): combined query + defensive fallback + skip ensureAllTabsExist (S17 ที่ค้าง — push ต้น S18) ✅
+>   - `c79f254` — chore(cleanup): remove dead files webhook/line + pdf-to-png-server + wth-cert (stale 6 sessions, S18) ✅
+>   - `e9ba6e8` — feat(reports): /reports/weekly-payment + Bank CSV export (12C, S18) ✅
+>   - `(TBD)` — chore(sidebar): restructure to Section รายจ่าย + ภงด.3/53 + remove duplicate weekly-payment menu ⚠️ พี่กำลังจะ commit
+>
+> **🔴 IMPORTANT — Sidebar restructure ใน S18 รอบ 2:**
+> หลัง commit `e9ba6e8` พี่ point ออกว่า "ชำระรายสัปดาห์" ที่เพิ่งเพิ่มใน sidebar **ซ้ำซ้อนกับ `/payment-prep` เดิม** (ซึ่งเป็น workflow page ที่ครบกว่ามาก: per-bank tabs + Mark paid batch + Excel export). พี่ขอ:
+> - ลบเมนู "ชำระรายสัปดาห์" ออกจาก sidebar
+> - **เก็บไฟล์ /reports/weekly-payment + bank-csv.ts ไว้** เป็น orphan code (สามารถใช้เป็น report view-only ในอนาคต — ไม่มี sidebar link แต่ accessible ผ่าน URL)
+> - Restructure sidebar ใหม่ (รายละเอียดด้านล่าง)
 
 ---
 
@@ -74,13 +81,38 @@
 
 **Sidebar:** เพิ่ม nav item "ชำระรายสัปดาห์" → `/reports/weekly-payment` (icon 💰, permission `viewReports`)
 
-### 3️⃣ ที่ยังไม่ได้ทำใน S18 (เก็บไว้ S19+)
+### 3️⃣ Sidebar Restructure (รอบ 2 — หลัง 12C commit) — พี่ขอแก้
+
+**Section "รายจ่าย" (เปลี่ยนชื่อจาก "ค่าใช้จ่าย"):**
+1. ตั้งเบิก → /payments
+2. บันทึกค่าใช้จ่าย → /expenses
+3. อนุมัติรายการ → /approvals
+4. **เตรียมการจ่าย** → /payment-prep (เปลี่ยน label จาก "การเตรียมจ่าย")
+5. **เคลียร์งบ** → /reports/clearance ✨ (ย้ายมาจาก Section "รายงาน")
+6. เอกสาร / ใบเสร็จ → /documents
+
+**Section "รายงาน":**
+1. ภาพรวมรายจ่าย → /reports
+2. **รายงาน ภพ.30** → /reports/vat (เดิม "รายงานภาษี (ภ.พ.30)" — เปลี่ยน label)
+3. **รายงาน ภงด.3** ✨ → /reports/wht?tab=pnd3 (NEW dead link — รอ S19+ implement)
+4. **รายงาน ภงด.53** ✨ → /reports/wht?tab=pnd53 (NEW dead link — รอ S19+ implement)
+- ~~เคลียร์งบ~~ → ย้ายไป Section "รายจ่าย"
+- ~~ชำระรายสัปดาห์~~ → ลบ (ซ้ำซ้อนกับ /payment-prep)
+- ~~รายงานหัก ณ ที่จ่าย~~ → ลบ (split เป็น ภงด.3 + ภงด.53)
+
+### 4️⃣ ที่ยังไม่ได้ทำใน S18 (เก็บไว้ S19+)
 
 - ❌ ลบหน้าเก่า `/reports/expense-summary` + `/reports/by-project` + procedures `expenseSummary/byProject/byVendor`
   - **เหตุผล:** S17 handoff แนะนำว่า "ถ้า unified ใช้สเถียรแล้ว 1-2 สัปดาห์" — ตอนนี้เพิ่ง deploy 0 วัน
   - **ทำใน S20+** หลัง unified เสถียร 1-2 สัปดาห์
+- ❌ Implement `/reports/wht` page + tabs (pnd3, pnd53) — **NEW priority** ตามที่พี่ขอ
+- ❌ Implement `/reports/vat` page (ภ.พ.30) — dead link มาตั้งแต่ก่อน S18
 - ❌ Optimize เพิ่ม: light `event.list` (ไม่โหลด payments) — optional ถ้า test แล้วช้า
-- ❌ Smoke test 12C บน dev/Vercel — รอพี่ test
+- ❌ Smoke test 12C + sidebar restructure บน dev/Vercel — รอพี่ test
+- ❌ ตัดสินใจอนาคตของ `/reports/weekly-payment` (orphan page):
+  - **Option A:** ใช้เป็น "report view-only" คู่กับ `/payment-prep` (workflow) — กลับมาเปิด sidebar ภายหลัง
+  - **Option B:** ลบทิ้ง (page + procedure + bank-csv.ts) — ถ้าตัดสินใจไม่ใช้
+  - **Option C:** Merge feature เด่น (ISO week grouping) เข้า `/payment-prep`
 
 ---
 
@@ -89,17 +121,14 @@
 | Hash | Subject | Pushed |
 |------|---------|--------|
 | `117fede` | perf(reports): combined query + defensive fallback + skip ensureAllTabsExist (S17) | ✅ pushed (ต้น S18) |
-| TBD | chore(cleanup): remove dead files webhook/line + pdf-to-png-server + wth-cert (stale 6 sessions, S18) | ✅ pushed |
-| TBD | feat(reports): /reports/weekly-payment + Bank CSV export (12C, S18) | ⚠️ พี่กำลังจะ commit |
+| `c79f254` | chore(cleanup): remove dead files webhook/line + pdf-to-png-server + wth-cert (stale 6 sessions, S18) | ✅ pushed |
+| `e9ba6e8` | feat(reports): /reports/weekly-payment + Bank CSV export (12C, S18) | ✅ pushed |
+| TBD | chore(sidebar): restructure to Section รายจ่าย + ภงด.3/53 + remove duplicate weekly-payment menu (S18) | ⚠️ พี่กำลังจะ commit |
 
-### Working tree ค้างใน Session 18 (ก่อน commit)
+### Working tree ค้างใน Session 18 (ก่อน commit รอบ 4)
 ```
-M  src/components/layout/sidebar.tsx                              (+ "ชำระรายสัปดาห์" nav)
-M  src/server/routers/report.router.ts                            (+ weeklyPayment procedure ~250 lines)
-?? src/app/(app)/reports/weekly-payment/page.tsx                  (NEW server entry)
-?? src/app/(app)/reports/weekly-payment/weekly-payment-client.tsx (NEW client ~515 lines)
-?? src/lib/utils/bank-csv.ts                                      (NEW helper ~140 lines)
-?? session18/handoff/HANDOFF_2026-04-26_END_CLEANUP-WEEKLY.md     (NEW this file)
+M  src/components/layout/sidebar.tsx              (sidebar restructure)
+M  session18/handoff/HANDOFF_2026-04-26_END_CLEANUP-WEEKLY.md  (update handoff)
 ```
 
 ### Commands ที่พี่ต้องรันก่อนปิด S18:
@@ -107,7 +136,7 @@ M  src/server/routers/report.router.ts                            (+ weeklyPayme
 cd ~/Code/Aim\ Expense\ V2/aim-expense
 rm -f .git/index.lock
 git add -A
-git commit -m "feat(reports): /reports/weekly-payment + Bank CSV export (12C, S18)"
+git commit -m "chore(sidebar): restructure to Section รายจ่าย + ภงด.3/53 + remove duplicate weekly-payment menu (S18)"
 git push
 ```
 
@@ -128,13 +157,19 @@ git push
 
 ### ลำดับแนะนำ (เอม subjective):
 
-1. 🚀 **12E — Inactive Payees + Audit Logs UI** — admin tools, ขนาดกลาง — ทำต่อจาก S18 ได้
-2. 🚀 **Bank CSV — KBank/SCB specific format** — ถ้าพี่ส่ง spec/sample ของ KBank Bulk Payment + SCB Business Net Cash Management มา → เปลี่ยน generic format เป็น bank-specific
-3. 🚀 **12B — Dashboard role-specific** (ใหญ่สุด — ทำหลังสุด)
-4. 🧹 **Cleanup รอบที่ 2** (~Session 20-21):
+1. 🚀 **/reports/wht (ภงด.3 + ภงด.53)** — สำคัญที่สุด — sidebar dead link 2 อันรอ implement (พี่ขอใหม่ S18)
+   - หน้า /reports/wht + 2 tabs (pnd3 + pnd53) — ต่างกันที่ vendor type (บุคคลธรรมดา vs นิติบุคคล)
+   - Procedure ใน `report.router.ts`: `report.wht` (filter by WTH > 0 + group by vendor type จาก Payee.TaxID length หรือ Payee.IsVAT?)
+   - Export CSV/XLSX ตาม spec ภงด.3/53 (รอพี่ confirm spec)
+2. 🚀 **/reports/vat (ภพ.30)** — sidebar dead link เก่า — implement หลัง wth
+3. 🚀 **12E — Inactive Payees + Audit Logs UI** — admin tools, ขนาดกลาง
+4. 🚀 **Bank CSV — KBank/SCB specific format** — ถ้าพี่ส่ง spec/sample มา → เปลี่ยน generic format เป็น bank-specific (เก็บไว้ใน /reports/weekly-payment ที่เป็น orphan ตอนนี้ หรือย้ายไป /payment-prep)
+5. 🚀 **12B — Dashboard role-specific** (ใหญ่สุด — ทำหลังสุด)
+6. 🧹 **Cleanup รอบที่ 2** (~Session 20-21):
    - ลบ `/reports/expense-summary` + `/reports/by-project` (page + client)
    - ลบ procedures `expenseSummary` + `byProject` + `byVendor` ใน `report.router.ts`
    - เงื่อนไข: หลัง unified สเถียร 1-2 สัปดาห์ + พี่ confirm
+7. 🤔 **ตัดสินใจอนาคตของ /reports/weekly-payment** (orphan) — ใช้ต่อ / ลบ / merge เข้า /payment-prep
 
 ---
 
@@ -220,9 +255,10 @@ Org:
 ```
 สวัสดีค่ะเอม นี่คือ Session 19 ต่อจาก Session 18
 📂 Folder: ~/Code/Aim Expense V2/aim-expense
-📦 Latest commit: feat(reports): /reports/weekly-payment + Bank CSV export (12C, S18) บน main + push แล้ว
-🎉 ผลงาน S18: Cleanup 4 ไฟล์ค้าง 6 sessions (-1098 บรรทัด) + 12C Weekly Payment + Bank CSV ✅
-⏳ ยังไม่ได้ test 12C — พี่จะ test ก่อน
+📦 Latest commit: chore(sidebar): restructure to Section รายจ่าย + ภงด.3/53 (S18) บน main + push แล้ว
+🎉 ผลงาน S18: Cleanup 6 sessions stale (-1098 บรรทัด) + 12C Weekly Payment (orphan) + Sidebar restructure ใหม่
+⚠️ /reports/weekly-payment เป็น orphan page (code ค้าง บน main แต่ไม่มี sidebar link) — รอตัดสินใจ
+⚠️ Sidebar dead links เพิ่ม: /reports/vat + /reports/wht?tab=pnd3 + /reports/wht?tab=pnd53
 
 🔴 อ่านก่อนเริ่ม (ตามลำดับ):
 1. SYSTEM_REQUIREMENTS.md  ← Single Source of Truth (4 core principles)
@@ -231,17 +267,18 @@ Org:
 
 🎯 งาน Session 19 (เลือก 1 sub-session ใหญ่):
 
-🚀 ตัวเลือก:
-- 12E Inactive Payees + Audit Logs UI (กลาง — admin tools)
-- Bank CSV bank-specific (เล็ก — ถ้าพี่ส่ง KBank/SCB spec มา)
-- 12B Dashboard role-specific (ใหญ่สุด — ทำทีหลังดีกว่า)
+🚀 ตัวเลือก (priority):
+- /reports/wht (ภงด.3 + ภงด.53) — สำคัญที่สุด — sidebar dead link รอ implement (พี่ขอใหม่)
+- /reports/vat (ภพ.30) — dead link เก่า
+- 12E Inactive Payees + Audit Logs UI (admin tools)
+- Bank CSV bank-specific KBank/SCB (ถ้าพี่ส่ง spec)
+- 12B Dashboard role-specific (ใหญ่สุด)
 
-🧹 Optional (ถ้า context เหลือ):
-- ลบหน้า/procedures /reports เก่า (เงื่อนไข: หลัง unified สเถียร 1-2 สัปดาห์)
-- Optimize: light event.list (ไม่โหลด payments)
+🤔 ตัดสินใจ:
+- /reports/weekly-payment orphan — ใช้ต่อ / ลบ / merge เข้า /payment-prep?
 
 📋 ขั้นตอนแนะนำ:
-1. AskUserQuestion ก่อนเริ่ม: confirm sub-session + scope
+1. AskUserQuestion ก่อนเริ่ม: confirm sub-session + scope + decision เรื่อง weekly-payment
 2. ทำตาม priority + type check ทุกครั้ง
 3. แจ้งพี่ commit message → พี่ push เอง
 
