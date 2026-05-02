@@ -356,4 +356,253 @@ export const userRouter = router({
 
       return { success: true, orgId: inv.orgId };
     }),
+
+  // ===========================================
+  // Permission Management (used by /permissions page)
+  //
+  // /users handles role + eventScope + invite/remove (high-level).
+  // /permissions handles per-key overrides (granular). They share the
+  // same underlying tables (OrgMember + UserPermission) but expose
+  // different facets — these procedures are the granular API.
+  // ===========================================
+
+  /**
+   * List members with their effective permissions (for the permissions grid).
+   *
+   * For each member we return:
+   *   - role (default permission baseline)
+   *   - permissions: the user's actual UserPermission row (or role default if missing)
+   *   - isCustom: did anyone tweak this away from the role default?
+   *
+   * Sort: admins first → managers → accountants → staff, then by name.
+   */
+  listPermissions: permissionProcedure("managePermissions").query(
+    async ({ ctx }) => {
+      const members = await prisma.orgMember.findMany({
+        where: { orgId: ctx.org.orgId, status: "active" },
+        include: {
+          user: {
+            select: {
+              id: true,
+              lineDisplayName: true,
+              linePictureUrl: true,
+              fullName: true,
+              email: true,
+              lineEmail: true,
+            },
+          },
+        },
+        orderBy: { createdAt: "asc" },
+      });
+
+      const userIds = members.map((m) => m.userId);
+      const permRows = await prisma.userPermission.findMany({
+        where: { orgId: ctx.org.orgId, userId: { in: userIds } },
+      });
+      const permByUser = new Map(permRows.map((p) => [p.userId, p]));
+
+      // Get owner so the UI can disable the toggle for them
+      const org = await prisma.organization.findUnique({
+        where: { id: ctx.org.orgId },
+        select: { ownerId: true },
+      });
+      const ownerId = org?.ownerId;
+
+      const ROLE_ORDER: Record<string, number> = {
+        admin: 0,
+        manager: 1,
+        accountant: 2,
+        staff: 3,
+      };
+
+      const rows = members.map((m) => {
+        const role = m.role as OrgRole;
+        const stored = permByUser.get(m.userId);
+        const fallback = DEFAULT_PERMISSIONS[role];
+
+        // Build a flat object of just the 14 permission booleans
+        // (so the UI doesn't have to know the column structure)
+        const perms = {
+          manageEvents: stored?.manageEvents ?? fallback.manageEvents,
+          assignEvents: stored?.assignEvents ?? fallback.assignEvents,
+          managePayees: stored?.managePayees ?? fallback.managePayees,
+          manageBanks: stored?.manageBanks ?? fallback.manageBanks,
+          updatePayments: stored?.updatePayments ?? fallback.updatePayments,
+          deletePayments: stored?.deletePayments ?? fallback.deletePayments,
+          approvePayments: stored?.approvePayments ?? fallback.approvePayments,
+          editPaymentAfterApproval:
+            stored?.editPaymentAfterApproval ?? fallback.editPaymentAfterApproval,
+          viewReports: stored?.viewReports ?? fallback.viewReports,
+          printReports: stored?.printReports ?? fallback.printReports,
+          dashboardEvent: stored?.dashboardEvent ?? fallback.dashboardEvent,
+          dashboardSummary: stored?.dashboardSummary ?? fallback.dashboardSummary,
+          manageUsers: stored?.manageUsers ?? fallback.manageUsers,
+          managePermissions:
+            stored?.managePermissions ?? fallback.managePermissions,
+        };
+
+        return {
+          memberId: m.id,
+          userId: m.userId,
+          role,
+          displayName: m.user.lineDisplayName || m.user.fullName || "—",
+          email: m.user.email || m.user.lineEmail || "",
+          avatarUrl: m.user.linePictureUrl,
+          isOwner: m.userId === ownerId,
+          isSelf: m.userId === ctx.session.userId,
+          isCustom: stored?.isCustom ?? false,
+          permissions: perms,
+        };
+      });
+
+      rows.sort((a, b) => {
+        const ra = ROLE_ORDER[a.role] ?? 99;
+        const rb = ROLE_ORDER[b.role] ?? 99;
+        if (ra !== rb) return ra - rb;
+        return a.displayName.localeCompare(b.displayName, "th");
+      });
+
+      return { members: rows };
+    },
+  ),
+
+  /**
+   * Toggle a single permission key for a member.
+   * Sets isCustom=true so the role-default reset can flip it back.
+   *
+   * Guards:
+   *   - Cannot edit your own permissions (ทำให้ตัวเองหลุดจาก managePermissions ได้)
+   *   - Cannot edit org owner's permissions
+   *   - Member must belong to this org
+   */
+  updatePermission: permissionProcedure("managePermissions")
+    .input(
+      z.object({
+        memberId: z.string(),
+        key: z.enum([
+          "manageEvents",
+          "assignEvents",
+          "managePayees",
+          "manageBanks",
+          "updatePayments",
+          "deletePayments",
+          "approvePayments",
+          "editPaymentAfterApproval",
+          "viewReports",
+          "printReports",
+          "dashboardEvent",
+          "dashboardSummary",
+          "manageUsers",
+          "managePermissions",
+        ]),
+        value: z.boolean(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const member = await prisma.orgMember.findFirst({
+        where: { id: input.memberId, orgId: ctx.org.orgId },
+      });
+      if (!member)
+        throw new TRPCError({ code: "NOT_FOUND", message: "ไม่พบสมาชิก" });
+
+      if (member.userId === ctx.session.userId) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "ไม่สามารถแก้ไขสิทธิ์ของตัวเองได้",
+        });
+      }
+
+      const org = await prisma.organization.findUnique({
+        where: { id: ctx.org.orgId },
+        select: { ownerId: true },
+      });
+      if (org?.ownerId === member.userId) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "ไม่สามารถแก้ไขสิทธิ์ของเจ้าขององค์กรได้",
+        });
+      }
+
+      // Upsert: keep existing values, just flip this one key + mark custom
+      const role = member.role as OrgRole;
+      const fallback = DEFAULT_PERMISSIONS[role];
+
+      await prisma.userPermission.upsert({
+        where: {
+          orgId_userId: { orgId: ctx.org.orgId, userId: member.userId },
+        },
+        create: {
+          orgId: ctx.org.orgId,
+          userId: member.userId,
+          ...fallback,
+          [input.key]: input.value,
+          isCustom: true,
+        },
+        update: {
+          [input.key]: input.value,
+          isCustom: true,
+        },
+      });
+
+      await prisma.auditLog.create({
+        data: {
+          orgId: ctx.org.orgId,
+          userId: ctx.session.userId,
+          action: "update_permission",
+          entityType: "user",
+          entityRef: member.userId,
+          summary: `แก้ไขสิทธิ์ "${input.key}" → ${input.value ? "ON" : "OFF"}`,
+        },
+      });
+
+      return { success: true };
+    }),
+
+  /**
+   * Reset a member's permissions to the role default (clear isCustom).
+   */
+  resetPermissions: permissionProcedure("managePermissions")
+    .input(z.object({ memberId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const member = await prisma.orgMember.findFirst({
+        where: { id: input.memberId, orgId: ctx.org.orgId },
+      });
+      if (!member)
+        throw new TRPCError({ code: "NOT_FOUND", message: "ไม่พบสมาชิก" });
+
+      if (member.userId === ctx.session.userId) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "ไม่สามารถรีเซ็ตสิทธิ์ของตัวเองได้",
+        });
+      }
+
+      const role = member.role as OrgRole;
+      const fallback = DEFAULT_PERMISSIONS[role];
+
+      await prisma.userPermission.upsert({
+        where: {
+          orgId_userId: { orgId: ctx.org.orgId, userId: member.userId },
+        },
+        create: {
+          orgId: ctx.org.orgId,
+          userId: member.userId,
+          ...fallback,
+        },
+        update: { ...fallback, isCustom: false },
+      });
+
+      await prisma.auditLog.create({
+        data: {
+          orgId: ctx.org.orgId,
+          userId: ctx.session.userId,
+          action: "reset_permissions",
+          entityType: "user",
+          entityRef: member.userId,
+          summary: `รีเซ็ตสิทธิ์เป็น default ของ role ${role}`,
+        },
+      });
+
+      return { success: true };
+    }),
 });

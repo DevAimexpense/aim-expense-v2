@@ -1,100 +1,105 @@
-# Session 21 → Session 22 — Handoff
+# Session 21 → Session 22 — Handoff (FINAL)
 
 > **Created:** 2026-05-02 (end of Session 21)
-> **Reason:** /reports/vat (sidebar dead link เก่า) implement เสร็จแล้วในส่วน "รายงานภาษีซื้อ" (Input VAT) — ฝั่งภาษีขายเก็บไว้ทำคู่กับ sales/quotation module ในอนาคต
+> **Reason:** S21 multi-feature session — VAT report + Google settings + Permissions editor + critical OAuth callback bug fix
 > **Repo:** `~/Code/Aim Expense V2/aim-expense`
 > **Type check:** ✅ 0 errors
-> **Smoke test:** 🟡 ยังไม่ได้ test browser (ผม sandbox start dev server ไม่ได้) — พี่ทำตอนเปิดเครื่อง
+> **Smoke test:** 🟢 /reports/vat + /settings/google passed by user. /permissions ยังไม่ได้ test
 
 ---
 
 ## 🔴 อ่านก่อนเริ่มทำงานทุกครั้ง
 
 1. **`SYSTEM_REQUIREMENTS.md`** ← Single Source of Truth (4 principles)
-2. **ไฟล์นี้** ← what's next (Session 22)
+2. **ไฟล์นี้** ← S21 summary + S22 next
 3. **`session20/handoff/HANDOFF_2026-04-26_END_WHT-PHASE2.md`** ← S20 context (WHT polish ที่ค้าง)
 
 ---
 
 ## 🎯 ที่ทำใน Session 21
 
-### ✅ 1. รายงานภาษีซื้อ (Input VAT — `/reports/vat`)
+### ✅ 1. VAT Report Phase 1 — รายงานภาษีซื้อ (`/reports/vat`)
 
-**Scope decision:** Aim Expense เป็น **expense system** ฝั่งเดียว → /reports/vat แสดงเฉพาะ "รายงานภาษีซื้อ" (Input VAT) ที่ใช้แนบ ภ.พ.30 ตอนยื่น. ฝั่งภาษีขาย (Output VAT) จะมาเมื่อ quotation/invoice module เปิดใช้งาน — ตอนนั้น ภ.พ.30 ทั้งใบจะ generate ได้
+**Scope decision:** Aim Expense เป็น expense system → /reports/vat แสดงเฉพาะ "รายงานภาษีซื้อ" (Input VAT). ฝั่งภาษีขายจะมาคู่กับ quotation/invoice module → ภพ.30 ทั้งใบ defer
 
-**สร้างไฟล์ใหม่ 2 ไฟล์:**
+**ไฟล์ใหม่:**
+- `src/app/(app)/reports/vat/page.tsx` — server entry
+- `src/app/(app)/reports/vat/vat-client.tsx` — client (filters + stats + DataTable + Export)
 
-| ไฟล์ | หน้าที่ |
-|------|---------|
-| `src/app/(app)/reports/vat/page.tsx` | Server entry — auth + org context (no plan-gate, ตรงกับ /reports/wht pattern) |
-| `src/app/(app)/reports/vat/vat-client.tsx` | Client — filters + stats + DataTable + ExportButton |
+**ไฟล์แก้:**
+- `src/server/routers/report.router.ts` — เพิ่ม `VatInput` schema + `report.vat` orgProcedure
 
-**ไฟล์แก้ไข:**
-
-- `src/server/routers/report.router.ts` — เพิ่ม:
-  - `VatInput` schema: `{ from, to, eventId?, dateField: "receiptDate" | "paymentDate" (default receiptDate) }`
-  - `vat` orgProcedure: filter `status=paid` + `DocumentType=tax_invoice` + `VATAmount > 0` + date in range, return `{ stats, rows[] }`
-
-### 📐 Filter rules (ตามคำตอบพี่ตอนต้น session)
-
-- `status === "paid"` (ตรงกับ WHT — ใช้ "actual cash-out" view)
-- `DocumentType === "tax_invoice"` (ใบเสร็จธรรมดาขอเครดิตภาษีไม่ได้)
-- `VATAmount > 0`
+**Filter rules:**
+- `status === "paid"` + `DocumentType === "tax_invoice"` + `VATAmount > 0`
 - Date filter: ReceiptDate (default — ตามสรรพากร) หรือ PaymentDate (toggle ใน UI)
 - Optional project filter
 
-### 🎨 UI
+**UI:** 4 stat cards (count / totalBase / totalVAT / vendorCount) + DateField dropdown + Export CSV/XLSX/PDF (generic landscape, no form-specific PDF)
 
-- **Header:** "📈 รายงานภาษีซื้อ (ภ.พ.30)" + scope notice แจ้ง user ว่าแสดงเฉพาะ Input VAT
-- **Filters:** DateRangePicker + Project SearchableSelect + DateField dropdown ("วันที่ใบกำกับภาษี" / "วันที่จ่ายเงิน") + clear button
-- **Stats (4 cards):** จำนวนใบกำกับ / ฐานภาษีรวม / ภาษีซื้อรวม / ผู้ขาย unique
-- **Table columns:** วันที่ / เลขที่ใบกำกับ + เลขที่ใบเสร็จ / เลขผู้เสียภาษี + branch / ผู้ขาย + ที่อยู่ / รายการ + ประเภท (สินค้า/บริการ) / ฐานภาษี / ภาษีซื้อ / โปรเจกต์
-- **Export:** CSV/XLSX/PDF (generic landscape) ผ่าน ExportButton
-- **❌ ไม่มี PDF form-specific** — รอ spec จากพี่
+### ✅ 2. Settings → Google (`/settings/google`)
 
-### 📐 URL params
+**ไฟล์ใหม่:**
+- `src/app/(app)/settings/google/page.tsx` — server-rendered, ~430 บรรทัด
 
-- `/reports/vat?eventId=<id>&dateField=paymentDate` — query params persist ผ่าน `router.replace`
-- `dateField=receiptDate` ไม่เขียนลง URL (default state)
+**ไฟล์แก้:**
+- `src/app/api/auth/google/callback/route.ts` — 🚨 **fix critical bug**
+
+**🚨 Bug fix critical ใน OAuth callback:**
+
+เดิม callback ตั้ง `onboardingStep = "company"` **เสมอ** → user ที่ "done" แล้ว reconnect จะถูก reset กลับไป onboarding! แก้แล้ว:
+```ts
+const isInOnboarding = session.onboardingStep === "line_login"
+                    || session.onboardingStep === "line_oa"
+                    || session.onboardingStep === "google";
+data: { ...(isInOnboarding ? { onboardingStep: "company" } : {}) }
+// redirect: in-onboarding → /onboarding/company, else → /settings/google?reconnected=1
+```
+
+**UI 3 sections + footer:**
+- Google Account: email, connected date, token expiry (relative time + tone), scopes chips, ปุ่ม "🔄 เชื่อมต่อใหม่" (= `<a href="/api/auth/google">`)
+- Master Spreadsheet: ลิงค์เปิด Sheet
+- Drive Folders: 4 โฟลเดอร์ (root / receipts / documents / reports) + ลิงค์ revoke ที่ Google
+- adminOnly (sidebar config + page-level role check)
+- Server-rendered ทั้ง page — ไม่มี client/tRPC
+
+### ✅ 3. Permissions (`/permissions`)
+
+**Design decision:** /users page (existing) handles **role + eventScope + invite/remove** (high-level). /permissions handles **per-key override** (granular). They share OrgMember + UserPermission tables.
+
+**ไฟล์ใหม่:**
+- `src/app/(app)/permissions/page.tsx` — server entry (managePermissions gate)
+- `src/app/(app)/permissions/permissions-client.tsx` — client (permission grid)
+
+**ไฟล์แก้:**
+- `src/server/routers/user.router.ts` — เพิ่ม 3 procedures:
+  - `user.listPermissions` — return members + flat 14-key effective permissions (merge UserPermission row + role default fallback) + `isCustom` flag + `isOwner` / `isSelf` lock signals
+  - `user.updatePermission` — toggle one key, set `isCustom=true`. Guards: ห้าม edit self หรือ org owner
+  - `user.resetPermissions` — reset เป็น default ของ role + `isCustom=false`. Guards: ห้าม reset self
+- AuditLog entries สำหรับทุก mutation (action: `update_permission` / `reset_permissions`)
+
+**UI:**
+- Per-member card with avatar + role badge + override badge (⚙️ ถ้า isCustom) + owner badge (👑) + self badge
+- 5 permission groups (events / masterData / payments / reports / admin) — แต่ละ group แสดง toggle cells (auto-fill grid 220px+)
+- Toggle cell: green tint เมื่อ ON, gray เมื่อ OFF, locked สำหรับ self/owner
+- Filter: "ทั้งหมด" / "ปรับ override แล้ว"
+- ปุ่ม "↺ รีเซ็ตเป็น default" ต่อ user (เฉพาะ isCustom=true + ไม่ใช่ self/owner)
+- Optimistic via `utils.invalidate()` — refetch หลัง mutate
 
 ---
 
-## ⚠️ ยังไม่จบ — ต้องทำต่อใน S22
-
-### 🟡 1. Smoke test เต็มรูปแบบของ /reports/vat
-
-**ยังไม่ test:**
-- เปิด `/reports/vat` ใน browser — ดูว่า render ครบไม่มี error
-- ทดสอบ DateField dropdown สลับ receiptDate ↔ paymentDate
-- ทดสอบ Export CSV/XLSX/PDF
-- ทดสอบ filter เดือนเดียว vs ข้ามเดือน
-- ตรวจ stats ตรงกับยอดจริงใน Sheet
-
-### 🟡 2. WHT Phase 2 polish (ค้างจาก S20)
-
-ใบสรุป ภงด.3/53 (`/documents/pnd3/[period]` + `/documents/pnd53/[period]`) — render OK แต่ยัง **ต้องการ polish CSS** ตามที่พี่ระบุใน screenshot. ยังไม่ได้รับ screenshot ของพี่ใน S21 → เก็บต่อ S22
-
-### 🟡 3. PDF form-specific สำหรับรายงานภาษีซื้อ (Phase 2)
-
-ตอนนี้ใช้ generic landscape PDF table จาก ExportButton. ถ้าพี่อยากได้ฟอร์ม "รายงานภาษีซื้อ" ตามรูปแบบกรมสรรพากร 100% (เหมือน ภงด.3/53) → ส่ง spec PDF มาก่อน → ทำ `/documents/vat-purchase/[period]` ใน S22+ pattern เดียวกับ pnd3-attach
-
-### 🟡 4. ฝั่งภาษีขาย (Output VAT) + ภ.พ.30 ทั้งใบ
-
-ต้องรอ sales/quotation module:
-- Sheets tab ใหม่: `Quotations`, `SalesInvoices` (หรือชื่ออื่น)
-- procedure `report.vatOutput` สำหรับฝั่งขาย
-- procedure `report.vatPP30` รวม input + output → คำนวณภาษีต้องชำระ/ขอคืน
-- PDF ภ.พ.30 form-specific
-
----
-
-## 📦 Working tree (ก่อน commit)
+## 📦 Files changed (un-committed)
 
 ```
-A  src/app/(app)/reports/vat/page.tsx
-A  src/app/(app)/reports/vat/vat-client.tsx
-M  src/server/routers/report.router.ts
-A  session21/handoff/HANDOFF_2026-05-02_END_VAT-PURCHASE.md
+NEW  src/app/(app)/reports/vat/page.tsx
+NEW  src/app/(app)/reports/vat/vat-client.tsx
+MOD  src/server/routers/report.router.ts
+NEW  src/app/(app)/settings/google/page.tsx
+MOD  src/app/api/auth/google/callback/route.ts
+NEW  src/app/(app)/permissions/page.tsx
+NEW  src/app/(app)/permissions/permissions-client.tsx
+MOD  src/server/routers/user.router.ts
+NEW  .claude/launch.json (optional)
+NEW  session21/handoff/HANDOFF_2026-05-02_END_VAT-PURCHASE.md
 ```
 
 ---
@@ -103,38 +108,41 @@ A  session21/handoff/HANDOFF_2026-05-02_END_VAT-PURCHASE.md
 
 ```bash
 cd ~/Code/Aim\ Expense\ V2/aim-expense
+rm -f .git/index.lock
 
-# 1. Type check (ต้องผ่าน 0 errors)
+# Type check
 npx tsc --noEmit
 
-# 2. Smoke test (พี่ทำเอง)
+# Smoke test /permissions
 npm run dev
-# เปิด /reports/vat → ทดสอบ filter + export
+# เปิด http://localhost:3000/permissions
+# ลองเปิด-ปิด permission คนอื่น (admin คนละคน หรือ staff)
+# ลองรีเซ็ตเป็น default
+# ตรวจ self / owner ล็อกได้
 
-# 3. Commit
-rm -f .git/index.lock
+# Commit
 git add -A
-git commit -m 'feat(reports): VAT Phase 1 - รายงานภาษีซื้อ /reports/vat (S21)'
-
-# 4. Push
+git commit -m 'feat(S21): VAT รายงานภาษีซื้อ + /settings/google + /permissions per-key editor + fix callback onboardingStep guard'
 git push
 ```
 
 ---
 
-## ⚠️ Known Issues / Watch Out (carry-over จาก S20)
+## ⚠️ Known Issues / Watch Out
 
-1. **🔴 Vercel Pro trial expires ~2026-05-06** — เหลือ ~4 วัน! ไป downgrade Hobby
+1. **🟡 Prisma 5.22 → 7.8 update prompt** — อย่า upgrade (major jump ข้าม v6, breaking changes). Tech debt S25+
 
-2. **🟡 Prisma 5.22 → 7.8 update prompt** — **อย่า upgrade** (major jump ข้าม v6, breaking changes). เก็บเป็น tech debt task ใน S25+
+2. **🟡 Sidebar label "รายงาน ภพ.30"** — ตอนนี้แสดงแค่ Input VAT. ควร rename เป็น "รายงานภาษีซื้อ (ภ.พ.30)" หรือ "ภพ.30 — ภาษีซื้อ" (พร้อม Phase 2 ฝั่งขาย)
 
-3. **🟡 Sidebar label "รายงาน ภพ.30"** — strictly ตอนนี้แสดงแค่ Input VAT เท่านั้น. ถ้าจะ accurate ควร rename เป็น "รายงานภาษีซื้อ (ภ.พ.30)" หรือ "ภพ.30 — ภาษีซื้อ" ใน sidebar (ทำพร้อม S22 ตอนทำ Phase 2 ฝั่งขาย)
+3. **🟡 OAuth callback flow** — smart guard ทำงานถูก: in-onboarding → /onboarding/company, post-onboarding → /settings/google?reconnected=1. ถ้าจะเพิ่ม flow อื่น (re-auth จาก dashboard) ต้อง pass state param
 
-4. **🟡 Single-line commit messages** — ห้ามใช้ multi-line `"`
+4. **🟡 /permissions optimistic update** — ตอนนี้ใช้ `invalidate()` (refetch) ไม่ใช่ true optimistic. ถ้าโหลดช้า → toggle จะ "snap back" ก่อน update. Acceptable สำหรับ MVP
 
-5. **🟡 Cowork sandbox** — ลบ files / push เองไม่ได้ → พี่ทำ Terminal
+5. **🟡 Single-line commit messages** — ห้ามใช้ multi-line `"`
 
-6. **🟡 git index.lock อาจค้าง** — `rm -f .git/index.lock`
+6. **🟡 Cowork sandbox** — ต้อง copy worktree → main repo (ไม่งั้น dev server เห็นไม่เจอ). ทุก feature S21 copy เรียบร้อยแล้ว
+
+7. **🟡 git index.lock อาจค้าง** — `rm -f .git/index.lock`
 
 ---
 
@@ -143,10 +151,10 @@ git push
 ```
 Repo path:       ~/Code/Aim Expense V2/aim-expense
 Branch:          main (S20 commit b9a3c80 already pushed)
-HEAD (local):    S21 changes uncommitted — รอพี่ commit + push
-Vercel:          deploy ใหม่ทุกครั้งที่ push (Pro trial ~4 days remaining)
+HEAD (local):    S21 changes uncommitted — รอพี่ smoke test /permissions + commit
+Vercel:          Hobby (downgraded 2026-05-02)
 Type check:      ✅ 0 errors
-Smoke test:      🟡 ยังไม่ test browser
+Smoke test:      🟢 /reports/vat + /settings/google passed. /permissions ยังไม่ test
 DB connection:   ✅ Healthy (Supabase Singapore)
 ```
 
@@ -155,12 +163,32 @@ DB connection:   ✅ Healthy (Supabase Singapore)
 | Phase | สถานะ | หมายเหตุ |
 |-------|-------|----------|
 | Phase 4 Reports WHT — Phase 1 | ✅ 100% | S19 |
-| Phase 4 Reports WHT — Phase 2 (PDF 4 forms) | 🟡 95% | S20 — รอ polish ใบสรุป |
-| **Phase 4 Reports VAT — Phase 1 (ภาษีซื้อ)** | ✅ 100% | **S21 — สรุปการ implement เสร็จ + smoke test ค้าง** |
-| Phase 4 Reports VAT — Phase 2 (ภาษีขาย + ภ.พ.30 ทั้งใบ) | ❌ 0% | รอ quotation/invoice module |
-| Phase 4 Reports Inactive Payees + Audit | ❌ 0% | S22+ |
+| Phase 4 Reports WHT — Phase 2 (PDF 4 forms) | 🟡 95% | S20 — ใบสรุป polish ค้าง |
+| **Phase 4 Reports VAT — Phase 1 (ภาษีซื้อ)** | ✅ 100% | **S21** |
+| Phase 4 Reports VAT — Phase 2 (ภาษีขาย + ภพ.30 ทั้งใบ) | ❌ 0% | รอ quotation/invoice module |
+| **Settings → Google** | ✅ 100% | **S21** |
+| **Settings → Permissions** | ✅ 100% | **S21 — per-key override editor** |
+| Settings → Billing | ❌ 0% | Phase 6 — รอ Stripe integration |
+| รายได้ (Quotations/Billings/Tax-Invoices) | ❌ 0% | Big feature — XL effort |
+| Phase 4 Inactive Payees + Audit Logs UI | ❌ 0% | S22+ |
 | Phase 4 Dashboard role-specific | ❌ 0% | S24+ |
-| Phase 6 Billing | ❌ 0% | หลัง Phase 4 |
+
+---
+
+## 🎯 Sidebar dead-link audit (จบ S21)
+
+### บริหารจัดการ — เหลือ 1 dead link เท่านั้น (จาก 3)
+- ✅ จัดการผู้ใช้ (`/users`) — done (S18-)
+- ✅ ตั้งค่าองค์กร (`/settings/org`) — done
+- ✅ เปลี่ยนบริษัท (`/select-org`) — done
+- ✅ **เชื่อมต่อ Google (`/settings/google`)** — **DONE S21** ✨
+- ✅ **จัดการสิทธิ์ (`/permissions`)** — **DONE S21** ✨
+- ❌ **แพ็คเกจ (`/settings/billing`)** — Phase 6 (~S26-28) — รอ Stripe
+
+### รายได้ — ยังไม่เริ่มทั้งหมด (XL effort)
+- ❌ ใบเสนอราคา (`/quotations`)
+- ❌ ใบวางบิล (`/billings`)
+- ❌ ใบกำกับภาษี (`/tax-invoices`)
 
 ---
 
@@ -185,10 +213,11 @@ Org:
 
 ### 🚀 ลำดับงาน:
 
-1. **Smoke test /reports/vat** — เปิดในเครื่องพี่ + test filter + export
-2. **WHT Phase 2 polish** — รับ screenshot จากพี่ → fix CSS ใบสรุป
-3. **Inactive Payees + Audit Logs UI** — admin tools (ถ้า WHT จบ)
-4. **Vercel downgrade Hobby** — ก่อน 6 พ.ค.
+1. **Smoke test /permissions** ที่เหลือจาก S21 → fix bug ถ้ามี
+2. **WHT Phase 2 polish** — รับ screenshot จากพี่ → fix CSS ใบสรุป (ค้างจาก S20)
+3. **Smoke test ใบแนบ ภงด.53 + ใบสรุปทั้ง 2** — ค้างจาก S20
+4. **เริ่ม "รายได้" foundation** — design Sheets schema (Quotations/Billings/TaxInvoices) + state machine (S23-25 implement)
+5. **(Optional) Inactive Payees + Audit Logs UI** — admin tools
 
 ---
 
