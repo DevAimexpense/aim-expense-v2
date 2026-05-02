@@ -134,6 +134,23 @@ const WHTInput = z.object({
   type: z.enum(["pnd3", "pnd53"]).optional(),
 });
 
+const VatInput = z.object({
+  /** ISO YYYY-MM-DD inclusive */
+  from: z.string().min(10),
+  /** ISO YYYY-MM-DD inclusive */
+  to: z.string().min(10),
+  /** Optional project filter */
+  eventId: z.string().optional(),
+  /**
+   * Which date column drives the filter.
+   *   "receiptDate" (default) — date on the tax invoice itself (Revenue Dept canonical)
+   *   "paymentDate"           — date money was actually paid (cash-flow view)
+   * The Revenue Dept canonical date is "วันที่ในใบกำกับภาษี" but some users want
+   * to see the cash-flow view, so we support both.
+   */
+  dateField: z.enum(["receiptDate", "paymentDate"]).default("receiptDate"),
+});
+
 // -------------------------------------------------------------------
 // Router
 // -------------------------------------------------------------------
@@ -1069,6 +1086,185 @@ export const reportRouter = router({
       return {
         stats: overallStats,
         ...filtered,
+      };
+    }),
+
+  /**
+   * Purchase VAT Report (รายงานภาษีซื้อ) — used by /reports/vat
+   *
+   * Filing context (Thai tax law):
+   *   - VAT-registered businesses must file ภ.พ.30 monthly. The form aggregates:
+   *       (a) Output VAT — VAT charged on SALES (not yet captured by Aim Expense)
+   *       (b) Input VAT  — VAT paid on PURCHASES (this report)
+   *   - This procedure produces the "รายงานภาษีซื้อ" attachment that supports
+   *     the Input VAT line on ภ.พ.30. Once a sales/quotation module ships,
+   *     a future procedure will combine both halves into the full ภ.พ.30 view.
+   *
+   * Filter rules:
+   *   - status === "paid" (matches WHT logic — Revenue Dept reports are based on
+   *     actual booked entries; we treat status=paid as "settled enough to claim
+   *     the input VAT credit"). This may need to relax to include "approved"
+   *     once accountants ask for accrual-style views.
+   *   - DocumentType === "tax_invoice" — only ใบกำกับภาษี qualifies. Plain
+   *     receipts (DocumentType="receipt") and rows where the field is empty are
+   *     excluded — Revenue Dept will not let you claim VAT credit without one.
+   *   - VATAmount > 0 — defensive; some payees are flagged ไม่จดทะเบียน VAT.
+   *
+   * Date filter:
+   *   - Driven by `input.dateField`:
+   *       "receiptDate"  → ReceiptDate (canonical: date on the invoice itself)
+   *       "paymentDate"  → PaymentDate / PaidAt (cash-flow view)
+   *   - Empty source date → row excluded (cannot place it on a calendar).
+   *
+   * Read-only aggregation per SYSTEM_REQUIREMENTS principle 3 — no caching.
+   *
+   * Returns:
+   *   - stats: { totalCount, totalBase, totalVAT, vendorCount }
+   *   - rows:  one entry per qualifying payment, sorted by date asc then vendor name
+   */
+  vat: orgProcedure
+    .input(VatInput)
+    .query(async ({ ctx, input }) => {
+      const sheets = await getSheetsService(ctx.org.orgId);
+      // NOTE: skip ensureAllTabsExist (read-only — same as other reports).
+
+      const [payments, events, payees] = await Promise.all([
+        sheets.getPayments(),
+        sheets.getEvents(),
+        sheets.getPayees(),
+      ]);
+
+      const eventMap = new Map(events.map((e) => [e.EventID, e.EventName]));
+      const payeeMap = new Map(
+        payees.map((p) => [
+          p.PayeeID,
+          {
+            name: p.PayeeName || p.PayeeID,
+            taxId: p.TaxID || "",
+            branchType: p.BranchType || "",
+            branchNumber: p.BranchNumber || "",
+            address: p.Address || "",
+            isVAT: p.IsVAT || "",
+          },
+        ]),
+      );
+
+      /** Branch label per Revenue Dept convention. */
+      function branchLabelOf(
+        branchType: string,
+        branchNumber: string,
+      ): string {
+        if (branchType === "HQ") return "00000";
+        if (branchType === "Branch" && branchNumber) {
+          return branchNumber.padStart(5, "0");
+        }
+        return "";
+      }
+
+      /** Pick the date used for filtering, normalized to YYYY-MM-DD. */
+      function pickDate(p: Record<string, string>): string {
+        if (input.dateField === "paymentDate") {
+          if (p.PaymentDate) return p.PaymentDate;
+          if (p.PaidAt && p.PaidAt.length >= 10) return p.PaidAt.slice(0, 10);
+          return "";
+        }
+        // default: receiptDate
+        if (p.ReceiptDate) return p.ReceiptDate;
+        return "";
+      }
+
+      type VatRow = {
+        // Identity
+        paymentId: string;
+        date: string; // YYYY-MM-DD (whichever dateField was selected)
+        receiptDate: string; // raw — for cross-check display
+        paymentDate: string; // raw — for cross-check display
+        // Document
+        invoiceNumber: string;
+        receiptNumber: string;
+        // Vendor
+        payeeId: string;
+        payeeName: string;
+        taxId: string;
+        branchLabel: string;
+        address: string;
+        // Project
+        eventId: string;
+        eventName: string;
+        // Amounts
+        baseAmount: number; // ฐานภาษี (TTLAmount = pre-VAT amount)
+        vatAmount: number; // ภาษีซื้อ (VATAmount)
+        // Auxiliary
+        description: string;
+        expenseNature: string; // "goods" | "service" | ""
+      };
+
+      const rows: VatRow[] = [];
+
+      for (const p of payments) {
+        // Status filter — paid only
+        if (p.Status !== "paid") continue;
+
+        // Document type filter — only tax invoices qualify for input VAT credit
+        if (p.DocumentType !== "tax_invoice") continue;
+
+        // VAT amount must be positive
+        const vatAmount = num(p.VATAmount);
+        if (vatAmount <= 0) continue;
+
+        // Project filter
+        if (input.eventId && p.EventID !== input.eventId) continue;
+
+        // Date filter
+        const date = pickDate(p);
+        if (!date) continue;
+        if (date < input.from || date > input.to) continue;
+
+        const info = payeeMap.get(p.PayeeID);
+        const taxId = info?.taxId || p.VendorTaxIdSnapshot || "";
+
+        rows.push({
+          paymentId: p.PaymentID,
+          date,
+          receiptDate: p.ReceiptDate || "",
+          paymentDate: p.PaymentDate || (p.PaidAt ? p.PaidAt.slice(0, 10) : ""),
+          invoiceNumber: p.InvoiceNumber || "",
+          receiptNumber: p.ReceiptNumber || "",
+          payeeId: p.PayeeID,
+          payeeName: info?.name || p.PayeeID || "—",
+          taxId,
+          branchLabel: branchLabelOf(
+            info?.branchType || "",
+            info?.branchNumber || "",
+          ),
+          address: info?.address || "",
+          eventId: p.EventID,
+          eventName: eventMap.get(p.EventID) || p.EventID || "—",
+          baseAmount: num(p.TTLAmount),
+          vatAmount,
+          description: p.Description || "",
+          expenseNature: p.ExpenseNature || "",
+        });
+      }
+
+      // Sort: date asc, then payeeName (Thai locale)
+      rows.sort((a, b) => {
+        if (a.date !== b.date) return a.date < b.date ? -1 : 1;
+        return a.payeeName.localeCompare(b.payeeName, "th");
+      });
+
+      const totalBase = rows.reduce((s, r) => s + r.baseAmount, 0);
+      const totalVAT = rows.reduce((s, r) => s + r.vatAmount, 0);
+      const vendorCount = new Set(rows.map((r) => r.payeeId)).size;
+
+      return {
+        stats: {
+          totalCount: rows.length,
+          totalBase,
+          totalVAT,
+          vendorCount,
+        },
+        rows,
       };
     }),
 });
