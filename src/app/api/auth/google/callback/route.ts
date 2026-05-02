@@ -81,17 +81,25 @@ export async function GET(request: NextRequest) {
     });
 
     // 5. Update user email + name (if not already set from LINE)
+    //    Only advance onboarding step when the user is still partway through
+    //    onboarding. Reconnects from /settings/google ("done") must NOT reset
+    //    the step back to "company" — that would kick the user out of the app.
+    const isInOnboarding =
+      session.onboardingStep === "line_login" ||
+      session.onboardingStep === "line_oa" ||
+      session.onboardingStep === "google";
+
     const user = await prisma.user.update({
       where: { id: session.userId },
       data: {
         email: userInfo.email,
         fullName: userInfo.name,
         avatarUrl: userInfo.picture || undefined,
-        onboardingStep: "company", // move to next step
+        ...(isInOnboarding ? { onboardingStep: "company" } : {}),
       },
     });
 
-    // 6. Refresh session with new onboardingStep
+    // 6. Refresh session with (possibly new) onboardingStep
     await setSessionCookie({
       userId: user.id,
       lineUserId: user.lineUserId,
@@ -100,7 +108,15 @@ export async function GET(request: NextRequest) {
       onboardingStep: user.onboardingStep,
     });
 
-    return NextResponse.redirect(new URL("/onboarding/company", request.url));
+    // 7. Redirect: in-onboarding → next step, post-onboarding → settings page
+    return NextResponse.redirect(
+      new URL(
+        isInOnboarding
+          ? "/onboarding/company"
+          : "/settings/google?reconnected=1",
+        request.url,
+      ),
+    );
   } catch (err) {
     console.error("[Google OAuth callback] error:", err);
     return NextResponse.redirect(
