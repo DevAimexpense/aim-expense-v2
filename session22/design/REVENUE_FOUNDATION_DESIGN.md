@@ -733,31 +733,72 @@ vat30: orgProcedure
 
 ---
 
-## 13. Open Questions (need พี่ confirm before S23)
+## 13. Resolved Decisions (approved by พี่ — 2026-05-02)
 
-1. **`Customer.IsVAT` semantics** — ลูกค้าจดทะเบียน VAT เพื่ออะไร? เช็ค block ออก tax invoice ให้ลูกค้าที่ไม่จด? หรือ just info?
-   - **ข้อเสนอ:** info-only field. ตามกฎหมายเราออก TI ให้ใครก็ได้ — IsVAT ของลูกค้าไม่ block
+| # | หัวข้อ | ตัดสินใจ |
+|---|--------|---------|
+| 1 | `Customer.IsVAT` semantics | ✅ **info-only field** — ไม่ block การออก TI. ตามกฎหมายออก TI ให้ใครก็ได้ |
+| 2 | `PaymentMethod` ใน Billing | ✅ **enum** — `["transfer", "cash", "cheque", "creditCard", "other"]` |
+| 3 | `PaymentTerms` ใน Customer | ✅ **free text + dropdown defaults** — NET 0/15/30/60/90 (รองรับ "NET 30 หลังส่งของ") |
+| 4 | `WHTPercent` ใน Billing override | ✅ **override ได้** — default จาก Customer.DefaultWHTPercent, editable per billing |
+| 5 | Quotation linking to Event | ✅ **optional** — รองรับ retail sale ที่ไม่ผ่าน event |
+| 6 | Received payments structure | ✅ **MVP ใน Billing row** (PaidAmount + PaidDate). Phase 2 add `BillingPayments` tab ถ้า partial payment เยอะ |
+| 7 | **DocNumber prefix scheme** | 🔄 **CHANGED — customizable from MVP** (ไม่ defer Phase 2). User แก้ prefix ได้ใน /settings/org |
+| 8 | TaxInvoice.DocDate backdate | ✅ **±7 วัน** — warn ถ้า > 7 วันที่ผ่านมา, block future date เด็ดขาด |
 
-2. **`PaymentMethod` ใน Billing** — ต้อง enum หรือ free text?
-   - **ข้อเสนอ:** enum `["transfer", "cash", "cheque", "creditCard", "other"]`
+### 13.1 Q7 Implementation Detail (customizable DocNumber prefix)
 
-3. **`PaymentTerms` ใน Customer** — fixed enum หรือ free text?
-   - **ข้อเสนอ:** free text (รองรับ "NET 30 หลังส่งของ" เป็นต้น) — แต่ default dropdown มี NET 0/15/30/60/90
+**Storage** — ใน Config tab (existing schema, key-value):
 
-4. **`WHTPercent` ใน Billing** — ถ้าลูกค้าหักจริงไม่เท่า DefaultWHTPercent?
-   - **ข้อเสนอ:** override ได้ใน billing form. Default จาก Customer.DefaultWHTPercent — but editable
+| Config Key | Default | Editable |
+|-----------|---------|----------|
+| `DOC_PREFIX_QT`  | `QT`  | ✅ user แก้ได้ |
+| `DOC_PREFIX_BIL` | `BIL` | ✅ |
+| `DOC_PREFIX_TI`  | `TI`  | ✅ |
 
-5. **Quotation linking to Event** — บังคับเลือก Event มั้ย?
-   - **ข้อเสนอ:** optional. ฝั่ง expense งานคงต้องมี Event เพราะคุมงบ — ฝั่ง revenue บางทีขายตรงไม่ผ่าน event (e.g. ขายของ retail)
+**Format pattern (MVP fixed):** `{PREFIX}-{YEAR}-{4-digit-seq}`
+- เช่น `QT-2026-0001`, `INV-2026-0042`, `B/2026/0099` (ถ้า user ตั้ง prefix `B/`)
+- รับ format pattern customizable (separator/padding) ใน Phase 2 → `Config.DOC_NUMBER_FORMAT`
 
-6. **Where to attach received payments?** — ในตอนนี้ `Billings.PaidAmount` คุมเอง ไม่มี Payment record แยก
-   - **ข้อเสนอ:** MVP บันทึกใน Billing row เอง (PaidAmount + PaidDate). Phase 2 อาจมี `BillingPayments` tab ถ้า partial payment เยอะ
+**Helper functions to add (S23):**
+```typescript
+// src/server/lib/doc-number.ts
+export async function getDocPrefix(
+  sheets: GoogleSheetsService,
+  type: "QT" | "BIL" | "TI"
+): Promise<string> {
+  const config = await sheets.getConfigMap();
+  const key = `DOC_PREFIX_${type}`;
+  return (config[key] || type).trim();
+}
 
-7. **Number prefix scheme** — QT/BIL/TI พอ หรือลูกค้าอยาก customize? (e.g. INV2026/0001 vs BL2026-001)
-   - **ข้อเสนอ:** MVP fixed prefix. Phase 2 add `Config.DOC_PREFIX_QT/BIL/TI` overrides
+export async function computeNextDocNumber(
+  sheets: GoogleSheetsService,
+  type: "QT" | "BIL" | "TI",
+  year: number,
+  tab: string,           // SHEET_TABS.QUOTATIONS | etc.
+  statusFilter?: (s: string) => boolean,  // for TI: only count "issued"
+): Promise<string> {
+  const prefix = await getDocPrefix(sheets, type);
+  const all = await sheets.getAll(tab);
+  const yearPrefix = `${prefix}-${year}-`;
+  const seqs = all
+    .filter((r) => {
+      if (statusFilter && !statusFilter(r.Status)) return false;
+      return (r.DocNumber || "").startsWith(yearPrefix);
+    })
+    .map((r) => parseInt(r.DocNumber.slice(yearPrefix.length), 10))
+    .filter((n) => !isNaN(n));
+  const next = (Math.max(0, ...seqs) || 0) + 1;
+  return `${prefix}-${year}-${String(next).padStart(4, "0")}`;
+}
+```
 
-8. **TaxInvoice.DocDate constraint** — RD requires "ภายในวันที่ส่งมอบ/ให้บริการเสร็จสิ้น" — เราบังคับ today only หรืออนุญาต backdate?
-   - **ข้อเสนอ:** อนุญาต ±7 วัน — ใส่ warning ถ้า > 7 วันที่ผ่านมา (อาจติด audit). Block future date เด็ดขาด
+**UI: /settings/org เพิ่ม section "เลขที่เอกสาร" (S23)**
+- 3 input fields: Quotation prefix / Billing prefix / Tax Invoice prefix
+- Validation: ห้ามเว้นว่าง, ห้ามมี space, max 8 chars (recommendation), allow `[A-Z0-9/-]`
+- Save → write to Config tab (key/value upsert)
+- ⚠️ **Warning:** ห้ามเปลี่ยน prefix ถ้าเคย issue เอกสารแล้ว — เพราะจะทำ DocNumber ไม่ continuous (อนุญาตแต่เตือน)
 
 ---
 
@@ -774,6 +815,9 @@ vat30: orgProcedure
 - [ ] /quotations page + form (multi-step)
 - [ ] Sidebar: gate รายได้ items + add ลูกค้า
 - [ ] Plan gate (pro+) on /customers + /quotations
+- [ ] **NEW (Q7):** Add `getDocPrefix` + `computeNextDocNumber` helpers (`src/server/lib/doc-number.ts`)
+- [ ] **NEW (Q7):** /settings/org → "เลขที่เอกสาร" section (3 prefix inputs + save to Config tab)
+- [ ] **NEW (Q7):** org.router.ts → `updateDocPrefixes` mutation (admin-only)
 
 ### S24 — Billings + state transitions + recordPayment
 - [ ] Billings + BillingLines tabs
@@ -811,9 +855,8 @@ vat30: orgProcedure
 
 ## 16. Approval
 
-✅ พี่ approve schema + roadmap → ผม start S23 (Customers + Quotations)
-🔄 ถ้ามีจุดอยากปรับ → ตอบใน open questions ข้อ 1-8 ด้านบน
+✅ **พี่ approved schema + 8 decisions on 2026-05-02** — ready for S23 (Customers + Quotations + DocPrefix config)
 
 ---
 
-*Design by Claude (S22) — for review by Aim before implementation*
+*Design by Claude (S22) — approved by Aim 2026-05-02 — implementation kicks off S23*

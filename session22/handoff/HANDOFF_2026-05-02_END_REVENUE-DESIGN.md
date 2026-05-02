@@ -4,7 +4,7 @@
 > **Reason:** S22 = "รายได้" foundation design (Track B). No code changes — design doc only
 > **Repo:** `~/Code/Aim Expense V2/aim-expense`
 > **Worktree:** `.claude/worktrees/nostalgic-jemison-0ee440`
-> **Status:** Pending พี่ review design doc + answer open questions ก่อนเริ่ม S23
+> **Status:** ✅ Approved by พี่ 2026-05-02 — 8 decisions resolved, ready for S23
 
 ---
 
@@ -104,18 +104,22 @@ NEW  session22/handoff/HANDOFF_2026-05-02_END_REVENUE-DESIGN.md  (this file)
 
 ---
 
-## ❓ Open Questions ที่ต้องให้พี่ answer ก่อน S23
+## ✅ Resolved Decisions (approved 2026-05-02)
 
-ใน design doc section 13 มี 8 ข้อ — สรุปมาอันสำคัญ:
+ดูรายละเอียดใน design doc section 13. สรุป:
 
-1. **`Customer.IsVAT`** = info-only หรือ block ออก TI? → **เสนอ:** info-only
-2. **`PaymentMethod`** = enum หรือ free text? → **เสนอ:** enum (`transfer/cash/cheque/creditCard/other`)
-3. **`PaymentTerms`** = enum หรือ free text? → **เสนอ:** free text + dropdown defaults (NET 0/15/30/60/90)
-4. **`WHTPercent` ใน Billing** override ได้? → **เสนอ:** ได้ (default จาก Customer)
-5. **Quotation.EventID** บังคับ? → **เสนอ:** optional (รองรับ retail sale)
-6. **Received payments** เก็บใน Billing row หรือแยกตาราง? → **เสนอ:** MVP ใน Billing row (PaidAmount), Phase 2 add `BillingPayments` tab ถ้าเยอะ
-7. **DocNumber prefix** — fixed (QT/BIL/TI) หรือ customizable? → **เสนอ:** MVP fixed
-8. **TaxInvoice.DocDate** — backdate ได้กี่วัน? → **เสนอ:** ±7 วัน + warn ถ้า > 7
+| # | Decision | สถานะ |
+|---|----------|-------|
+| 1 | `Customer.IsVAT` = **info-only** | ✅ |
+| 2 | `PaymentMethod` = **enum** (transfer/cash/cheque/creditCard/other) | ✅ |
+| 3 | `PaymentTerms` = **free text + dropdown defaults** (NET 0/15/30/60/90) | ✅ |
+| 4 | `WHTPercent` Billing override = **ได้** (default จาก Customer) | ✅ |
+| 5 | `Quotation.EventID` = **optional** | ✅ |
+| 6 | Received payments = **MVP ใน Billing row** (Phase 2 add tab ถ้าเยอะ) | ✅ |
+| 7 | DocNumber prefix = **customizable from MVP** (Config tab + /settings/org UI) | 🔄 changed |
+| 8 | TaxInvoice.DocDate = **±7 วัน** + warn + block future | ✅ |
+
+**Q7 changed scope:** ไม่ defer Phase 2 — ทำ customizable prefix ตั้งแต่ S23 (เพิ่ม helper `getDocPrefix` + `computeNextDocNumber` ใน `src/server/lib/doc-number.ts` + section "เลขที่เอกสาร" ใน /settings/org). ดู design doc section 13.1
 
 ---
 
@@ -184,17 +188,22 @@ DB connection:   ✅ (no schema change)
 
 ## 🎯 งาน Session 23 — Priority
 
+✅ **Design approved + 8 decisions resolved** — start implement ได้เลย
+
 ### 🚀 ลำดับงาน:
 
-1. **พี่ review design doc + ตอบ open questions 1-8** → confirm ก่อนเริ่ม
-2. **S23 implementation: Customers + Quotations**
+1. **S23 implementation: Customers + Quotations + DocPrefix config**
    - 4 permission keys + role default + revenue group
    - Customers tab + customer.router.ts + /customers page
    - Quotations + QuotationLines tabs + quotation.router.ts + /quotations page + form
+   - **Q7 customizable DocNumber prefix:**
+     - `src/server/lib/doc-number.ts` — `getDocPrefix` + `computeNextDocNumber`
+     - org.router.ts → `updateDocPrefixes` mutation (admin-only)
+     - /settings/org → "เลขที่เอกสาร" section (3 prefix inputs)
    - Sidebar gate + plan gate (pro+)
    - Audit logs full coverage
-3. **(Optional) WHT Phase 2 polish** — ถ้าพี่ส่ง screenshot ใบสรุปมา
-4. **(Optional) Smoke test ใบแนบ ภงด.53** — ค้างจาก S20
+2. **(Optional) WHT Phase 2 polish** — ถ้าพี่ส่ง screenshot ใบสรุปมา
+3. **(Optional) Smoke test ใบแนบ ภงด.53** — ค้างจาก S20
 
 ---
 
