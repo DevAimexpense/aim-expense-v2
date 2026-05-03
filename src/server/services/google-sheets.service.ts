@@ -526,6 +526,50 @@ export class GoogleSheetsService {
   }
 
   /**
+   * อ่านข้อมูลหลาย tabs ใน 1 HTTP call (Sheets values.batchGet)
+   *
+   * เร็วกว่าทำ Promise.all ของ getAll() เพราะ:
+   * - 1 HTTPS handshake แทน N
+   * - 1 connection establish แทน N
+   * - Save ~50-100ms ต่อ request
+   *
+   * Returns: map of tabName → row records
+   */
+  async getAllBatch(
+    tabNames: string[]
+  ): Promise<Record<string, Record<string, string>[]>> {
+    if (tabNames.length === 0) return {};
+
+    const ranges = tabNames.map((t) => `${t}!A:ZZ`);
+    const response = await this.sheets.spreadsheets.values.batchGet({
+      spreadsheetId: this.spreadsheetId,
+      ranges,
+    });
+
+    const valueRanges = response.data.valueRanges || [];
+    const result: Record<string, Record<string, string>[]> = {};
+
+    for (let i = 0; i < tabNames.length; i++) {
+      const tabName = tabNames[i];
+      const rows = (valueRanges[i]?.values as string[][] | undefined) || [];
+      if (rows.length < 2) {
+        result[tabName] = [];
+        continue;
+      }
+      const headers = rows[0];
+      result[tabName] = rows.slice(1).map((row) => {
+        const record: Record<string, string> = {};
+        headers.forEach((header, idx) => {
+          record[header] = row[idx] || "";
+        });
+        return record;
+      });
+    }
+
+    return result;
+  }
+
+  /**
    * อ่านข้อมูลโดย filter ตาม column
    */
   async getFiltered(

@@ -7,6 +7,7 @@ import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth/session";
 import { getOrgContext } from "@/lib/auth/middleware";
 import { getSheetsService, ensureTabsCached } from "@/server/lib/sheets-context";
+import { SHEET_TABS } from "@/server/services/google-sheets.service";
 import { prisma } from "@/lib/prisma";
 import { QuotationDocument } from "./document";
 
@@ -29,7 +30,25 @@ export default async function QuotationDocumentPage({
   const sheets = await getSheetsService(orgCtx.orgId);
   await ensureTabsCached(sheets, orgCtx.orgId);
 
-  const header = await sheets.getQuotationById(id);
+  // batchGet (header + lines in 1 HTTP call) parallel with prisma org lookup
+  const [batch, org] = await Promise.all([
+    sheets.getAllBatch([SHEET_TABS.QUOTATIONS, SHEET_TABS.QUOTATION_LINES]),
+    prisma.organization.findUnique({
+      where: { id: orgCtx.orgId },
+      select: {
+        name: true,
+        taxId: true,
+        address: true,
+        phone: true,
+        branchType: true,
+        branchNumber: true,
+      },
+    }),
+  ]);
+
+  const header = (batch[SHEET_TABS.QUOTATIONS] || []).find(
+    (r) => r.QuotationID === id
+  );
   if (!header) {
     return (
       <div style={{ padding: "2rem", fontFamily: "system-ui, sans-serif" }}>
@@ -39,23 +58,13 @@ export default async function QuotationDocumentPage({
     );
   }
 
-  const lines = await sheets.getQuotationLines(id);
-  lines.sort(
-    (a, b) =>
-      (parseInt(a.LineNumber, 10) || 0) - (parseInt(b.LineNumber, 10) || 0)
-  );
+  const lines = (batch[SHEET_TABS.QUOTATION_LINES] || [])
+    .filter((r) => r.QuotationID === id)
+    .sort(
+      (a, b) =>
+        (parseInt(a.LineNumber, 10) || 0) - (parseInt(b.LineNumber, 10) || 0)
+    );
 
-  const org = await prisma.organization.findUnique({
-    where: { id: orgCtx.orgId },
-    select: {
-      name: true,
-      taxId: true,
-      address: true,
-      phone: true,
-      branchType: true,
-      branchNumber: true,
-    },
-  });
   if (!org) redirect("/");
 
   return (

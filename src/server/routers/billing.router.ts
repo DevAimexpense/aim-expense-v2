@@ -218,14 +218,22 @@ export const billingRouter = router({
     .input(z.object({ billingId: z.string() }))
     .query(async ({ ctx, input }) => {
       const sheets = await getSheetsService(ctx.org.orgId);
-      const header = await sheets.getBillingById(input.billingId);
-      if (!header) return null;
-      const lines = await sheets.getBillingLines(input.billingId);
-      lines.sort(
-        (a, b) =>
-          (parseInt(a.LineNumber, 10) || 0) -
-          (parseInt(b.LineNumber, 10) || 0)
+      // batchGet — fetch header tab + lines tab in 1 HTTP call
+      const batch = await sheets.getAllBatch([
+        SHEET_TABS.BILLINGS,
+        SHEET_TABS.BILLING_LINES,
+      ]);
+      const header = (batch[SHEET_TABS.BILLINGS] || []).find(
+        (r) => r.BillingID === input.billingId
       );
+      if (!header) return null;
+      const lines = (batch[SHEET_TABS.BILLING_LINES] || [])
+        .filter((r) => r.BillingID === input.billingId)
+        .sort(
+          (a, b) =>
+            (parseInt(a.LineNumber, 10) || 0) -
+            (parseInt(b.LineNumber, 10) || 0)
+        );
       return {
         header: shapeHeader(header),
         lines: lines.map(shapeLine),

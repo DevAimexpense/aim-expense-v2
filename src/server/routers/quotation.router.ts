@@ -189,14 +189,22 @@ export const quotationRouter = router({
     .input(z.object({ quotationId: z.string() }))
     .query(async ({ ctx, input }) => {
       const sheets = await getSheetsService(ctx.org.orgId);
-      const header = await sheets.getQuotationById(input.quotationId);
-      if (!header) return null;
-      const lines = await sheets.getQuotationLines(input.quotationId);
-      lines.sort(
-        (a, b) =>
-          (parseInt(a.LineNumber, 10) || 0) -
-          (parseInt(b.LineNumber, 10) || 0)
+      // batchGet — fetch header tab + lines tab in 1 HTTP call (saves ~50-100ms)
+      const batch = await sheets.getAllBatch([
+        SHEET_TABS.QUOTATIONS,
+        SHEET_TABS.QUOTATION_LINES,
+      ]);
+      const header = (batch[SHEET_TABS.QUOTATIONS] || []).find(
+        (r) => r.QuotationID === input.quotationId
       );
+      if (!header) return null;
+      const lines = (batch[SHEET_TABS.QUOTATION_LINES] || [])
+        .filter((r) => r.QuotationID === input.quotationId)
+        .sort(
+          (a, b) =>
+            (parseInt(a.LineNumber, 10) || 0) -
+            (parseInt(b.LineNumber, 10) || 0)
+        );
       return {
         header: shapeHeader(header),
         lines: lines.map(shapeLine),
