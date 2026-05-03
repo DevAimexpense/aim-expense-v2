@@ -200,13 +200,14 @@ export function QuotationDetailClient({
             </button>
           </>
         )}
-        <button
-          disabled
-          className="app-btn app-btn-ghost"
-          title="PDF จะรองรับใน S24"
+        <a
+          href={`/documents/quotation/${quotationId}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="app-btn app-btn-secondary"
         >
-          📄 PDF (เร็ว ๆ นี้)
-        </button>
+          📄 PDF
+        </a>
       </div>
 
       <div className="app-section cols-2">

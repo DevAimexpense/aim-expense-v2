@@ -167,13 +167,14 @@ export function BillingDetailClient({ billingId }: { billingId: string }) {
             → ออกใบกำกับภาษี (S25)
           </button>
         )}
-        <button
-          disabled
-          className="app-btn app-btn-ghost"
-          title="PDF เร็ว ๆ นี้"
+        <a
+          href={`/documents/billing/${billingId}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="app-btn app-btn-secondary"
         >
-          📄 PDF (เร็ว ๆ นี้)
-        </button>
+          📄 PDF
+        </a>
       </div>
 
       <div className="app-section cols-2">
