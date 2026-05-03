@@ -81,14 +81,6 @@ function formatTaxId(taxId: string): string {
   return taxId.replace(/(\d)(\d{4})(\d{5})(\d{2})(\d)/, "$1-$2-$3-$4-$5");
 }
 
-const STATUS_LABEL: Record<string, string> = {
-  draft: "ร่าง",
-  sent: "ส่งแล้ว",
-  partial: "รับบางส่วน",
-  paid: "ชำระครบ",
-  void: "ยกเลิก",
-};
-
 async function generateAndDownloadPdf(
   filename: string
 ): Promise<{ ok: boolean; error?: string }> {
@@ -266,11 +258,8 @@ export function BillingDocument({ billingId, org, header, lines }: Props) {
           position: relative;
         }
         .copy-stamp {
-          position: absolute;
-          top: 1rem;
-          left: 50%;
-          transform: translateX(-50%);
-          padding: 0.25rem 1.5rem;
+          display: inline-block;
+          padding: 0.25rem 1rem;
           font-size: 0.875rem;
           font-weight: 700;
           letter-spacing: 0.15em;
@@ -316,15 +305,6 @@ export function BillingDocument({ billingId, org, header, lines }: Props) {
           font-size: 0.75rem;
           color: #64748b;
           letter-spacing: 0.1em;
-        }
-        .status-stamp {
-          margin-top: 0.5rem;
-          font-size: 0.875rem;
-          font-weight: 700;
-          border: 2px solid currentColor;
-          padding: 0.25rem 0.5rem;
-          border-radius: 0.25rem;
-          display: inline-block;
         }
         .info-grid {
           display: grid;
@@ -514,10 +494,6 @@ function DocPage({
 
   return (
     <div className={`doc-page doc-page-${copyType}`}>
-      <div className={`copy-stamp copy-${copyType}`}>
-        {copyType === "copy" ? "สำเนา" : "ต้นฉบับ"}
-      </div>
-
       <div className="doc-header">
         <div className="company">
           <div className="company-name">{org.name}</div>
@@ -530,21 +506,12 @@ function DocPage({
         <div className="doc-meta">
           <div className="doc-title">ใบวางบิล / ใบแจ้งหนี้</div>
           <div className="doc-title-sub">BILLING / INVOICE</div>
-          {header.status === "void" && (
-            <div className="status-stamp" style={{ color: "#dc2626" }}>
-              ✗ ยกเลิก
-            </div>
-          )}
-          {header.status === "paid" && (
-            <div className="status-stamp" style={{ color: "#15803d" }}>
-              ✓ {STATUS_LABEL.paid}
-            </div>
-          )}
-          {header.status === "partial" && (
-            <div className="status-stamp" style={{ color: "#b45309" }}>
-              ◐ {STATUS_LABEL.partial}
-            </div>
-          )}
+          <div
+            className={`copy-stamp copy-${copyType}`}
+            style={{ marginTop: "0.5rem" }}
+          >
+            {copyType === "copy" ? "สำเนา" : "ต้นฉบับ"}
+          </div>
         </div>
       </div>
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { trpc } from "@/lib/trpc/client";
 
@@ -62,9 +62,19 @@ export function BillingsClient() {
     from: from || undefined,
     to: to || undefined,
   });
-  const customersQuery = trpc.customer.list.useQuery();
+  const [shouldLoadCustomers, setShouldLoadCustomers] = useState(false);
+  const customersQuery = trpc.customer.list.useQuery(undefined, {
+    enabled: shouldLoadCustomers,
+  });
   const customers = customersQuery.data || [];
   const rows = listQuery.data || [];
+
+  useEffect(() => {
+    if (!listQuery.isLoading && !shouldLoadCustomers) {
+      const t = setTimeout(() => setShouldLoadCustomers(true), 100);
+      return () => clearTimeout(t);
+    }
+  }, [listQuery.isLoading, shouldLoadCustomers]);
 
   const toggleSelect = (id: string) => {
     setSelected((prev) => {
@@ -149,10 +159,15 @@ export function BillingsClient() {
         <select
           value={customerFilter}
           onChange={(e) => setCustomerFilter(e.target.value)}
+          onMouseDown={() => setShouldLoadCustomers(true)}
+          onFocus={() => setShouldLoadCustomers(true)}
           className="app-select"
           style={{ minWidth: "200px" }}
         >
           <option value="all">ลูกค้า: ทั้งหมด</option>
+          {customersQuery.isLoading && shouldLoadCustomers && (
+            <option disabled>กำลังโหลด...</option>
+          )}
           {customers.map((c) => (
             <option key={c.customerId} value={c.customerId}>
               {c.customerName}

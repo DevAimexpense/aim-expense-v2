@@ -173,7 +173,7 @@ export function BillingDetailClient({ billingId }: { billingId: string }) {
           rel="noopener noreferrer"
           className="app-btn app-btn-secondary"
         >
-          📄 ดูเอกสาร
+          📄 พิมพ์เอกสาร
         </a>
       </div>
 

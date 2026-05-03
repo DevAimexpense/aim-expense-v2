@@ -206,7 +206,7 @@ export function QuotationDetailClient({
           rel="noopener noreferrer"
           className="app-btn app-btn-secondary"
         >
-          📄 ดูเอกสาร
+          📄 พิมพ์เอกสาร
         </a>
       </div>
 
