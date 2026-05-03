@@ -84,7 +84,7 @@ export function BillingsClient() {
   const allChecked = rows.length > 0 && selected.size === rows.length;
   const someChecked = selected.size > 0 && selected.size < rows.length;
 
-  const printSelected = (copy: boolean) => {
+  const downloadSelected = () => {
     const ids = Array.from(selected);
     if (ids.length === 0) return;
     if (ids.length > 10) {
@@ -98,7 +98,7 @@ export function BillingsClient() {
     }
     let blocked = 0;
     ids.forEach((id) => {
-      const url = `/documents/billing/${id}?print=1${copy ? "&copy=1" : ""}`;
+      const url = `/documents/billing/${id}?download=1`;
       const w = window.open(url, "_blank");
       if (!w) blocked++;
     });
@@ -198,16 +198,10 @@ export function BillingsClient() {
           </span>
           <div style={{ flex: 1 }} />
           <button
-            onClick={() => printSelected(false)}
+            onClick={downloadSelected}
             className="app-btn app-btn-primary app-btn-sm"
           >
-            🖨️ พิมพ์ต้นฉบับ ({selected.size})
-          </button>
-          <button
-            onClick={() => printSelected(true)}
-            className="app-btn app-btn-secondary app-btn-sm"
-          >
-            🖨️ พิมพ์สำเนา ({selected.size})
+            💾 ดาวน์โหลด PDF ({selected.size})
           </button>
           <button
             onClick={() => setSelected(new Set())}
