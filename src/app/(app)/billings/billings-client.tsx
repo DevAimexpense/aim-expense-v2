@@ -53,6 +53,7 @@ export function BillingsClient() {
   const [customerFilter, setCustomerFilter] = useState<string>("all");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
+  const [selected, setSelected] = useState<Set<string>>(new Set());
 
   const queryInput = statusFilter === "all" ? {} : { status: statusFilter };
   const listQuery = trpc.billing.list.useQuery({
@@ -64,6 +65,49 @@ export function BillingsClient() {
   const customersQuery = trpc.customer.list.useQuery();
   const customers = customersQuery.data || [];
   const rows = listQuery.data || [];
+
+  const toggleSelect = (id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+  const toggleSelectAll = () => {
+    if (selected.size === rows.length && rows.length > 0) {
+      setSelected(new Set());
+    } else {
+      setSelected(new Set(rows.map((b) => b.billingId)));
+    }
+  };
+  const allChecked = rows.length > 0 && selected.size === rows.length;
+  const someChecked = selected.size > 0 && selected.size < rows.length;
+
+  const printSelected = (copy: boolean) => {
+    const ids = Array.from(selected);
+    if (ids.length === 0) return;
+    if (ids.length > 10) {
+      if (
+        !confirm(
+          `เลือกไว้ ${ids.length} รายการ — browser อาจ block popup. ดำเนินการต่อไหม?`
+        )
+      ) {
+        return;
+      }
+    }
+    let blocked = 0;
+    ids.forEach((id) => {
+      const url = `/documents/billing/${id}?print=1${copy ? "&copy=1" : ""}`;
+      const w = window.open(url, "_blank");
+      if (!w) blocked++;
+    });
+    if (blocked > 0) {
+      alert(
+        `Browser block popup ${blocked} รายการ — กรุณาอนุญาต popup จาก site นี้แล้วลองอีกครั้ง`
+      );
+    }
+  };
 
   const formatTHB = (n: number) =>
     n.toLocaleString("th-TH", {
@@ -131,6 +175,49 @@ export function BillingsClient() {
         />
       </div>
 
+      {selected.size > 0 && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "0.75rem",
+            padding: "0.625rem 1rem",
+            background: "#eff6ff",
+            border: "1px solid #bfdbfe",
+            borderRadius: "0.5rem",
+            marginBottom: "0.75rem",
+            position: "sticky",
+            top: "0.5rem",
+            zIndex: 5,
+          }}
+        >
+          <span
+            style={{ fontSize: "0.875rem", fontWeight: 600, color: "#1e40af" }}
+          >
+            เลือก {selected.size} รายการ
+          </span>
+          <div style={{ flex: 1 }} />
+          <button
+            onClick={() => printSelected(false)}
+            className="app-btn app-btn-primary app-btn-sm"
+          >
+            🖨️ พิมพ์ต้นฉบับ ({selected.size})
+          </button>
+          <button
+            onClick={() => printSelected(true)}
+            className="app-btn app-btn-secondary app-btn-sm"
+          >
+            🖨️ พิมพ์สำเนา ({selected.size})
+          </button>
+          <button
+            onClick={() => setSelected(new Set())}
+            className="app-btn app-btn-ghost app-btn-sm"
+          >
+            ✕ ยกเลิก
+          </button>
+        </div>
+      )}
+
       {listQuery.isLoading ? (
         <LoadingSkeleton />
       ) : rows.length === 0 ? (
@@ -151,6 +238,16 @@ export function BillingsClient() {
           <table className="app-table">
             <thead>
               <tr>
+                <th style={{ width: "32px" }} className="text-center">
+                  <input
+                    type="checkbox"
+                    checked={allChecked}
+                    ref={(el) => {
+                      if (el) el.indeterminate = someChecked;
+                    }}
+                    onChange={toggleSelectAll}
+                  />
+                </th>
                 <th>เลขเอกสาร</th>
                 <th>วันที่</th>
                 <th>ลูกค้า</th>
@@ -165,8 +262,16 @@ export function BillingsClient() {
             <tbody>
               {rows.map((b) => {
                 const overdue = isOverdue(b.dueDate, b.status, b.balance);
+                const isChecked = selected.has(b.billingId);
                 return (
                   <tr key={b.billingId}>
+                    <td className="text-center">
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={() => toggleSelect(b.billingId)}
+                      />
+                    </td>
                     <td className="mono" style={{ fontWeight: 600 }}>
                       {b.docNumber}
                     </td>

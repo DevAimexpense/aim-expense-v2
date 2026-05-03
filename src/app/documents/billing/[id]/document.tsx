@@ -1,6 +1,10 @@
 "use client";
 
+import { useEffect } from "react";
+
 interface Props {
+  copyType: "original" | "copy";
+  billingId: string;
   org: {
     name: string;
     taxId: string;
@@ -83,8 +87,41 @@ const STATUS_LABEL: Record<string, string> = {
   void: "ยกเลิก",
 };
 
-export function BillingDocument({ org, header, lines }: Props) {
+export function BillingDocument({
+  copyType,
+  billingId,
+  org,
+  header,
+  lines,
+}: Props) {
   const balance = header.grandTotal - header.paidAmount;
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const search = new URLSearchParams(window.location.search);
+    if (search.get("print") !== "1") return;
+    const triggerPrint = async () => {
+      try {
+        if ("fonts" in document) {
+          await (document as Document & {
+            fonts: { ready: Promise<unknown> };
+          }).fonts.ready;
+        }
+      } catch {
+        /* ignore */
+      }
+      await new Promise<void>((r) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => r()))
+      );
+      await new Promise<void>((r) => setTimeout(r, 200));
+      window.print();
+    };
+    triggerPrint();
+  }, []);
+
+  const otherCopyHref = `/documents/billing/${billingId}?copy=${
+    copyType === "copy" ? "0" : "1"
+  }&print=1`;
 
   return (
     <>
@@ -100,20 +137,28 @@ export function BillingDocument({ org, header, lines }: Props) {
         }}
       >
         <button
-          onClick={() => window.history.back()}
+          onClick={() => window.close()}
           className="app-btn app-btn-secondary"
         >
-          ← กลับ
+          ✕ ปิด
         </button>
+        <a href={otherCopyHref} className="app-btn app-btn-secondary">
+          🖨️ พิมพ์{copyType === "copy" ? "ต้นฉบับ" : "สำเนา"}
+        </a>
         <button
           onClick={() => window.print()}
           className="app-btn app-btn-primary"
         >
-          🖨️ พิมพ์ / บันทึก PDF
+          🖨️ พิมพ์{copyType === "copy" ? "สำเนา" : "ต้นฉบับ"}
         </button>
       </div>
 
       <div className="doc">
+        {/* Copy stamp */}
+        <div className={`copy-stamp copy-${copyType}`}>
+          {copyType === "copy" ? "สำเนา" : "ต้นฉบับ"}
+        </div>
+
         <div className="doc-header">
           <div className="company">
             <div className="company-name">{org.name}</div>
@@ -322,6 +367,27 @@ export function BillingDocument({ org, header, lines }: Props) {
           font-family: "IBM Plex Sans Thai", "Sarabun", sans-serif;
           color: #0f172a;
           font-size: 0.875rem;
+          position: relative;
+        }
+        .copy-stamp {
+          position: absolute;
+          top: 1rem;
+          left: 50%;
+          transform: translateX(-50%);
+          padding: 0.25rem 1.5rem;
+          font-size: 0.875rem;
+          font-weight: 700;
+          letter-spacing: 0.15em;
+          border: 2px solid currentColor;
+          border-radius: 0.25rem;
+        }
+        .copy-original {
+          color: #7c3aed;
+          background: #f5f3ff;
+        }
+        .copy-copy {
+          color: #b45309;
+          background: #fef3c7;
         }
         .doc-header {
           display: grid;

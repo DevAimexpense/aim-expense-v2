@@ -5,7 +5,7 @@
 
 import { z } from "zod";
 import { router, orgProcedure, permissionProcedure } from "../trpc";
-import { getSheetsService } from "../lib/sheets-context";
+import { getSheetsService, ensureTabsCached } from "../lib/sheets-context";
 import { GoogleSheetsService, SHEET_TABS } from "../services/google-sheets.service";
 import { prisma } from "@/lib/prisma";
 
@@ -28,7 +28,7 @@ const CustomerInputSchema = z.object({
 export const customerRouter = router({
   list: orgProcedure.query(async ({ ctx }) => {
     const sheets = await getSheetsService(ctx.org.orgId);
-    await sheets.ensureAllTabsExist(); // Auto-migrate Customers tab on first load
+    await ensureTabsCached(sheets, ctx.org.orgId); // Auto-migrate Customers tab on first load
     const customers = await sheets.getCustomers();
     return customers
       .map((c) => ({
@@ -84,7 +84,7 @@ export const customerRouter = router({
     .input(CustomerInputSchema)
     .mutation(async ({ ctx, input }) => {
       const sheets = await getSheetsService(ctx.org.orgId);
-      await sheets.ensureAllTabsExist();
+      await ensureTabsCached(sheets, ctx.org.orgId);
       const customerId = GoogleSheetsService.generateId("CUST");
 
       await sheets.appendRowByHeaders(SHEET_TABS.CUSTOMERS, {

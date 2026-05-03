@@ -173,7 +173,23 @@ export function BillingDetailClient({ billingId }: { billingId: string }) {
           rel="noopener noreferrer"
           className="app-btn app-btn-secondary"
         >
-          📄 PDF
+          📄 ดูเอกสาร
+        </a>
+        <a
+          href={`/documents/billing/${billingId}?print=1`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="app-btn app-btn-secondary"
+        >
+          🖨️ พิมพ์ต้นฉบับ
+        </a>
+        <a
+          href={`/documents/billing/${billingId}?copy=1&print=1`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="app-btn app-btn-secondary"
+        >
+          🖨️ พิมพ์สำเนา
         </a>
       </div>
 

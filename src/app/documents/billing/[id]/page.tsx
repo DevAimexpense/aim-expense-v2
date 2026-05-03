@@ -6,7 +6,7 @@
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth/session";
 import { getOrgContext } from "@/lib/auth/middleware";
-import { getSheetsService } from "@/server/lib/sheets-context";
+import { getSheetsService, ensureTabsCached } from "@/server/lib/sheets-context";
 import { prisma } from "@/lib/prisma";
 import { BillingDocument } from "./document";
 
@@ -16,8 +16,10 @@ export const metadata = {
 
 export default async function BillingDocumentPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ copy?: string }>;
 }) {
   const session = await getSession();
   if (!session) redirect("/login");
@@ -26,8 +28,11 @@ export default async function BillingDocumentPage({
   if (!orgCtx) redirect("/");
 
   const { id } = await params;
+  const sp = await searchParams;
+  const copyType: "original" | "copy" =
+    sp.copy === "1" || sp.copy === "copy" ? "copy" : "original";
   const sheets = await getSheetsService(orgCtx.orgId);
-  await sheets.ensureAllTabsExist();
+  await ensureTabsCached(sheets, orgCtx.orgId);
 
   const header = await sheets.getBillingById(id);
   if (!header) {
@@ -60,6 +65,8 @@ export default async function BillingDocumentPage({
 
   return (
     <BillingDocument
+      copyType={copyType}
+      billingId={id}
       org={{
         name: org.name,
         taxId: org.taxId,

@@ -77,6 +77,30 @@ export async function getSheetsService(orgId: string): Promise<GoogleSheetsServi
   return new GoogleSheetsService(accessToken, org.googleSpreadsheetId);
 }
 
+// Module-level cache: orgId → timestamp ของการ ensureAllTabsExist ครั้งล่าสุด
+// ป้องกันการเรียก spreadsheets.get + values.get N tabs ทุก request (~1-2s)
+// Cold start serverless = first request ของ instance นั้นจะตรวจ tabs จริง
+// Warm instance ภายใน TTL = ข้าม
+const ensuredOrgs = new Map<string, number>();
+const TAB_CACHE_MS = 60 * 60 * 1000; // 1 hour
+
+/**
+ * Cached wrapper รอบ sheets.ensureAllTabsExist()
+ * ใช้แทน sheets.ensureAllTabsExist() โดยตรงใน routers
+ *
+ * Per-process module cache: orgId checked → ข้าม subsequent calls ภายใน 1 ชม.
+ * (next.js server runtime: warm instance reuses module state)
+ */
+export async function ensureTabsCached(
+  sheets: GoogleSheetsService,
+  orgId: string
+): Promise<void> {
+  const last = ensuredOrgs.get(orgId);
+  if (last && Date.now() - last < TAB_CACHE_MS) return;
+  await sheets.ensureAllTabsExist();
+  ensuredOrgs.set(orgId, Date.now());
+}
+
 /**
  * Get GoogleDriveService instance for an org
  */

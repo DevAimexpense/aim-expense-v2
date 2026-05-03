@@ -7,7 +7,7 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { router, orgProcedure, permissionProcedure } from "../trpc";
-import { getSheetsService } from "../lib/sheets-context";
+import { getSheetsService, ensureTabsCached } from "../lib/sheets-context";
 import {
   GoogleSheetsService,
   SHEET_TABS,
@@ -163,7 +163,7 @@ export const quotationRouter = router({
     )
     .query(async ({ ctx, input }) => {
       const sheets = await getSheetsService(ctx.org.orgId);
-      await sheets.ensureAllTabsExist();
+      await ensureTabsCached(sheets, ctx.org.orgId);
       const all = await sheets.getQuotations();
 
       const filtered = all.filter((r) => {
@@ -207,7 +207,7 @@ export const quotationRouter = router({
     .input(QuotationCreateInput)
     .mutation(async ({ ctx, input }) => {
       const sheets = await getSheetsService(ctx.org.orgId);
-      await sheets.ensureAllTabsExist();
+      await ensureTabsCached(sheets, ctx.org.orgId);
 
       // 1. Snapshot customer
       const customer = await sheets.getCustomerById(input.customerId);
@@ -507,7 +507,7 @@ export const quotationRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const sheets = await getSheetsService(ctx.org.orgId);
-      await sheets.ensureAllTabsExist();
+      await ensureTabsCached(sheets, ctx.org.orgId);
 
       const q = await sheets.getQuotationById(input.quotationId);
       if (!q) {

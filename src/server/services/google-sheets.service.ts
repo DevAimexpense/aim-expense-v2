@@ -599,7 +599,7 @@ export class GoogleSheetsService {
       const value = data[header];
       if (value === undefined || value === null) return "";
       if (typeof value === "boolean") return value ? "TRUE" : "FALSE";
-      return value;
+      return preserveLeadingZeros(value);
     });
 
     await this.appendRow(tabName, row);
@@ -638,7 +638,7 @@ export class GoogleSheetsService {
     for (const [key, value] of Object.entries(updates)) {
       const colIndex = headers.indexOf(key);
       if (colIndex !== -1) {
-        updatedRow[colIndex] = String(value);
+        updatedRow[colIndex] = String(preserveLeadingZeros(value));
       }
     }
 
@@ -983,6 +983,20 @@ export class GoogleSheetsService {
 }
 
 // ===== Helper =====
+
+/**
+ * Force text-mode for values that look like numbers but need to keep leading zeros
+ * (e.g. taxId "0123456789012", branchNumber "00001", phone "0812345678")
+ *
+ * Sheets API USER_ENTERED parses pure-digit strings as numbers → drops leading 0.
+ * Prefix with apostrophe (') tells Sheets "store as text" — apostrophe consumed,
+ * value still reads back as the original string.
+ */
+function preserveLeadingZeros(value: string | number): string | number {
+  if (typeof value !== "string") return value;
+  if (/^0\d+$/.test(value)) return `'${value}`;
+  return value;
+}
 
 /**
  * Convert column number to letter (1 = A, 26 = Z, 27 = AA, etc.)

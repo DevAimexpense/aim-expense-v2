@@ -7,7 +7,7 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { router, orgProcedure, permissionProcedure } from "../trpc";
-import { getSheetsService } from "../lib/sheets-context";
+import { getSheetsService, ensureTabsCached } from "../lib/sheets-context";
 import {
   GoogleSheetsService,
   SHEET_TABS,
@@ -193,7 +193,7 @@ export const billingRouter = router({
     )
     .query(async ({ ctx, input }) => {
       const sheets = await getSheetsService(ctx.org.orgId);
-      await sheets.ensureAllTabsExist();
+      await ensureTabsCached(sheets, ctx.org.orgId);
       const all = await sheets.getBillings();
 
       const filtered = all.filter((r) => {
@@ -236,7 +236,7 @@ export const billingRouter = router({
     .input(BillingCreateInput)
     .mutation(async ({ ctx, input }) => {
       const sheets = await getSheetsService(ctx.org.orgId);
-      await sheets.ensureAllTabsExist();
+      await ensureTabsCached(sheets, ctx.org.orgId);
 
       const customer = await sheets.getCustomerById(input.customerId);
       if (!customer) {

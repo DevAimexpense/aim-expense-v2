@@ -5,7 +5,7 @@
 
 import { z } from "zod";
 import { router, orgProcedure } from "../trpc";
-import { getSheetsService } from "../lib/sheets-context";
+import { getSheetsService, ensureTabsCached } from "../lib/sheets-context";
 import { GoogleSheetsService, SHEET_TABS } from "../services/google-sheets.service";
 import { prisma } from "@/lib/prisma";
 import { TRPCError } from "@trpc/server";
@@ -37,7 +37,7 @@ export const companyBankRouter = router({
   list: orgProcedure.query(async ({ ctx }) => {
     const sheets = await getSheetsService(ctx.org.orgId);
     // Auto-migration: ensure CompanyBanks tab exists
-    await sheets.ensureAllTabsExist();
+    await ensureTabsCached(sheets, ctx.org.orgId);
 
     const banks = await sheets.getAll(SHEET_TABS.COMPANY_BANKS);
     return banks.map((b) => ({
@@ -58,7 +58,7 @@ export const companyBankRouter = router({
    */
   listForPayment: orgProcedure.query(async ({ ctx }) => {
     const sheets = await getSheetsService(ctx.org.orgId);
-    await sheets.ensureAllTabsExist();
+    await ensureTabsCached(sheets, ctx.org.orgId);
     const banks = await sheets.getAll(SHEET_TABS.COMPANY_BANKS);
     return banks
       .filter((b) => b.UseForPayment !== "FALSE" && b.UseForPayment !== "false")
@@ -79,7 +79,7 @@ export const companyBankRouter = router({
     .mutation(async ({ ctx, input }) => {
       requireAdmin(ctx.org.role);
       const sheets = await getSheetsService(ctx.org.orgId);
-      await sheets.ensureAllTabsExist();
+      await ensureTabsCached(sheets, ctx.org.orgId);
 
       // ถ้าตั้งเป็น default → unset อื่นทั้งหมด
       if (input.isDefault) {

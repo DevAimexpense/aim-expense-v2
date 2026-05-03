@@ -12,7 +12,7 @@ import { decryptToken } from "@/lib/google/token-encryption";
 import { refreshAccessToken } from "@/lib/google/oauth";
 import { encryptToken } from "@/lib/google/token-encryption";
 import { getDefaultPermissions } from "@/lib/permissions";
-import { getSheetsService } from "../lib/sheets-context";
+import { getSheetsService, ensureTabsCached } from "../lib/sheets-context";
 import { getAllDocPrefixes, isValidDocPrefix } from "../lib/doc-number";
 import { TRPCError } from "@trpc/server";
 
@@ -395,7 +395,7 @@ export const orgRouter = router({
       const sheets = await getSheetsService(ctx.org.orgId);
 
       // Ensure Config tab exists (auto-migrate)
-      await sheets.ensureAllTabsExist();
+      await ensureTabsCached(sheets, ctx.org.orgId);
 
       // Upsert 3 keys
       await sheets.setConfig("DOC_PREFIX_QT", input.QT);

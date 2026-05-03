@@ -5,7 +5,7 @@
 
 import { z } from "zod";
 import { router, orgProcedure, permissionProcedure } from "../trpc";
-import { getSheetsService } from "../lib/sheets-context";
+import { getSheetsService, ensureTabsCached } from "../lib/sheets-context";
 import { GoogleSheetsService, SHEET_TABS } from "../services/google-sheets.service";
 import { prisma } from "@/lib/prisma";
 import { calculatePayment } from "@/lib/calculations";
@@ -108,7 +108,7 @@ export const paymentRouter = router({
     )
     .query(async ({ ctx, input }) => {
       const sheets = await getSheetsService(ctx.org.orgId);
-      await sheets.ensureAllTabsExist();
+      await ensureTabsCached(sheets, ctx.org.orgId);
 
       let payments = await sheets.getPayments();
 
@@ -163,7 +163,7 @@ export const paymentRouter = router({
       }
 
       const sheets = await getSheetsService(ctx.org.orgId);
-      await sheets.ensureAllTabsExist();
+      await ensureTabsCached(sheets, ctx.org.orgId);
 
       const calc = calculatePayment({
         costPerUnit: input.costPerUnit,
