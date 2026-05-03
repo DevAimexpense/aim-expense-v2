@@ -439,12 +439,15 @@ export const userRouter = router({
           manageUsers: stored?.manageUsers ?? fallback.manageUsers,
           managePermissions:
             stored?.managePermissions ?? fallback.managePermissions,
-          // S23: Revenue keys — role default only (no Prisma column yet)
-          // Migration deferred to S24 when /permissions UI extends to revenue group
-          manageCustomers: fallback.manageCustomers,
-          manageQuotations: fallback.manageQuotations,
-          manageBillings: fallback.manageBillings,
-          manageTaxInvoices: fallback.manageTaxInvoices,
+          // S24: Revenue keys in Prisma — same stored-or-fallback pattern as legacy
+          manageCustomers:
+            stored?.manageCustomers ?? fallback.manageCustomers,
+          manageQuotations:
+            stored?.manageQuotations ?? fallback.manageQuotations,
+          manageBillings:
+            stored?.manageBillings ?? fallback.manageBillings,
+          manageTaxInvoices:
+            stored?.manageTaxInvoices ?? fallback.manageTaxInvoices,
         };
 
         return {
@@ -500,8 +503,7 @@ export const userRouter = router({
           "dashboardSummary",
           "manageUsers",
           "managePermissions",
-          // S23: Revenue keys — accepted in input for type compatibility
-          // but throw at runtime (no Prisma column yet — defer migration to S24)
+          // S24: Revenue keys — full per-user override support (Prisma columns added)
           "manageCustomers",
           "manageQuotations",
           "manageBillings",
@@ -511,20 +513,6 @@ export const userRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      // S23 guard: revenue keys are role-default-only — no per-user override yet
-      const REVENUE_KEYS = [
-        "manageCustomers",
-        "manageQuotations",
-        "manageBillings",
-        "manageTaxInvoices",
-      ];
-      if (REVENUE_KEYS.includes(input.key)) {
-        throw new TRPCError({
-          code: "NOT_IMPLEMENTED",
-          message:
-            "สิทธิ์รายได้ยังไม่รองรับการ override รายบุคคล (กำหนดตาม role อย่างเดียว)",
-        });
-      }
       const member = await prisma.orgMember.findFirst({
         where: { id: input.memberId, orgId: ctx.org.orgId },
       });

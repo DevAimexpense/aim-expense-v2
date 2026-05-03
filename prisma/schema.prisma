@@ -153,6 +153,11 @@ model UserPermission {
   isCustom                 Boolean      @default(false) @map("is_custom")
   updatedAt                DateTime     @updatedAt @map("updated_at")
   editPaymentAfterApproval Boolean      @default(false) @map("edit_payment_after_approval")
+  // ===== S24: Revenue module =====
+  manageCustomers          Boolean      @default(false) @map("manage_customers")
+  manageQuotations         Boolean      @default(false) @map("manage_quotations")
+  manageBillings           Boolean      @default(false) @map("manage_billings")
+  manageTaxInvoices        Boolean      @default(false) @map("manage_tax_invoices")
   org                      Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
   user                     User         @relation(fields: [userId], references: [id], onDelete: Cascade)
 

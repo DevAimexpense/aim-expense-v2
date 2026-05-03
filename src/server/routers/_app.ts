@@ -15,6 +15,7 @@ import { eventAssignmentRouter } from "./event-assignment.router";
 import { reportRouter } from "./report.router";
 import { customerRouter } from "./customer.router";
 import { quotationRouter } from "./quotation.router";
+import { billingRouter } from "./billing.router";
 
 export const appRouter = router({
   event: eventRouter,
@@ -29,6 +30,7 @@ export const appRouter = router({
   report: reportRouter,
   customer: customerRouter,
   quotation: quotationRouter,
+  billing: billingRouter,
 });
 
 export type AppRouter = typeof appRouter;

@@ -76,9 +76,7 @@ export async function getOrgContext(
   const roleHasEditAfterApproval =
     membership.role === "admin" || membership.role === "manager";
 
-  // S23: Revenue permission keys (manageCustomers/Quotations/Billings/TaxInvoices)
-  // ยังไม่มีใน Prisma UserPermission table — fallback ตาม role default จาก DEFAULT_PERMISSIONS
-  // (Add migration in S24 when /permissions UI extends to revenue group)
+  // S24: Revenue keys are now in Prisma UserPermission — same fallback pattern as legacy keys
   const role = (membership.role || "staff") as OrgRole;
   const roleDefaults = DEFAULT_PERMISSIONS[role] ?? DEFAULT_PERMISSIONS.staff;
 
@@ -100,11 +98,14 @@ export async function getOrgContext(
     dashboardSummary: perms?.dashboardSummary ?? false,
     manageUsers: perms?.manageUsers ?? false,
     managePermissions: perms?.managePermissions ?? false,
-    // Revenue (S23) — role default until S24 migration
-    manageCustomers: roleDefaults.manageCustomers,
-    manageQuotations: roleDefaults.manageQuotations,
-    manageBillings: roleDefaults.manageBillings,
-    manageTaxInvoices: roleDefaults.manageTaxInvoices,
+    // Revenue keys: stored in DB after S24 migration. Existing rows default to FALSE,
+    // so for orgs predating the migration we still fall back to role defaults so that
+    // admin/manager/accountant don't suddenly lose revenue access.
+    manageCustomers: perms?.manageCustomers ?? roleDefaults.manageCustomers,
+    manageQuotations: perms?.manageQuotations ?? roleDefaults.manageQuotations,
+    manageBillings: perms?.manageBillings ?? roleDefaults.manageBillings,
+    manageTaxInvoices:
+      perms?.manageTaxInvoices ?? roleDefaults.manageTaxInvoices,
   };
 
   return {

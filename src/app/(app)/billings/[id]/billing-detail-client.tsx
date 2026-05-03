@@ -2,15 +2,8 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { trpc } from "@/lib/trpc/client";
-import { StatusBadge } from "../quotations-client";
-
-const PLUS_30_DAYS = () => {
-  const d = new Date();
-  d.setDate(d.getDate() + 30);
-  return d.toISOString().slice(0, 10);
-};
+import { BillingStatusBadge } from "../billings-client";
 
 const formatTHB = (n: number) =>
   n.toLocaleString("th-TH", {
@@ -18,40 +11,36 @@ const formatTHB = (n: number) =>
     maximumFractionDigits: 2,
   });
 
-export function QuotationDetailClient({
-  quotationId,
-}: {
-  quotationId: string;
-}) {
-  const router = useRouter();
+const PAYMENT_METHODS: { value: "transfer" | "cash" | "cheque" | "creditCard" | "other"; label: string }[] = [
+  { value: "transfer", label: "โอนเงิน" },
+  { value: "cash", label: "เงินสด" },
+  { value: "cheque", label: "เช็ค" },
+  { value: "creditCard", label: "บัตรเครดิต" },
+  { value: "other", label: "อื่น ๆ" },
+];
+
+export function BillingDetailClient({ billingId }: { billingId: string }) {
   const utils = trpc.useUtils();
-  const detail = trpc.quotation.getById.useQuery({ quotationId });
-  const sendMut = trpc.quotation.send.useMutation();
-  const acceptMut = trpc.quotation.accept.useMutation();
-  const rejectMut = trpc.quotation.reject.useMutation();
-  const voidMut = trpc.quotation.void.useMutation();
-  const convertMut = trpc.quotation.convertToBilling.useMutation();
+  const detail = trpc.billing.getById.useQuery({ billingId });
+  const sendMut = trpc.billing.send.useMutation();
+  const voidMut = trpc.billing.void.useMutation();
 
   const [error, setError] = useState<string | null>(null);
-  const [showConvertModal, setShowConvertModal] = useState(false);
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
 
   const refresh = () => {
-    utils.quotation.getById.invalidate({ quotationId });
-    utils.quotation.list.invalidate();
+    utils.billing.getById.invalidate({ billingId });
+    utils.billing.list.invalidate();
   };
 
   const handleAction = async (
-    mut:
-      | typeof sendMut
-      | typeof acceptMut
-      | typeof rejectMut
-      | typeof voidMut,
+    mut: typeof sendMut | typeof voidMut,
     confirmText?: string
   ) => {
     if (confirmText && !confirm(confirmText)) return;
     setError(null);
     try {
-      await mut.mutateAsync({ quotationId });
+      await mut.mutateAsync({ billingId });
       refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "เกิดข้อผิดพลาด");
@@ -67,8 +56,8 @@ export function QuotationDetailClient({
         <div className="app-card">
           <div className="app-empty">
             <div className="app-empty-icon">❓</div>
-            <p className="app-empty-title">ไม่พบใบเสนอราคา</p>
-            <Link href="/quotations" className="app-btn app-btn-primary">
+            <p className="app-empty-title">ไม่พบใบวางบิล</p>
+            <Link href="/billings" className="app-btn app-btn-primary">
               ← กลับ
             </Link>
           </div>
@@ -78,32 +67,39 @@ export function QuotationDetailClient({
   }
 
   const { header, lines } = detail.data;
-  const isLoading =
-    sendMut.isPending ||
-    acceptMut.isPending ||
-    rejectMut.isPending ||
-    voidMut.isPending;
+  const isLoading = sendMut.isPending || voidMut.isPending;
 
   return (
     <div className="app-page">
       <div className="app-page-header">
         <div>
           <h1 className="app-page-title">
-            📜 {header.docNumber}{" "}
-            <StatusBadge status={header.status} />
+            🧾 {header.docNumber}{" "}
+            <BillingStatusBadge status={header.status} />
           </h1>
           <p className="app-page-subtitle">
-            ออกเมื่อ {header.docDate} • ใช้ได้ถึง {header.validUntil}
+            ออก {header.docDate} • ครบกำหนด {header.dueDate}
+            {header.sourceQuotationId && (
+              <>
+                {" • "}
+                สร้างจาก{" "}
+                <Link
+                  href={`/quotations/${header.sourceQuotationId}`}
+                  style={{ color: "#2563eb" }}
+                >
+                  ใบเสนอราคา
+                </Link>
+              </>
+            )}
           </p>
         </div>
-        <Link href="/quotations" className="app-btn app-btn-secondary">
+        <Link href="/billings" className="app-btn app-btn-secondary">
           ← กลับ
         </Link>
       </div>
 
       {error && <div className="app-error-msg">{error}</div>}
 
-      {/* Action buttons */}
       <div
         style={{
           display: "flex",
@@ -116,7 +112,7 @@ export function QuotationDetailClient({
           <>
             <button
               onClick={() =>
-                handleAction(sendMut, `ส่งใบเสนอราคา ${header.docNumber} ใช่หรือไม่?`)
+                handleAction(sendMut, `ส่งใบวางบิล ${header.docNumber}?`)
               }
               disabled={isLoading}
               className="app-btn app-btn-primary"
@@ -124,14 +120,14 @@ export function QuotationDetailClient({
               ✉️ ส่งให้ลูกค้า
             </button>
             <Link
-              href={`/quotations/${quotationId}/edit`}
+              href={`/billings/${billingId}/edit`}
               className="app-btn app-btn-secondary"
             >
               ✏️ แก้ไข
             </Link>
             <button
               onClick={() =>
-                handleAction(voidMut, `ยกเลิกใบเสนอราคา ${header.docNumber}?`)
+                handleAction(voidMut, `ยกเลิกใบวางบิล ${header.docNumber}?`)
               }
               disabled={isLoading}
               className="app-btn app-btn-ghost"
@@ -141,35 +137,18 @@ export function QuotationDetailClient({
             </button>
           </>
         )}
-        {header.status === "sent" && (
+        {(header.status === "sent" || header.status === "partial") && (
           <>
             <button
-              onClick={() =>
-                handleAction(
-                  acceptMut,
-                  `ลูกค้ายืนยันรับใบเสนอราคา ${header.docNumber}?`
-                )
-              }
+              onClick={() => setShowPaymentModal(true)}
               disabled={isLoading}
               className="app-btn app-btn-primary"
             >
-              ✅ ลูกค้ายืนยัน
+              💰 บันทึกรับเงิน
             </button>
             <button
               onClick={() =>
-                handleAction(
-                  rejectMut,
-                  `บันทึกว่าลูกค้าปฏิเสธใบเสนอราคา ${header.docNumber}?`
-                )
-              }
-              disabled={isLoading}
-              className="app-btn app-btn-secondary"
-            >
-              ❌ ลูกค้าปฏิเสธ
-            </button>
-            <button
-              onClick={() =>
-                handleAction(voidMut, `ยกเลิกใบเสนอราคา ${header.docNumber}?`)
+                handleAction(voidMut, `ยกเลิกใบวางบิล ${header.docNumber}?`)
               }
               disabled={isLoading}
               className="app-btn app-btn-ghost"
@@ -179,38 +158,25 @@ export function QuotationDetailClient({
             </button>
           </>
         )}
-        {header.status === "accepted" && (
-          <>
-            <button
-              onClick={() => setShowConvertModal(true)}
-              disabled={isLoading || convertMut.isPending}
-              className="app-btn app-btn-primary"
-            >
-              → สร้างใบวางบิล
-            </button>
-            <button
-              onClick={() =>
-                handleAction(voidMut, `ยกเลิกใบเสนอราคา ${header.docNumber}?`)
-              }
-              disabled={isLoading}
-              className="app-btn app-btn-ghost"
-              style={{ color: "#dc2626" }}
-            >
-              🗑️ ยกเลิก
-            </button>
-          </>
+        {header.status === "paid" && (
+          <button
+            disabled
+            className="app-btn app-btn-secondary"
+            title="ฟีเจอร์ S25"
+          >
+            → ออกใบกำกับภาษี (S25)
+          </button>
         )}
         <button
           disabled
           className="app-btn app-btn-ghost"
-          title="PDF จะรองรับใน S24"
+          title="PDF เร็ว ๆ นี้"
         >
           📄 PDF (เร็ว ๆ นี้)
         </button>
       </div>
 
       <div className="app-section cols-2">
-        {/* Customer + Doc info */}
         <div className="app-card">
           <div className="app-card-header">
             <h2 className="app-card-title">ลูกค้า</h2>
@@ -245,7 +211,7 @@ export function QuotationDetailClient({
               <strong>วันที่ออก:</strong> {header.docDate}
             </div>
             <div>
-              <strong>ใช้ได้ถึง:</strong> {header.validUntil}
+              <strong>วันครบกำหนด:</strong> {header.dueDate}
             </div>
             <div>
               <strong>ผู้จัดทำ:</strong> {header.preparedBy || "-"}
@@ -254,7 +220,6 @@ export function QuotationDetailClient({
         </div>
       </div>
 
-      {/* Lines */}
       <div className="app-card" style={{ marginTop: "1rem" }}>
         <div className="app-card-header">
           <h2 className="app-card-title">รายการ</h2>
@@ -302,7 +267,7 @@ export function QuotationDetailClient({
             padding: "1rem",
             background: "#f8fafc",
             borderRadius: "0.5rem",
-            maxWidth: "320px",
+            maxWidth: "360px",
             marginLeft: "auto",
             fontSize: "0.875rem",
           }}
@@ -346,12 +311,61 @@ export function QuotationDetailClient({
               justifyContent: "space-between",
               borderTop: "1px solid #cbd5e1",
               paddingTop: "0.5rem",
-              fontWeight: 700,
-              fontSize: "1rem",
+              fontWeight: 600,
             }}
           >
             <span>ยอดรวมสุทธิ:</span>
             <span className="num">{formatTHB(header.grandTotal)}</span>
+          </div>
+          {header.whtPercent > 0 && (
+            <>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  marginTop: "0.5rem",
+                  color: "#dc2626",
+                }}
+              >
+                <span>หัก WHT {header.whtPercent}%:</span>
+                <span className="num">−{formatTHB(header.whtAmount)}</span>
+              </div>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  marginTop: "0.5rem",
+                  fontWeight: 700,
+                  color: "#166534",
+                }}
+              >
+                <span>ลูกค้าต้องจ่าย:</span>
+                <span className="num">
+                  {formatTHB(header.amountReceivable)}
+                </span>
+              </div>
+            </>
+          )}
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              marginTop: "0.5rem",
+              borderTop: "1px solid #cbd5e1",
+              paddingTop: "0.5rem",
+              fontWeight: 600,
+              color:
+                header.balance === 0
+                  ? "#166534"
+                  : header.balance > 0
+                  ? "#c2410c"
+                  : "#475569",
+            }}
+          >
+            <span>รับแล้ว / คงค้าง:</span>
+            <span className="num">
+              {formatTHB(header.paidAmount)} / {formatTHB(header.balance)}
+            </span>
           </div>
         </div>
       </div>
@@ -381,16 +395,14 @@ export function QuotationDetailClient({
         </div>
       )}
 
-      {showConvertModal && (
-        <ConvertToBillingModal
-          quotationId={quotationId}
-          docNumber={header.docNumber}
-          onClose={() => setShowConvertModal(false)}
-          onSuccess={(billingId) => {
-            setShowConvertModal(false);
-            utils.quotation.getById.invalidate({ quotationId });
-            utils.billing.list.invalidate();
-            router.push(`/billings/${billingId}`);
+      {showPaymentModal && (
+        <RecordPaymentModal
+          billingId={billingId}
+          balance={header.balance}
+          onClose={() => setShowPaymentModal(false)}
+          onSuccess={() => {
+            setShowPaymentModal(false);
+            refresh();
           }}
         />
       )}
@@ -398,44 +410,45 @@ export function QuotationDetailClient({
   );
 }
 
-function ConvertToBillingModal({
-  quotationId,
-  docNumber,
+function RecordPaymentModal({
+  billingId,
+  balance,
   onClose,
   onSuccess,
 }: {
-  quotationId: string;
-  docNumber: string;
+  billingId: string;
+  balance: number;
   onClose: () => void;
-  onSuccess: (billingId: string) => void;
+  onSuccess: () => void;
 }) {
-  const convertMut = trpc.quotation.convertToBilling.useMutation();
+  const recordMut = trpc.billing.recordPayment.useMutation();
 
-  const today = new Date().toISOString().slice(0, 10);
-  const [docDate, setDocDate] = useState(today);
-  const [dueDate, setDueDate] = useState(PLUS_30_DAYS());
-  const [whtPercent, setWhtPercent] = useState(0);
+  const [amount, setAmount] = useState(balance);
+  const [paidDate, setPaidDate] = useState(
+    new Date().toISOString().slice(0, 10)
+  );
+  const [paymentMethod, setPaymentMethod] = useState<
+    "transfer" | "cash" | "cheque" | "creditCard" | "other"
+  >("transfer");
+  const [notes, setNotes] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-    if (!dueDate) {
-      setError("กรุณาระบุวันครบกำหนด");
-      return;
-    }
-    if (dueDate < docDate) {
-      setError("วันครบกำหนดต้องไม่น้อยกว่าวันที่ออก");
+    if (amount <= 0) {
+      setError("จำนวนเงินต้องมากกว่า 0");
       return;
     }
     try {
-      const result = await convertMut.mutateAsync({
-        quotationId,
-        docDate,
-        dueDate,
-        whtPercent,
+      await recordMut.mutateAsync({
+        billingId,
+        amount,
+        paidDate,
+        paymentMethod,
+        notes: notes.trim() || undefined,
       });
-      onSuccess(result.billingId);
+      onSuccess();
     } catch (e) {
       setError(e instanceof Error ? e.message : "เกิดข้อผิดพลาด");
     }
@@ -449,7 +462,7 @@ function ConvertToBillingModal({
       <div className="app-modal modal-lg">
         <form onSubmit={handleSubmit}>
           <div className="app-modal-header">
-            <h3 className="app-modal-title">→ สร้างใบวางบิล</h3>
+            <h3 className="app-modal-title">💰 บันทึกรับเงิน</h3>
             <button
               type="button"
               onClick={onClose}
@@ -467,51 +480,71 @@ function ConvertToBillingModal({
                 marginBottom: "0.75rem",
               }}
             >
-              สร้างใบวางบิลจากใบเสนอราคา <strong>{docNumber}</strong> —
-              ใบเสนอราคาจะถูกล็อกเป็น "converted" หลัง convert
+              คงค้าง:{" "}
+              <strong>
+                {balance.toLocaleString("th-TH", {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                })}
+              </strong>{" "}
+              บาท
             </p>
-            <div className="app-form-grid cols-2">
-              <div className="app-form-group">
-                <label className="app-label app-label-required">
-                  วันที่ออก
-                </label>
-                <input
-                  type="date"
-                  value={docDate}
-                  onChange={(e) => setDocDate(e.target.value)}
-                  className="app-input"
-                />
-              </div>
-              <div className="app-form-group">
-                <label className="app-label app-label-required">
-                  วันครบกำหนด
-                </label>
-                <input
-                  type="date"
-                  value={dueDate}
-                  onChange={(e) => setDueDate(e.target.value)}
-                  className="app-input"
-                />
-              </div>
-            </div>
             <div className="app-form-group">
-              <label className="app-label">
-                WHT% (ลูกค้าหัก ณ ที่จ่ายเรา)
+              <label className="app-label app-label-required">
+                จำนวนเงินที่รับ
               </label>
               <input
                 type="number"
-                value={whtPercent}
-                onChange={(e) =>
-                  setWhtPercent(parseFloat(e.target.value) || 0)
-                }
-                min={0}
-                max={15}
-                step={0.5}
+                value={amount}
+                onChange={(e) => setAmount(parseFloat(e.target.value) || 0)}
+                min={0.01}
+                max={balance}
+                step={0.01}
                 className="app-input num"
+                autoFocus
               />
               <p className="app-hint">
-                Default 0 — แก้ใน /billings/[id]/edit ก็ได้
+                ระบบจะอัปเดตสถานะเป็น "รับบางส่วน" หรือ "ชำระครบ" อัตโนมัติ
               </p>
+            </div>
+            <div className="app-form-grid cols-2">
+              <div className="app-form-group">
+                <label className="app-label app-label-required">วันที่รับ</label>
+                <input
+                  type="date"
+                  value={paidDate}
+                  onChange={(e) => setPaidDate(e.target.value)}
+                  className="app-input"
+                />
+              </div>
+              <div className="app-form-group">
+                <label className="app-label app-label-required">วิธีรับ</label>
+                <select
+                  value={paymentMethod}
+                  onChange={(e) =>
+                    setPaymentMethod(
+                      e.target.value as typeof paymentMethod
+                    )
+                  }
+                  className="app-select"
+                >
+                  {PAYMENT_METHODS.map((m) => (
+                    <option key={m.value} value={m.value}>
+                      {m.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="app-form-group">
+              <label className="app-label">หมายเหตุ</label>
+              <textarea
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                rows={2}
+                className="app-textarea"
+                maxLength={500}
+              />
             </div>
           </div>
           <div className="app-modal-footer">
@@ -524,15 +557,15 @@ function ConvertToBillingModal({
             </button>
             <button
               type="submit"
-              disabled={convertMut.isPending}
+              disabled={recordMut.isPending}
               className="app-btn app-btn-primary"
             >
-              {convertMut.isPending ? (
+              {recordMut.isPending ? (
                 <>
-                  <span className="app-spinner" /> กำลังสร้าง...
+                  <span className="app-spinner" /> กำลังบันทึก...
                 </>
               ) : (
-                "สร้างใบวางบิล"
+                "บันทึกรับเงิน"
               )}
             </button>
           </div>

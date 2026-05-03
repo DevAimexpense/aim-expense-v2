@@ -481,6 +481,193 @@ export const quotationRouter = router({
       });
       return { success: true };
     }),
+
+  /**
+   * Convert accepted quotation → billing
+   *
+   * - Quotation ต้องอยู่ใน status "accepted"
+   * - สร้าง Billing header + lines copy จาก quotation (ลูกค้า + lines + totals)
+   * - SourceQuotationID = quotation.QuotationID
+   * - DueDate ใช้ input (default = docDate + 30 days)
+   * - WHTPercent ใช้ input (default = customer.DefaultWHTPercent)
+   * - Mark quotation Status = "converted" (lock)
+   * - Audit log ทั้ง 2 entries (billing.create + quotation.converted)
+   *
+   * Permission: manageBillings (ไม่ใช่ manageQuotations) — เพราะคนที่ทำ billing
+   * จะเป็นคนตัดสินใจค่าจ่าย แม้ quotation อาจจะถูกสร้างโดยคนอื่น
+   */
+  convertToBilling: permissionProcedure("manageBillings")
+    .input(
+      z.object({
+        quotationId: z.string(),
+        docDate: z.string().min(1).optional(), // default = today
+        dueDate: z.string().min(1), // required
+        whtPercent: z.number().min(0).max(15).optional(), // default = customer
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const sheets = await getSheetsService(ctx.org.orgId);
+      await sheets.ensureAllTabsExist();
+
+      const q = await sheets.getQuotationById(input.quotationId);
+      if (!q) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "ไม่พบใบเสนอราคา",
+        });
+      }
+      if (q.Status !== "accepted") {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: `ใบเสนอราคาต้องอยู่ในสถานะ accepted (ปัจจุบัน: ${q.Status})`,
+        });
+      }
+
+      const customer = await sheets.getCustomerById(q.CustomerID);
+      if (!customer) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "ไม่พบลูกค้าของใบเสนอราคานี้",
+        });
+      }
+
+      const qLines = await sheets.getQuotationLines(input.quotationId);
+      qLines.sort(
+        (a, b) =>
+          (parseInt(a.LineNumber, 10) || 0) -
+          (parseInt(b.LineNumber, 10) || 0)
+      );
+
+      // Build totals from existing quotation values (don't recompute — preserve)
+      const subtotal = parseFloat(q.Subtotal) || 0;
+      const discountAmount = parseFloat(q.DiscountAmount) || 0;
+      const vatAmount = parseFloat(q.VATAmount) || 0;
+      const grandTotal = parseFloat(q.GrandTotal) || 0;
+      const vatIncluded = q.VATIncluded === "TRUE" || q.VATIncluded === "true";
+      const whtPercent =
+        input.whtPercent ?? parseFloat(customer.DefaultWHTPercent) ?? 0;
+      const whtAmount = Math.round(((subtotal * whtPercent) / 100) * 100) / 100;
+      const amountReceivable = Math.round((grandTotal - whtAmount) * 100) / 100;
+
+      const billingId = GoogleSheetsService.generateId("BIL");
+      const docDate = input.docDate || new Date().toISOString().slice(0, 10);
+      const year = new Date(docDate).getFullYear() || new Date().getFullYear();
+      const docNumber = await computeNextDocNumber(
+        sheets,
+        "BIL",
+        year,
+        SHEET_TABS.BILLINGS
+      );
+
+      const now = new Date().toISOString();
+
+      try {
+        await sheets.appendRowByHeaders(SHEET_TABS.BILLINGS, {
+          BillingID: billingId,
+          DocNumber: docNumber,
+          DocDate: docDate,
+          DueDate: input.dueDate,
+          CustomerID: customer.CustomerID,
+          CustomerNameSnapshot: q.CustomerNameSnapshot || customer.CustomerName,
+          CustomerTaxIdSnapshot:
+            q.CustomerTaxIdSnapshot || customer.TaxID || "",
+          CustomerAddressSnapshot:
+            q.CustomerAddressSnapshot ||
+            customer.BillingAddress ||
+            customer.Address ||
+            "",
+          SourceQuotationID: q.QuotationID,
+          EventID: q.EventID || "",
+          ProjectName: q.ProjectName || "",
+          Status: "draft",
+          Subtotal: subtotal,
+          DiscountAmount: discountAmount,
+          VATAmount: vatAmount,
+          VATIncluded: vatIncluded ? "TRUE" : "FALSE",
+          WHTPercent: whtPercent,
+          WHTAmount: whtAmount,
+          GrandTotal: grandTotal,
+          AmountReceivable: amountReceivable,
+          PaidAmount: 0,
+          PaidDate: "",
+          PaymentMethod: "",
+          BankAccountID: "",
+          Notes: q.Notes || "",
+          Terms: q.Terms || "",
+          PreparedBy: ctx.session.displayName || "",
+          PreparedByUserId: ctx.session.userId,
+          CreatedAt: now,
+          UpdatedAt: now,
+          PdfUrl: "",
+        });
+
+        for (let i = 0; i < qLines.length; i++) {
+          const ql = qLines[i];
+          await sheets.appendRowByHeaders(SHEET_TABS.BILLING_LINES, {
+            LineID: GoogleSheetsService.generateId("BILL"),
+            BillingID: billingId,
+            LineNumber: i + 1,
+            Description: ql.Description || "",
+            Quantity: parseFloat(ql.Quantity) || 0,
+            UnitPrice: parseFloat(ql.UnitPrice) || 0,
+            DiscountPercent: parseFloat(ql.DiscountPercent) || 0,
+            LineTotal: parseFloat(ql.LineTotal) || 0,
+            Notes: ql.Notes || "",
+          });
+        }
+      } catch (e) {
+        // Cleanup orphan billing
+        try {
+          await sheets.deleteById(SHEET_TABS.BILLINGS, "BillingID", billingId);
+          const orphans = await sheets.getBillingLines(billingId);
+          for (const ol of orphans) {
+            await sheets.deleteById(
+              SHEET_TABS.BILLING_LINES,
+              "LineID",
+              ol.LineID
+            );
+          }
+        } catch {
+          /* ignore */
+        }
+        throw e;
+      }
+
+      // Mark quotation as converted (locks it from further state changes)
+      await sheets.updateById(
+        SHEET_TABS.QUOTATIONS,
+        "QuotationID",
+        input.quotationId,
+        {
+          Status: "converted",
+          UpdatedAt: new Date().toISOString(),
+        }
+      );
+
+      // Audit (2 entries)
+      await prisma.auditLog.create({
+        data: {
+          orgId: ctx.org.orgId,
+          userId: ctx.session.userId,
+          action: "create",
+          entityType: "billing",
+          entityRef: billingId,
+          summary: `สร้างใบวางบิล ${docNumber} จากใบเสนอราคา ${q.DocNumber}`,
+        },
+      });
+      await prisma.auditLog.create({
+        data: {
+          orgId: ctx.org.orgId,
+          userId: ctx.session.userId,
+          action: "update",
+          entityType: "quotation",
+          entityRef: input.quotationId,
+          summary: `แปลงใบเสนอราคา ${q.DocNumber} → ใบวางบิล ${docNumber}`,
+        },
+      });
+
+      return { success: true, billingId, docNumber };
+    }),
 });
 
 // ===== Helper: state transition =====

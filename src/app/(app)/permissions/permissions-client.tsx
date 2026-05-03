@@ -36,6 +36,7 @@ const GROUP_ORDER: Array<keyof typeof PERMISSION_GROUPS> = [
   "events",
   "masterData",
   "payments",
+  "revenue",
   "reports",
   "admin",
 ];

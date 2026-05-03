@@ -19,6 +19,9 @@ export const SHEET_TABS = {
   CUSTOMERS: "Customers",
   QUOTATIONS: "Quotations",
   QUOTATION_LINES: "QuotationLines",
+  // ===== S24: Billings =====
+  BILLINGS: "Billings",
+  BILLING_LINES: "BillingLines",
 } as const;
 
 // ===== Column Headers per Tab =====
@@ -173,6 +176,51 @@ export const SHEET_HEADERS: Record<string, string[]> = {
   [SHEET_TABS.QUOTATION_LINES]: [
     "LineID",
     "QuotationID", // FK
+    "LineNumber",
+    "Description",
+    "Quantity",
+    "UnitPrice",
+    "DiscountPercent",
+    "LineTotal",
+    "Notes",
+  ],
+  // ===== S24: Billings =====
+  [SHEET_TABS.BILLINGS]: [
+    "BillingID",
+    "DocNumber", // BIL-2026-0001 (per-org prefix configurable)
+    "DocDate",
+    "DueDate",
+    "CustomerID",
+    "CustomerNameSnapshot",
+    "CustomerTaxIdSnapshot",
+    "CustomerAddressSnapshot",
+    "SourceQuotationID", // optional — if converted from Quotation
+    "EventID",
+    "ProjectName",
+    "Status", // draft | sent | partial | paid | void
+    "Subtotal",
+    "DiscountAmount",
+    "VATAmount",
+    "VATIncluded",
+    "WHTPercent", // ลูกค้าหัก ณ ที่จ่ายเรา
+    "WHTAmount", // = Subtotal × WHTPercent / 100
+    "GrandTotal", // Subtotal + VAT
+    "AmountReceivable", // GrandTotal - WHTAmount
+    "PaidAmount", // running — อัปเดตเมื่อรับเงิน
+    "PaidDate", // วันรับเงินครั้งล่าสุด
+    "PaymentMethod", // transfer | cash | cheque | creditCard | other
+    "BankAccountID", // ref → CompanyBanks (ถ้าโอน)
+    "Notes",
+    "Terms",
+    "PreparedBy",
+    "PreparedByUserId",
+    "CreatedAt",
+    "UpdatedAt",
+    "PdfUrl",
+  ],
+  [SHEET_TABS.BILLING_LINES]: [
+    "LineID",
+    "BillingID",
     "LineNumber",
     "Description",
     "Quantity",
@@ -906,6 +954,20 @@ export class GoogleSheetsService {
       "QuotationID",
       quotationId
     );
+  }
+
+  // ===== Billings (S24) =====
+
+  async getBillings() {
+    return this.getAll(SHEET_TABS.BILLINGS);
+  }
+
+  async getBillingById(billingId: string) {
+    return this.getById(SHEET_TABS.BILLINGS, "BillingID", billingId);
+  }
+
+  async getBillingLines(billingId: string) {
+    return this.getFiltered(SHEET_TABS.BILLING_LINES, "BillingID", billingId);
   }
 
   // ===== ID GENERATION =====
