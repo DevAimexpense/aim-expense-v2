@@ -3,6 +3,11 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { trpc } from "@/lib/trpc/client";
+import type { inferRouterOutputs } from "@trpc/server";
+import type { AppRouter } from "@/server/routers/_app";
+
+type QuotationListItem =
+  inferRouterOutputs<AppRouter>["quotation"]["list"][number];
 
 type Status = "draft" | "sent" | "accepted" | "rejected" | "void" | "converted";
 
@@ -49,23 +54,32 @@ function isExpired(validUntil: string, status: Status): boolean {
   return validUntil < new Date().toISOString().slice(0, 10);
 }
 
-export function QuotationsClient() {
+export function QuotationsClient({
+  initialQuotations,
+}: {
+  initialQuotations: QuotationListItem[];
+}) {
   const [statusFilter, setStatusFilter] = useState<Status | "all">("all");
   const [customerFilter, setCustomerFilter] = useState<string>("all");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
-  const queryInput =
-    statusFilter === "all"
-      ? {}
-      : { status: statusFilter };
-  const listQuery = trpc.quotation.list.useQuery({
-    ...queryInput,
-    customerId: customerFilter === "all" ? undefined : customerFilter,
-    from: from || undefined,
-    to: to || undefined,
-  });
+  const hasFilter =
+    statusFilter !== "all" || customerFilter !== "all" || !!from || !!to;
+  const queryInput = statusFilter === "all" ? {} : { status: statusFilter };
+  const listQuery = trpc.quotation.list.useQuery(
+    {
+      ...queryInput,
+      customerId: customerFilter === "all" ? undefined : customerFilter,
+      from: from || undefined,
+      to: to || undefined,
+    },
+    {
+      // First paint uses server-fetched data — no client roundtrip
+      initialData: hasFilter ? undefined : initialQuotations,
+    }
+  );
   // Lazy: don't block page on customer list — load after main list resolves
   const [shouldLoadCustomers, setShouldLoadCustomers] = useState(false);
   const customersQuery = trpc.customer.list.useQuery(undefined, {
