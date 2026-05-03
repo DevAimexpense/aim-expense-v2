@@ -2,23 +2,12 @@
 
 import { useState } from "react";
 import { trpc } from "@/lib/trpc/client";
-import type { inferRouterOutputs } from "@trpc/server";
-import type { AppRouter } from "@/server/routers/_app";
-
-type CustomerListItem =
-  inferRouterOutputs<AppRouter>["customer"]["list"][number];
 
 const PAYMENT_TERMS_DEFAULTS = ["NET 0", "NET 15", "NET 30", "NET 60", "NET 90"];
 
-export function CustomersClient({
-  initialCustomers,
-}: {
-  initialCustomers: CustomerListItem[];
-}) {
+export function CustomersClient() {
   const utils = trpc.useUtils();
-  const customersQuery = trpc.customer.list.useQuery(undefined, {
-    initialData: initialCustomers,
-  });
+  const customersQuery = trpc.customer.list.useQuery();
   const customers = customersQuery.data || [];
 
   const [showModal, setShowModal] = useState(false);

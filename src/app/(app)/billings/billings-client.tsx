@@ -3,11 +3,6 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { trpc } from "@/lib/trpc/client";
-import type { inferRouterOutputs } from "@trpc/server";
-import type { AppRouter } from "@/server/routers/_app";
-
-type BillingListItem =
-  inferRouterOutputs<AppRouter>["billing"]["list"][number];
 
 type Status = "draft" | "sent" | "partial" | "paid" | "void";
 
@@ -53,31 +48,20 @@ function isOverdue(dueDate: string, status: Status, balance: number): boolean {
   return dueDate < new Date().toISOString().slice(0, 10);
 }
 
-export function BillingsClient({
-  initialBillings,
-}: {
-  initialBillings: BillingListItem[];
-}) {
+export function BillingsClient() {
   const [statusFilter, setStatusFilter] = useState<Status | "all">("all");
   const [customerFilter, setCustomerFilter] = useState<string>("all");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
-  const hasFilter =
-    statusFilter !== "all" || customerFilter !== "all" || !!from || !!to;
   const queryInput = statusFilter === "all" ? {} : { status: statusFilter };
-  const listQuery = trpc.billing.list.useQuery(
-    {
-      ...queryInput,
-      customerId: customerFilter === "all" ? undefined : customerFilter,
-      from: from || undefined,
-      to: to || undefined,
-    },
-    {
-      initialData: hasFilter ? undefined : initialBillings,
-    }
-  );
+  const listQuery = trpc.billing.list.useQuery({
+    ...queryInput,
+    customerId: customerFilter === "all" ? undefined : customerFilter,
+    from: from || undefined,
+    to: to || undefined,
+  });
   const [shouldLoadCustomers, setShouldLoadCustomers] = useState(false);
   const customersQuery = trpc.customer.list.useQuery(undefined, {
     enabled: shouldLoadCustomers,

@@ -4,6 +4,7 @@
 // ===========================================
 
 import { redirect } from "next/navigation";
+import { cache } from "react";
 import { getSession, type SessionPayload } from "./session";
 import { prisma } from "@/lib/prisma";
 import type { Permissions, OrgRole } from "@/types/permissions";
@@ -37,8 +38,12 @@ export async function requireAuth(): Promise<SessionPayload> {
  * Get user's org context
  * หา org ที่ user เป็น member (active)
  * ถ้ามีหลาย org → ใช้ตัวแรก (TODO: org switcher)
+ *
+ * Wrapped in React.cache() — layout.tsx + page.tsx ใน Next.js App Router
+ * รันใน same request → without cache จะ query prisma ซ้ำ (~50-100ms × 2).
+ * cache() ดึง result เดิมกลับมาใช้ภายใน single request.
  */
-export async function getOrgContext(
+export const getOrgContext = cache(async function getOrgContextImpl(
   userId: string,
   activeOrgId?: string | null
 ): Promise<OrgContext | null> {
@@ -116,7 +121,7 @@ export async function getOrgContext(
     googleSpreadsheetId: membership.org.googleSpreadsheetId,
     googleDriveFolderId: membership.org.googleDriveFolderId,
   };
-}
+});
 
 /**
  * Require auth + org — redirect if missing

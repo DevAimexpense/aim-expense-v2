@@ -6,6 +6,7 @@
 
 import { SignJWT, jwtVerify } from "jose";
 import { cookies } from "next/headers";
+import { cache } from "react";
 
 const SESSION_COOKIE = "aim-session";
 const SESSION_MAX_AGE = 60 * 60 * 24 * 7; // 7 days
@@ -96,14 +97,21 @@ export async function setSessionCookie(payload: SessionPayload): Promise<void> {
 
 /**
  * Get current session from cookie
+ *
+ * Wrapped in React.cache() — Next.js App Router runs both layout.tsx and
+ * page.tsx within the same request. Without cache, getSession() runs twice
+ * (cookie decrypt + JWT verify each time = ~10-20ms each). cache() ensures
+ * the result is reused within a single request.
  */
-export async function getSession(): Promise<SessionPayload | null> {
-  const cookieStore = await cookies();
-  const token = cookieStore.get(SESSION_COOKIE)?.value;
+export const getSession = cache(
+  async (): Promise<SessionPayload | null> => {
+    const cookieStore = await cookies();
+    const token = cookieStore.get(SESSION_COOKIE)?.value;
 
-  if (!token) return null;
-  return verifySessionToken(token);
-}
+    if (!token) return null;
+    return verifySessionToken(token);
+  }
+);
 
 /**
  * Clear session cookie (logout)

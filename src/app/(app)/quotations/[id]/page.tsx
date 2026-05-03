@@ -1,10 +1,10 @@
 // ===========================================
 // /quotations/[id] — Server entry (plan-gated)
+// (Auth + org check done by layout.tsx — only plan check here)
 // ===========================================
 
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth/session";
-import { getOrgContext } from "@/lib/auth/middleware";
 import { prisma } from "@/lib/prisma";
 import { QuotationDetailClient } from "./quotation-detail-client";
 
@@ -20,14 +20,11 @@ export default async function QuotationDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const session = await getSession();
-  if (!session) redirect("/login");
-  if (session.onboardingStep !== "done") redirect("/");
-
-  const org = await getOrgContext(session.userId);
-  if (!org) redirect("/");
+  if (!session?.activeOrgId) redirect("/");
 
   const subscription = await prisma.subscription.findUnique({
-    where: { orgId: org.orgId },
+    where: { orgId: session.activeOrgId },
+    select: { plan: true },
   });
   if (!ALLOWED_PLANS.includes(subscription?.plan || "free")) {
     redirect("/dashboard?upgrade=required");
