@@ -87,16 +87,19 @@ const NAV_GROUPS: NavGroup[] = [
         label: "ใบเสนอราคา",
         href: "/quotations",
         icon: "📜",
+        permission: "manageQuotations",
       },
       {
         label: "ใบวางบิล",
         href: "/billings",
         icon: "🧾",
+        permission: "manageBillings",
       },
       {
         label: "ใบกำกับภาษี",
         href: "/tax-invoices",
         icon: "🧮",
+        permission: "manageTaxInvoices",
       },
     ],
   },
@@ -108,6 +111,12 @@ const NAV_GROUPS: NavGroup[] = [
         href: "/payees",
         icon: "👤",
         permission: "managePayees",
+      },
+      {
+        label: "ลูกค้า",
+        href: "/customers",
+        icon: "🏢",
+        permission: "manageCustomers",
       },
       {
         label: "รายชื่อธนาคาร",

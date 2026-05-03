@@ -6,7 +6,7 @@
 import type { Permissions, OrgRole } from "@/types/permissions";
 
 /**
- * Full access — all 13 permissions = true
+ * Full access — all 18 permissions = true
  */
 const ALL_TRUE: Permissions = {
   manageEvents: true,
@@ -23,10 +23,14 @@ const ALL_TRUE: Permissions = {
   dashboardSummary: true,
   manageUsers: true,
   managePermissions: true,
+  manageCustomers: true,
+  manageQuotations: true,
+  manageBillings: true,
+  manageTaxInvoices: true,
 };
 
 /**
- * No access — all 14 permissions = false
+ * No access — all 18 permissions = false
  */
 const ALL_FALSE: Permissions = {
   manageEvents: false,
@@ -43,6 +47,10 @@ const ALL_FALSE: Permissions = {
   dashboardSummary: false,
   manageUsers: false,
   managePermissions: false,
+  manageCustomers: false,
+  manageQuotations: false,
+  manageBillings: false,
+  manageTaxInvoices: false,
 };
 
 /**
@@ -71,6 +79,10 @@ export const DEFAULT_PERMISSIONS: Record<OrgRole, Permissions> = {
     dashboardSummary: true,
     manageUsers: false,
     managePermissions: false,
+    manageCustomers: true,
+    manageQuotations: true,
+    manageBillings: true,
+    manageTaxInvoices: false,
   },
 
   accountant: {
@@ -88,6 +100,10 @@ export const DEFAULT_PERMISSIONS: Record<OrgRole, Permissions> = {
     dashboardSummary: true,
     manageUsers: false,
     managePermissions: false,
+    manageCustomers: true,
+    manageQuotations: true,
+    manageBillings: true,
+    manageTaxInvoices: true,
   },
 
   staff: {
@@ -105,6 +121,10 @@ export const DEFAULT_PERMISSIONS: Record<OrgRole, Permissions> = {
     dashboardSummary: false,
     manageUsers: false,
     managePermissions: false,
+    manageCustomers: false,
+    manageQuotations: false,
+    manageBillings: false,
+    manageTaxInvoices: false,
   },
 };
 

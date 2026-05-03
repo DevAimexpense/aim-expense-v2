@@ -15,6 +15,10 @@ export const SHEET_TABS = {
   PAYMENTS: "Payments",
   EVENT_ASSIGNMENTS: "EventAssignments",
   CONFIG: "Config",
+  // ===== S23: Revenue module =====
+  CUSTOMERS: "Customers",
+  QUOTATIONS: "Quotations",
+  QUOTATION_LINES: "QuotationLines",
 } as const;
 
 // ===== Column Headers per Tab =====
@@ -122,6 +126,61 @@ export const SHEET_HEADERS: Record<string, string[]> = {
     "AssignedAt",
   ],
   [SHEET_TABS.CONFIG]: ["Key", "Value"],
+  // ===== S23: Revenue module =====
+  [SHEET_TABS.CUSTOMERS]: [
+    "CustomerID",
+    "CustomerName",
+    "TaxID",
+    "BranchType", // "HQ" | "Branch"
+    "BranchNumber", // 5 หลัก
+    "IsVAT", // info-only — ไม่ block ออก tax invoice
+    "ContactPerson",
+    "Phone",
+    "Email",
+    "Address", // ที่อยู่ตามทะเบียน (สำหรับ tax invoice)
+    "BillingAddress", // ที่อยู่จัดส่งใบวางบิล
+    "PaymentTerms", // "NET 30" | "COD" | custom
+    "DefaultWHTPercent", // % ลูกค้าหัก ณ ที่จ่ายเรา (1/3/5)
+    "Notes",
+    "CreatedAt",
+    "CreatedBy",
+  ],
+  [SHEET_TABS.QUOTATIONS]: [
+    "QuotationID",
+    "DocNumber", // QT-2026-0001 (per-org prefix configurable)
+    "DocDate",
+    "ValidUntil",
+    "CustomerID",
+    "CustomerNameSnapshot",
+    "CustomerTaxIdSnapshot",
+    "CustomerAddressSnapshot",
+    "Status", // draft | sent | accepted | rejected | void | converted
+    "EventID", // optional — link to internal Event/project
+    "ProjectName",
+    "Subtotal",
+    "DiscountAmount",
+    "VATAmount",
+    "VATIncluded", // TRUE = ราคารวม VAT แล้ว
+    "GrandTotal",
+    "Notes",
+    "Terms",
+    "PreparedBy",
+    "PreparedByUserId",
+    "CreatedAt",
+    "UpdatedAt",
+    "PdfUrl", // defer S24+
+  ],
+  [SHEET_TABS.QUOTATION_LINES]: [
+    "LineID",
+    "QuotationID", // FK
+    "LineNumber",
+    "Description",
+    "Quantity",
+    "UnitPrice",
+    "DiscountPercent",
+    "LineTotal",
+    "Notes",
+  ],
 };
 
 // ===== Default Thai Banks (Master List Seed) =====
@@ -731,6 +790,57 @@ export class GoogleSheetsService {
    *   - Header row with case variations ("key"/"Key"/"KEY")
    *   - Data starting on row 1 instead of row 2
    */
+  /**
+   * Upsert key/value ลง Config tab
+   * - ถ้ามี key อยู่แล้ว → update Value
+   * - ถ้าไม่มี → append row ใหม่
+   *
+   * Resilient: ถ้า Config tab ไม่มี header ให้สร้างเอง (Key/Value)
+   */
+  async setConfig(key: string, value: string): Promise<void> {
+    // อ่านทั้ง tab เพื่อหา row index
+    let rows: string[][] = [];
+    try {
+      const response = await this.sheets.spreadsheets.values.get({
+        spreadsheetId: this.spreadsheetId,
+        range: `${SHEET_TABS.CONFIG}!A:B`,
+      });
+      rows = (response.data.values as string[][] | undefined) || [];
+    } catch {
+      // tab ไม่มี — ปล่อยให้ ensureAllTabsExist() เรียกก่อน (caller responsibility)
+      throw new Error(`Sheet "${SHEET_TABS.CONFIG}" not found`);
+    }
+
+    // Detect header row
+    const firstA = String(rows[0]?.[0] ?? "").trim().toLowerCase();
+    const hasHeader = firstA === "key" || firstA === "keys";
+    const startIdx = hasHeader ? 1 : 0;
+
+    // Find existing row
+    let existingRow = -1;
+    for (let i = startIdx; i < rows.length; i++) {
+      if (String(rows[i]?.[0] ?? "").trim() === key) {
+        existingRow = i;
+        break;
+      }
+    }
+
+    if (existingRow !== -1) {
+      // Update Value column (B) only — preserve Key
+      const range = `${SHEET_TABS.CONFIG}!B${existingRow + 1}`;
+      await this.sheets.spreadsheets.values.update({
+        spreadsheetId: this.spreadsheetId,
+        range,
+        valueInputOption: "USER_ENTERED",
+        requestBody: { values: [[value]] },
+      });
+      return;
+    }
+
+    // Append new row (Key, Value)
+    await this.appendRow(SHEET_TABS.CONFIG, [key, value]);
+  }
+
   async getConfigMap(): Promise<Record<string, string>> {
     try {
       const response = await this.sheets.spreadsheets.values.get({
@@ -755,6 +865,47 @@ export class GoogleSheetsService {
       console.warn("[Sheets] getConfigMap failed (tab missing/no access):", err);
       return {};
     }
+  }
+
+  // ===== Revenue module (S23+) =====
+
+  /**
+   * ดึง Customers ทั้งหมด
+   */
+  async getCustomers() {
+    return this.getAll(SHEET_TABS.CUSTOMERS);
+  }
+
+  /**
+   * ดึง Customer ตาม ID
+   */
+  async getCustomerById(customerId: string) {
+    return this.getById(SHEET_TABS.CUSTOMERS, "CustomerID", customerId);
+  }
+
+  /**
+   * ดึง Quotations ทั้งหมด (header rows)
+   */
+  async getQuotations() {
+    return this.getAll(SHEET_TABS.QUOTATIONS);
+  }
+
+  /**
+   * ดึง Quotation ตาม ID
+   */
+  async getQuotationById(quotationId: string) {
+    return this.getById(SHEET_TABS.QUOTATIONS, "QuotationID", quotationId);
+  }
+
+  /**
+   * ดึง Quotation lines ของ quotation นั้น (FK = QuotationID)
+   */
+  async getQuotationLines(quotationId: string) {
+    return this.getFiltered(
+      SHEET_TABS.QUOTATION_LINES,
+      "QuotationID",
+      quotationId
+    );
   }
 
   // ===== ID GENERATION =====

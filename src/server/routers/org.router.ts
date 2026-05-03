@@ -12,6 +12,8 @@ import { decryptToken } from "@/lib/google/token-encryption";
 import { refreshAccessToken } from "@/lib/google/oauth";
 import { encryptToken } from "@/lib/google/token-encryption";
 import { getDefaultPermissions } from "@/lib/permissions";
+import { getSheetsService } from "../lib/sheets-context";
+import { getAllDocPrefixes, isValidDocPrefix } from "../lib/doc-number";
 import { TRPCError } from "@trpc/server";
 
 /**
@@ -341,6 +343,74 @@ export const orgRouter = router({
       await prisma.organization.update({
         where: { id: ctx.org.orgId },
         data,
+      });
+
+      return { success: true };
+    }),
+
+  /**
+   * Get current DocNumber prefixes (Customizable from MVP — S22 Q7)
+   * Returns { QT, BIL, TI } from Config tab (default = type literal)
+   */
+  getDocPrefixes: orgProcedure.query(async ({ ctx }) => {
+    const sheets = await getSheetsService(ctx.org.orgId);
+    return getAllDocPrefixes(sheets);
+  }),
+
+  /**
+   * Update DocNumber prefixes (admin only)
+   * - Validates each prefix: max 8 chars, no spaces, [A-Z0-9/-]
+   * - Upserts 3 keys in Config tab
+   * - AuditLog entry
+   *
+   * Note: ห้ามใช้ permissionProcedure — DocPrefix เป็น org-level config
+   * ใช้ pattern เดียวกับ org.update (ctx.org.role === "admin" check)
+   */
+  updateDocPrefixes: orgProcedure
+    .input(
+      z.object({
+        QT: z.string().min(1).max(8),
+        BIL: z.string().min(1).max(8),
+        TI: z.string().min(1).max(8),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      if (ctx.org.role !== "admin") {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "เฉพาะ Admin เท่านั้น",
+        });
+      }
+
+      // Validate format
+      for (const [key, value] of Object.entries(input)) {
+        if (!isValidDocPrefix(value)) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: `prefix "${key}" ไม่ถูกต้อง (อนุญาตเฉพาะ A-Z 0-9 / - และ max 8 ตัว, ห้ามมี space)`,
+          });
+        }
+      }
+
+      const sheets = await getSheetsService(ctx.org.orgId);
+
+      // Ensure Config tab exists (auto-migrate)
+      await sheets.ensureAllTabsExist();
+
+      // Upsert 3 keys
+      await sheets.setConfig("DOC_PREFIX_QT", input.QT);
+      await sheets.setConfig("DOC_PREFIX_BIL", input.BIL);
+      await sheets.setConfig("DOC_PREFIX_TI", input.TI);
+
+      await prisma.auditLog.create({
+        data: {
+          orgId: ctx.org.orgId,
+          userId: ctx.session.userId,
+          action: "update",
+          entityType: "org",
+          entityRef: ctx.org.orgId,
+          summary: `อัปเดต prefix เลขเอกสาร (QT=${input.QT}, BIL=${input.BIL}, TI=${input.TI})`,
+        },
       });
 
       return { success: true };

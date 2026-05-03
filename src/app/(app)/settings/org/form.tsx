@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { trpc } from "@/lib/trpc/client";
 import { CompanyBanksSection } from "./company-banks-section";
+import { DocPrefixSection } from "./doc-prefix-section";
 
 interface Props {
   org: {
@@ -325,6 +326,10 @@ export function OrgSettingsForm({ org, isAdmin, sheetUrl, driveUrl }: Props) {
 
           <div style={{ marginTop: "1rem" }}>
             <CompanyBanksSection isAdmin={isAdmin} />
+          </div>
+
+          <div style={{ marginTop: "1rem" }}>
+            <DocPrefixSection isAdmin={isAdmin} />
           </div>
 
           <div className="app-card" style={{ marginTop: "1rem" }}>

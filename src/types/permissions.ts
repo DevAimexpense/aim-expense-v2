@@ -4,8 +4,9 @@
 // ===========================================
 
 /**
- * 14 Permissions — ตรงตาม Core System
+ * 18 Permissions — Core System (14) + Revenue module (4)
  * + editPaymentAfterApproval: แก้ไขรายการจ่ายหลังถูกอนุมัติ/จ่ายแล้ว (สำหรับผู้มีอำนาจ)
+ * + manageCustomers / manageQuotations / manageBillings / manageTaxInvoices: รายได้ (S23+)
  */
 export interface Permissions {
   manageEvents: boolean;
@@ -22,6 +23,10 @@ export interface Permissions {
   dashboardSummary: boolean;
   manageUsers: boolean;
   managePermissions: boolean;
+  manageCustomers: boolean;
+  manageQuotations: boolean;
+  manageBillings: boolean;
+  manageTaxInvoices: boolean;
 }
 
 /**
@@ -35,7 +40,7 @@ export type OrgRole = "admin" | "manager" | "accountant" | "staff";
 export type PermissionKey = keyof Permissions;
 
 /**
- * All 13 permission keys — ใช้สำหรับ iterate
+ * All 18 permission keys — ใช้สำหรับ iterate
  */
 export const ALL_PERMISSION_KEYS: PermissionKey[] = [
   "manageEvents",
@@ -52,6 +57,10 @@ export const ALL_PERMISSION_KEYS: PermissionKey[] = [
   "dashboardSummary",
   "manageUsers",
   "managePermissions",
+  "manageCustomers",
+  "manageQuotations",
+  "manageBillings",
+  "manageTaxInvoices",
 ];
 
 /**
@@ -72,6 +81,10 @@ export const PERMISSION_LABELS: Record<PermissionKey, string> = {
   dashboardSummary: "Dashboard สรุปรวม",
   manageUsers: "จัดการผู้ใช้",
   managePermissions: "จัดการสิทธิ์",
+  manageCustomers: "จัดการลูกค้า",
+  manageQuotations: "จัดการใบเสนอราคา",
+  manageBillings: "จัดการใบวางบิล",
+  manageTaxInvoices: "จัดการใบกำกับภาษี",
 };
 
 /**
@@ -107,5 +120,14 @@ export const PERMISSION_GROUPS = {
   admin: {
     label: "บริหารจัดการ",
     permissions: ["manageUsers", "managePermissions"] as PermissionKey[],
+  },
+  revenue: {
+    label: "รายได้",
+    permissions: [
+      "manageCustomers",
+      "manageQuotations",
+      "manageBillings",
+      "manageTaxInvoices",
+    ] as PermissionKey[],
   },
 } as const;

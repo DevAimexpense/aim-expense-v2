@@ -6,7 +6,8 @@
 import { redirect } from "next/navigation";
 import { getSession, type SessionPayload } from "./session";
 import { prisma } from "@/lib/prisma";
-import type { Permissions } from "@/types/permissions";
+import type { Permissions, OrgRole } from "@/types/permissions";
+import { DEFAULT_PERMISSIONS } from "@/lib/permissions";
 
 /**
  * Org context — loaded once per request
@@ -75,6 +76,12 @@ export async function getOrgContext(
   const roleHasEditAfterApproval =
     membership.role === "admin" || membership.role === "manager";
 
+  // S23: Revenue permission keys (manageCustomers/Quotations/Billings/TaxInvoices)
+  // ยังไม่มีใน Prisma UserPermission table — fallback ตาม role default จาก DEFAULT_PERMISSIONS
+  // (Add migration in S24 when /permissions UI extends to revenue group)
+  const role = (membership.role || "staff") as OrgRole;
+  const roleDefaults = DEFAULT_PERMISSIONS[role] ?? DEFAULT_PERMISSIONS.staff;
+
   const permissions: Permissions = {
     manageEvents: perms?.manageEvents ?? false,
     assignEvents: perms?.assignEvents ?? false,
@@ -93,6 +100,11 @@ export async function getOrgContext(
     dashboardSummary: perms?.dashboardSummary ?? false,
     manageUsers: perms?.manageUsers ?? false,
     managePermissions: perms?.managePermissions ?? false,
+    // Revenue (S23) — role default until S24 migration
+    manageCustomers: roleDefaults.manageCustomers,
+    manageQuotations: roleDefaults.manageQuotations,
+    manageBillings: roleDefaults.manageBillings,
+    manageTaxInvoices: roleDefaults.manageTaxInvoices,
   };
 
   return {
