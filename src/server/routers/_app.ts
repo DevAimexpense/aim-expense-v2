@@ -16,6 +16,7 @@ import { reportRouter } from "./report.router";
 import { customerRouter } from "./customer.router";
 import { quotationRouter } from "./quotation.router";
 import { billingRouter } from "./billing.router";
+import { taxInvoiceRouter } from "./taxInvoice.router";
 
 export const appRouter = router({
   event: eventRouter,
@@ -31,6 +32,7 @@ export const appRouter = router({
   customer: customerRouter,
   quotation: quotationRouter,
   billing: billingRouter,
+  taxInvoice: taxInvoiceRouter,
 });
 
 export type AppRouter = typeof appRouter;

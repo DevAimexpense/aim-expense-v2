@@ -158,14 +158,15 @@ export function BillingDetailClient({ billingId }: { billingId: string }) {
             </button>
           </>
         )}
-        {header.status === "paid" && (
-          <button
-            disabled
+        {(header.status === "sent" ||
+          header.status === "partial" ||
+          header.status === "paid") && (
+          <Link
+            href={`/tax-invoices/new?fromBilling=${billingId}`}
             className="app-btn app-btn-secondary"
-            title="ฟีเจอร์ S25"
           >
-            → ออกใบกำกับภาษี (S25)
-          </button>
+            → ออกใบกำกับภาษี
+          </Link>
         )}
         <a
           href={`/documents/billing/${billingId}`}

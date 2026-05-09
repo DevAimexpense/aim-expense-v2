@@ -27,6 +27,7 @@
 import { z } from "zod";
 import { router, orgProcedure } from "../trpc";
 import { getSheetsService } from "../lib/sheets-context";
+import { SHEET_TABS } from "../services/google-sheets.service";
 
 // -------------------------------------------------------------------
 // Helpers
@@ -1265,6 +1266,271 @@ export const reportRouter = router({
           vendorCount,
         },
         rows,
+      };
+    }),
+
+  /**
+   * VAT Sales report (ภาษีขาย) — Output VAT side of ภ.พ.30 (S25B Phase 2).
+   *
+   * Source: TaxInvoices + TaxInvoiceLines (status="issued", in date range).
+   * Voided TIs are excluded (no output VAT to report); drafts are excluded
+   * (no DocNumber yet).
+   *
+   * Date field: DocDate of the tax invoice (canonical "วันที่ในใบกำกับภาษี").
+   *
+   * Aggregation:
+   *   - per-document totals from header (Subtotal, VATAmount)
+   *   - per-line goods/service split (sums of LineTotals — pre-VAT base by nature)
+   *
+   * Returns:
+   *   - stats: counts + total base + total VAT + customer count + goods/service split
+   *   - rows:  one entry per qualifying tax invoice, sorted by date asc
+   */
+  vatSales: orgProcedure
+    .input(
+      z.object({
+        from: z.string().min(10),
+        to: z.string().min(10),
+        customerId: z.string().optional(),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      const sheets = await getSheetsService(ctx.org.orgId);
+      const batch = await sheets.getAllBatch([
+        SHEET_TABS.TAX_INVOICES,
+        SHEET_TABS.TAX_INVOICE_LINES,
+      ]);
+      const headers = batch[SHEET_TABS.TAX_INVOICES] || [];
+      const allLines = batch[SHEET_TABS.TAX_INVOICE_LINES] || [];
+
+      type SalesRow = {
+        taxInvoiceId: string;
+        docNumber: string;
+        docDate: string;
+        customerId: string;
+        customerName: string;
+        customerTaxId: string;
+        customerBranch: string;
+        projectName: string;
+        baseAmount: number; // ฐานภาษี (subtotal pre-VAT, post-discount)
+        vatAmount: number; // ภาษีขาย (output VAT)
+        // Per-nature base (sums of LineTotals by ExpenseNature, pre-discount)
+        goodsBase: number;
+        serviceBase: number;
+      };
+
+      const rows: SalesRow[] = [];
+
+      for (const h of headers) {
+        if (h.Status !== "issued") continue;
+        if (!h.DocDate) continue;
+        if (h.DocDate < input.from || h.DocDate > input.to) continue;
+        if (input.customerId && h.CustomerID !== input.customerId) continue;
+
+        const linesForDoc = allLines.filter(
+          (l) => l.TaxInvoiceID === h.TaxInvoiceID,
+        );
+        const goodsBase = linesForDoc
+          .filter((l) => l.ExpenseNature === "goods")
+          .reduce((s, l) => s + num(l.LineTotal), 0);
+        const serviceBase = linesForDoc
+          .filter(
+            (l) => l.ExpenseNature !== "goods", // service or empty
+          )
+          .reduce((s, l) => s + num(l.LineTotal), 0);
+
+        rows.push({
+          taxInvoiceId: h.TaxInvoiceID,
+          docNumber: h.DocNumber || "",
+          docDate: h.DocDate,
+          customerId: h.CustomerID,
+          customerName: h.CustomerNameSnapshot || h.CustomerID || "—",
+          customerTaxId: h.CustomerTaxIdSnapshot || "",
+          customerBranch: h.CustomerBranchSnapshot || "",
+          projectName: h.ProjectName || "",
+          baseAmount: num(h.Subtotal),
+          vatAmount: num(h.VATAmount),
+          goodsBase,
+          serviceBase,
+        });
+      }
+
+      rows.sort((a, b) => {
+        if (a.docDate !== b.docDate) return a.docDate < b.docDate ? -1 : 1;
+        return a.docNumber.localeCompare(b.docNumber);
+      });
+
+      const totalBase = rows.reduce((s, r) => s + r.baseAmount, 0);
+      const totalVAT = rows.reduce((s, r) => s + r.vatAmount, 0);
+      const totalGoodsBase = rows.reduce((s, r) => s + r.goodsBase, 0);
+      const totalServiceBase = rows.reduce((s, r) => s + r.serviceBase, 0);
+      const customerCount = new Set(
+        rows.map((r) => r.customerId).filter(Boolean),
+      ).size;
+
+      return {
+        stats: {
+          totalCount: rows.length,
+          totalBase,
+          totalVAT,
+          customerCount,
+          totalGoodsBase,
+          totalServiceBase,
+        },
+        rows,
+      };
+    }),
+
+  /**
+   * VAT 30 — combined Input + Output VAT summary for ภ.พ.30 filing (S25B Phase 2).
+   *
+   * Combines:
+   *   - Input VAT (ภาษีซื้อ)  — from `report.vat` logic (paid tax-invoice payments)
+   *   - Output VAT (ภาษีขาย)  — from `report.vatSales` logic (issued tax invoices)
+   *   - Net VAT
+   *       positive → ต้องเสียเพิ่ม (Pay)
+   *       negative → ภาษีคงเหลือยกไป (Carry-forward credit)
+   *
+   * Read-only aggregation per SYSTEM_REQUIREMENTS principle 3 (no caching).
+   *
+   * Returns: { input: {totalBase, totalVAT, count}, output: {...}, net: {...} }
+   */
+  vat30: orgProcedure
+    .input(
+      z.object({
+        from: z.string().min(10),
+        to: z.string().min(10),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      const sheets = await getSheetsService(ctx.org.orgId);
+
+      const [payments, payees, batch] = await Promise.all([
+        sheets.getPayments(),
+        sheets.getPayees(),
+        sheets.getAllBatch([
+          SHEET_TABS.TAX_INVOICES,
+          SHEET_TABS.TAX_INVOICE_LINES,
+        ]),
+      ]);
+
+      const payeeMap = new Map(
+        payees.map((p) => [
+          p.PayeeID,
+          {
+            name: p.PayeeName || p.PayeeID,
+            taxId: p.TaxID || "",
+          },
+        ]),
+      );
+
+      // ===== INPUT VAT (purchases) =====
+      // Mirrors `report.vat` logic — status=paid + DocumentType=tax_invoice + VAT>0
+      const inputDateOf = (p: Record<string, string>): string => {
+        if (p.ReceiptDate) return p.ReceiptDate;
+        if (p.PaymentDate) return p.PaymentDate;
+        if (p.PaidAt && p.PaidAt.length >= 10) return p.PaidAt.slice(0, 10);
+        return "";
+      };
+
+      type InputRow = {
+        paymentId: string;
+        date: string;
+        invoiceNumber: string;
+        receiptNumber: string;
+        payeeId: string;
+        payeeName: string;
+        taxId: string;
+        baseAmount: number;
+        vatAmount: number;
+      };
+      const inputRows: InputRow[] = [];
+      for (const p of payments) {
+        if (p.Status !== "paid") continue;
+        if (p.DocumentType !== "tax_invoice") continue;
+        const vat = num(p.VATAmount);
+        if (vat <= 0) continue;
+        const date = inputDateOf(p);
+        if (!date) continue;
+        if (date < input.from || date > input.to) continue;
+        const info = payeeMap.get(p.PayeeID);
+        inputRows.push({
+          paymentId: p.PaymentID,
+          date,
+          invoiceNumber: p.InvoiceNumber || "",
+          receiptNumber: p.ReceiptNumber || "",
+          payeeId: p.PayeeID,
+          payeeName: info?.name || p.PayeeID || "—",
+          taxId: info?.taxId || p.VendorTaxIdSnapshot || "",
+          baseAmount: num(p.TTLAmount),
+          vatAmount: vat,
+        });
+      }
+      inputRows.sort((a, b) =>
+        a.date !== b.date ? (a.date < b.date ? -1 : 1) : 0,
+      );
+
+      // ===== OUTPUT VAT (sales) =====
+      const tiHeaders = batch[SHEET_TABS.TAX_INVOICES] || [];
+      type OutputRow = {
+        taxInvoiceId: string;
+        docNumber: string;
+        date: string;
+        customerName: string;
+        customerTaxId: string;
+        baseAmount: number;
+        vatAmount: number;
+      };
+      const outputRows: OutputRow[] = [];
+      for (const h of tiHeaders) {
+        if (h.Status !== "issued") continue;
+        if (!h.DocDate) continue;
+        if (h.DocDate < input.from || h.DocDate > input.to) continue;
+        outputRows.push({
+          taxInvoiceId: h.TaxInvoiceID,
+          docNumber: h.DocNumber || "",
+          date: h.DocDate,
+          customerName: h.CustomerNameSnapshot || h.CustomerID || "—",
+          customerTaxId: h.CustomerTaxIdSnapshot || "",
+          baseAmount: num(h.Subtotal),
+          vatAmount: num(h.VATAmount),
+        });
+      }
+      outputRows.sort((a, b) =>
+        a.date !== b.date ? (a.date < b.date ? -1 : 1) : 0,
+      );
+
+      // ===== Aggregates =====
+      const inputTotalBase = inputRows.reduce((s, r) => s + r.baseAmount, 0);
+      const inputTotalVAT = inputRows.reduce((s, r) => s + r.vatAmount, 0);
+      const outputTotalBase = outputRows.reduce((s, r) => s + r.baseAmount, 0);
+      const outputTotalVAT = outputRows.reduce((s, r) => s + r.vatAmount, 0);
+      const netVAT = outputTotalVAT - inputTotalVAT;
+
+      return {
+        input: {
+          rows: inputRows,
+          totalCount: inputRows.length,
+          totalBase: inputTotalBase,
+          totalVAT: inputTotalVAT,
+        },
+        output: {
+          rows: outputRows,
+          totalCount: outputRows.length,
+          totalBase: outputTotalBase,
+          totalVAT: outputTotalVAT,
+        },
+        net: {
+          // Positive = ต้องเสียเพิ่มภาษีขาย, Negative = ภาษีคงเหลือยกไป
+          netVAT,
+          inputTotalVAT,
+          outputTotalVAT,
+          direction: (netVAT > 0
+            ? "pay"
+            : netVAT < 0
+              ? "carry_forward"
+              : "balanced") as "pay" | "carry_forward" | "balanced",
+        },
       };
     }),
 });

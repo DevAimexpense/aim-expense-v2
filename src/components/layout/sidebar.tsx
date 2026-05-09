@@ -136,9 +136,15 @@ const NAV_GROUPS: NavGroup[] = [
         permission: "viewReports",
       },
       {
-        label: "รายงาน ภพ.30",
-        href: "/reports/vat",
+        label: "รายงาน ภ.พ.30 (รวม)",
+        href: "/reports/vat30",
         icon: "📈",
+        permission: "viewReports",
+      },
+      {
+        label: "รายงานภาษีซื้อ (ภ.พ.30)",
+        href: "/reports/vat",
+        icon: "🛒",
         permission: "viewReports",
       },
       {

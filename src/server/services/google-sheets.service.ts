@@ -31,6 +31,9 @@ export const SHEET_TABS = {
   // ===== S24: Billings =====
   BILLINGS: "Billings",
   BILLING_LINES: "BillingLines",
+  // ===== S25B: Tax Invoices =====
+  TAX_INVOICES: "TaxInvoices",
+  TAX_INVOICE_LINES: "TaxInvoiceLines",
 } as const;
 
 // ===== Column Headers per Tab =====
@@ -232,6 +235,49 @@ export const SHEET_HEADERS: Record<string, string[]> = {
     "BillingID",
     "LineNumber",
     "Description",
+    "Quantity",
+    "UnitPrice",
+    "DiscountPercent",
+    "LineTotal",
+    "Notes",
+  ],
+  // ===== S25B: Tax Invoices =====
+  [SHEET_TABS.TAX_INVOICES]: [
+    "TaxInvoiceID",
+    "DocNumber", // TI-2026-0001 (sequential, gap-detected, RD-compliance critical)
+    "DocDate", // วันที่ส่งมอบ/วันที่ให้บริการเสร็จสิ้น
+    "CustomerID",
+    "CustomerNameSnapshot",
+    "CustomerTaxIdSnapshot",
+    "CustomerBranchSnapshot", // "00000" / "00001" — RD layout requires
+    "CustomerAddressSnapshot",
+    "SourceBillingID", // optional
+    "SourceQuotationID", // optional (direct quotation→TI)
+    "EventID",
+    "ProjectName",
+    "Status", // draft | issued | void
+    "Subtotal", // ฐานภาษี (pre-VAT)
+    "DiscountAmount",
+    "VATAmount", // ภาษีขาย (output VAT)
+    "VATIncluded", // TRUE = ราคารวม VAT แล้ว
+    "GrandTotal",
+    "Notes",
+    "PreparedBy",
+    "PreparedByUserId",
+    "IssuedAt", // ISO timestamp ของการ issue (lock state)
+    "VoidedAt",
+    "VoidReason",
+    "CreditNoteID", // (Phase 2) link to credit note ที่ทดแทน
+    "CreatedAt",
+    "UpdatedAt",
+    "PdfUrl",
+  ],
+  [SHEET_TABS.TAX_INVOICE_LINES]: [
+    "LineID",
+    "TaxInvoiceID",
+    "LineNumber",
+    "Description",
+    "ExpenseNature", // "goods" | "service" — สำหรับ ภพ.30 (Output VAT แยกประเภท)
     "Quantity",
     "UnitPrice",
     "DiscountPercent",
@@ -1085,6 +1131,24 @@ export class GoogleSheetsService {
 
   async getBillingLines(billingId: string) {
     return this.getFiltered(SHEET_TABS.BILLING_LINES, "BillingID", billingId);
+  }
+
+  // ===== Tax Invoices (S25B) =====
+
+  async getTaxInvoices() {
+    return this.getAll(SHEET_TABS.TAX_INVOICES);
+  }
+
+  async getTaxInvoiceById(taxInvoiceId: string) {
+    return this.getById(SHEET_TABS.TAX_INVOICES, "TaxInvoiceID", taxInvoiceId);
+  }
+
+  async getTaxInvoiceLines(taxInvoiceId: string) {
+    return this.getFiltered(
+      SHEET_TABS.TAX_INVOICE_LINES,
+      "TaxInvoiceID",
+      taxInvoiceId,
+    );
   }
 
   // ===== ID GENERATION =====

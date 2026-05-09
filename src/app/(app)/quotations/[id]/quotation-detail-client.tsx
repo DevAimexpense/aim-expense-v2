@@ -188,6 +188,12 @@ export function QuotationDetailClient({
             >
               → สร้างใบวางบิล
             </button>
+            <Link
+              href={`/tax-invoices/new?fromQuotation=${quotationId}`}
+              className="app-btn app-btn-secondary"
+            >
+              → ออกใบกำกับภาษี (ตรง)
+            </Link>
             <button
               onClick={() =>
                 handleAction(voidMut, `ยกเลิกใบเสนอราคา ${header.docNumber}?`)
