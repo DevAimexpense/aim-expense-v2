@@ -183,8 +183,8 @@ const NAV_GROUPS: NavGroup[] = [
         adminOnly: true,
       },
       {
-        label: "แพ็คเกจ",
-        href: "/settings/billing",
+        label: "แพ็คเกจ + การใช้งาน",
+        href: "/account/billing",
         icon: "💳",
         adminOnly: true,
       },
