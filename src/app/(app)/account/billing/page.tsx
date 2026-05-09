@@ -1,6 +1,6 @@
 // ===========================================
 // /account/billing — current plan + usage bars + upgrade CTA
-// (S26-A: Stripe checkout button = "Coming soon" until live keys)
+// Uses project's standard app-page / app-card / brand color palette.
 // ===========================================
 
 import Link from "next/link";
@@ -14,7 +14,6 @@ import {
   PLAN_PRICING_THB,
   effectivePlan,
   isInTrial,
-  type PlanTier,
   type SubscriptionState,
 } from "@/lib/plans";
 import { getUsage } from "@/server/lib/usage";
@@ -29,6 +28,7 @@ const formatTHB = (n: number) =>
 
 function formatLimit(n: number): string {
   if (n === -1) return "ไม่จำกัด";
+  if (n === -2) return "—";
   return n.toLocaleString("th-TH");
 }
 
@@ -38,52 +38,13 @@ function daysFromNow(date: Date | string | null | undefined): number {
   return Math.max(0, Math.ceil((d.getTime() - Date.now()) / 86400_000));
 }
 
-const PLAN_THEME: Record<
-  PlanTier,
-  { gradient: string; ring: string; chip: string; chipText: string; icon: string }
-> = {
-  free: {
-    gradient: "from-slate-500 to-slate-700",
-    ring: "ring-slate-400",
-    chip: "bg-slate-100",
-    chipText: "text-slate-700",
-    icon: "🌱",
-  },
-  basic: {
-    gradient: "from-sky-500 to-blue-600",
-    ring: "ring-sky-400",
-    chip: "bg-sky-100",
-    chipText: "text-sky-700",
-    icon: "🚀",
-  },
-  pro: {
-    gradient: "from-violet-500 via-purple-500 to-fuchsia-500",
-    ring: "ring-purple-400",
-    chip: "bg-purple-100",
-    chipText: "text-purple-700",
-    icon: "⭐",
-  },
-  business: {
-    gradient: "from-indigo-500 to-blue-700",
-    ring: "ring-indigo-400",
-    chip: "bg-indigo-100",
-    chipText: "text-indigo-700",
-    icon: "💼",
-  },
-  max: {
-    gradient: "from-amber-500 via-orange-500 to-red-500",
-    ring: "ring-amber-400",
-    chip: "bg-amber-100",
-    chipText: "text-amber-800",
-    icon: "👑",
-  },
-  enterprise: {
-    gradient: "from-slate-800 to-slate-950",
-    ring: "ring-slate-700",
-    chip: "bg-slate-200",
-    chipText: "text-slate-900",
-    icon: "🏢",
-  },
+const PLAN_ICON: Record<string, string> = {
+  free: "🌱",
+  basic: "🚀",
+  pro: "⭐",
+  business: "💼",
+  max: "👑",
+  enterprise: "🏢",
 };
 
 export default async function AccountBillingPage() {
@@ -107,241 +68,377 @@ export default async function AccountBillingPage() {
   const plan = effectivePlan(sub as SubscriptionState | null);
   const inTrial = isInTrial(sub as SubscriptionState | null);
   const limits = PLAN_LIMITS[plan];
-  const theme = PLAN_THEME[plan];
+  const price = PLAN_PRICING_THB[plan];
 
   const ocrUsed = await getUsage(session.activeOrgId, "ocr");
   const memberCount = await prisma.orgMember.count({
     where: { orgId: session.activeOrgId },
   });
-  const eventCount = 0; // TODO(S26-B): wire `trpc.event.list` count
 
   const trialDaysLeft = inTrial ? daysFromNow(sub?.trialEndsAt) : 0;
-  const trialTotalDays = 30;
   const trialPctUsed = inTrial
-    ? Math.min(100, ((trialTotalDays - trialDaysLeft) / trialTotalDays) * 100)
+    ? Math.min(100, ((30 - trialDaysLeft) / 30) * 100)
     : 0;
   const isOnPaidPlan =
     !!sub?.stripeSubscriptionId && sub.plan !== "free" && !inTrial;
-  const price = PLAN_PRICING_THB[plan];
 
   return (
     <div className="app-page">
-      <div className="mx-auto w-full max-w-5xl space-y-6 px-4 pb-16 sm:px-6">
-        {/* ===== Hero plan card ===== */}
-        <section
-          className={`relative overflow-hidden rounded-3xl bg-gradient-to-br ${theme.gradient} px-6 py-8 text-white shadow-xl sm:px-10 sm:py-10`}
-        >
-          {/* decorative blobs */}
-          <div className="pointer-events-none absolute -right-20 -top-20 h-64 w-64 rounded-full bg-white/10 blur-3xl" />
-          <div className="pointer-events-none absolute -bottom-20 -left-20 h-64 w-64 rounded-full bg-white/10 blur-3xl" />
+      <div className="app-page-header">
+        <div>
+          <h1 className="app-page-title">💳 แพ็คเกจของคุณ</h1>
+          <p className="app-page-subtitle">
+            ดูแผนปัจจุบัน + การใช้งาน + อัปเกรด
+          </p>
+        </div>
+      </div>
 
-          <div className="relative flex flex-wrap items-start justify-between gap-6">
-            <div className="min-w-0">
-              <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-white/80">
+      {/* Hero plan card — soft brand colors */}
+      <div className="app-card" style={{ marginBottom: "1rem", overflow: "hidden" }}>
+        <div
+          style={{
+            background:
+              "linear-gradient(135deg, var(--color-brand-50) 0%, var(--color-brand-100) 100%)",
+            margin: "-1rem -1rem 1rem -1rem",
+            padding: "1.25rem 1.5rem",
+            borderBottom: "1px solid var(--color-brand-200)",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              alignItems: "flex-start",
+              justifyContent: "space-between",
+              flexWrap: "wrap",
+              gap: "1rem",
+            }}
+          >
+            <div style={{ minWidth: 0, flex: "1 1 60%" }}>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "0.5rem",
+                  fontSize: "0.6875rem",
+                  fontWeight: 600,
+                  color: "var(--color-brand-700)",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.08em",
+                  marginBottom: "0.5rem",
+                }}
+              >
                 <span>แพ็คเกจปัจจุบัน</span>
                 {inTrial && (
-                  <span className="rounded-full bg-white/20 px-2 py-0.5 text-[10px] backdrop-blur">
+                  <span
+                    style={{
+                      background: "var(--color-accent-100)",
+                      color: "var(--color-accent-800)",
+                      padding: "0.125rem 0.5rem",
+                      borderRadius: "999px",
+                      fontSize: "0.6875rem",
+                      letterSpacing: "0.04em",
+                    }}
+                  >
                     🎁 Free Trial
                   </span>
                 )}
                 {sub?.cancelAtPeriodEnd && (
-                  <span className="rounded-full bg-red-500/30 px-2 py-0.5 text-[10px]">
+                  <span
+                    style={{
+                      background: "#fee2e2",
+                      color: "#991b1b",
+                      padding: "0.125rem 0.5rem",
+                      borderRadius: "999px",
+                      fontSize: "0.6875rem",
+                      letterSpacing: "0.04em",
+                    }}
+                  >
                     จะยกเลิก
                   </span>
                 )}
               </div>
-              <div className="mt-3 flex items-baseline gap-3">
-                <span className="text-5xl drop-shadow-sm">{theme.icon}</span>
-                <h1 className="text-4xl font-extrabold tracking-tight sm:text-5xl">
-                  {PLAN_LABELS[plan]}
-                </h1>
-              </div>
-              {price && !inTrial ? (
-                <p className="mt-3 text-base text-white/90">
-                  <span className="text-2xl font-bold">
-                    {formatTHB(price.monthly)} ฿
-                  </span>{" "}
-                  / เดือน
-                  {sub?.billingInterval === "yearly" && (
-                    <span className="ml-2 text-sm text-white/70">
-                      · billed yearly ({formatTHB(price.yearly)} ฿)
-                    </span>
-                  )}
-                </p>
-              ) : inTrial ? (
-                <p className="mt-3 text-base text-white/90">
-                  ทดลอง Pro ฟรีระหว่าง closed beta
-                </p>
-              ) : plan === "free" ? (
-                <p className="mt-3 text-base text-white/90">ฟรีตลอดชีพ</p>
-              ) : null}
-            </div>
-
-            <div className="flex flex-shrink-0 flex-col gap-2 sm:items-end">
-              <Link
-                href="/pricing"
-                className="inline-flex items-center gap-2 rounded-2xl bg-white px-5 py-3 text-sm font-bold text-slate-900 shadow-lg transition hover:scale-105 hover:shadow-xl"
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "baseline",
+                  gap: "0.625rem",
+                  flexWrap: "wrap",
+                }}
               >
-                {plan === "free" ? "🚀 อัปเกรด" : "🔄 เปลี่ยนแผน"}
-                <span aria-hidden>→</span>
-              </Link>
-              {sub?.cancelAtPeriodEnd && sub.currentPeriodEnd && (
-                <p className="text-xs text-white/80">
-                  ยกเลิก{" "}
-                  {new Date(sub.currentPeriodEnd).toLocaleDateString("th-TH")}
-                </p>
-              )}
-            </div>
-          </div>
-
-          {/* Trial countdown — prominent if in trial */}
-          {inTrial && (
-            <div className="relative mt-8 rounded-2xl bg-white/15 p-4 backdrop-blur-sm">
-              <div className="flex items-center justify-between text-sm">
-                <span className="font-semibold">
-                  ⏳ Trial เหลือ{" "}
-                  <span className="text-2xl font-extrabold">
-                    {trialDaysLeft}
-                  </span>{" "}
-                  วัน
+                <span style={{ fontSize: "2rem", lineHeight: 1 }}>
+                  {PLAN_ICON[plan]}
                 </span>
-                <span className="text-xs text-white/70">
-                  หมด{" "}
-                  {sub?.trialEndsAt &&
-                    new Date(sub.trialEndsAt).toLocaleDateString("th-TH")}
-                </span>
+                <h2
+                  style={{
+                    fontSize: "1.875rem",
+                    fontWeight: 800,
+                    color: "var(--color-brand-900)",
+                    lineHeight: 1.1,
+                    margin: 0,
+                  }}
+                >
+                  {PLAN_LABELS[plan]}
+                </h2>
               </div>
-              <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-white/20">
-                <div
-                  className="h-full bg-white/80 transition-all"
-                  style={{ width: `${trialPctUsed}%` }}
-                />
+              <div
+                style={{
+                  marginTop: "0.5rem",
+                  fontSize: "0.875rem",
+                  color: "var(--color-brand-800)",
+                }}
+              >
+                {price && !inTrial ? (
+                  <>
+                    <strong style={{ fontSize: "1rem" }}>
+                      {formatTHB(price.monthly)} ฿
+                    </strong>{" "}
+                    / เดือน
+                    {sub?.billingInterval === "yearly" && (
+                      <span style={{ marginLeft: "0.5rem", fontSize: "0.75rem" }}>
+                        · billed yearly ({formatTHB(price.yearly)} ฿)
+                      </span>
+                    )}
+                  </>
+                ) : inTrial ? (
+                  <span>ทดลอง Pro ฟรี ระหว่าง Closed Beta</span>
+                ) : plan === "free" ? (
+                  <span>ฟรีตลอดชีพ</span>
+                ) : null}
               </div>
             </div>
-          )}
-        </section>
 
-        {/* ===== Usage stat cards ===== */}
-        <section>
-          <h2 className="mb-3 flex items-center gap-2 text-lg font-bold text-slate-900">
-            <span>📊</span> การใช้งานเดือนนี้
-          </h2>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            <UsageStatCard
-              icon="🧾"
-              label="OCR ใบเสร็จ"
-              used={ocrUsed}
-              limit={limits.ocrPerMonth}
-              color="emerald"
-              hint="reset ทุกต้นเดือน"
-            />
-            <UsageStatCard
-              icon="👥"
-              label="ผู้ใช้ในองค์กร"
-              used={memberCount}
-              limit={limits.users}
-              color="sky"
-            />
-            <UsageStatCard
-              icon="🏢"
-              label="บริษัท"
-              used={1}
-              limit={limits.businesses}
-              color="violet"
-            />
-            <UsageStatCard
-              icon="📋"
-              label="โปรเจกต์ / Events"
-              used={eventCount}
-              limit={-2 /* placeholder until S26-B wires sheet count */}
-              color="amber"
-              hint="live ใน Google Sheets"
-            />
-            <UsageStatCard
-              icon="💬"
-              label="LINE Group bot"
-              used={0}
-              limit={limits.lineGroups}
-              color="green"
-              hint="กำลังเปิดใช้ S26-B"
-            />
+            <Link
+              href="/pricing"
+              className="app-btn app-btn-primary"
+              style={{ flexShrink: 0, whiteSpace: "nowrap" }}
+            >
+              {plan === "free" ? "🚀 อัปเกรด" : "🔄 เปลี่ยนแผน"}
+            </Link>
           </div>
-        </section>
-
-        {/* ===== Beta notice (S26-A: Stripe not live) ===== */}
-        {!isOnPaidPlan && plan !== "enterprise" && (
-          <section className="overflow-hidden rounded-2xl border border-amber-200 bg-gradient-to-br from-amber-50 to-orange-50 p-6 shadow-sm">
-            <div className="flex items-start gap-4">
-              <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-xl bg-amber-100 text-2xl">
-                🚧
-              </div>
-              <div className="min-w-0 flex-1">
-                <h3 className="text-base font-bold text-amber-900">
-                  ระบบเก็บเงินกำลังเปิดเร็ว ๆ นี้
-                </h3>
-                <p className="mt-1 text-sm leading-relaxed text-amber-800">
-                  ตอนนี้อยู่ระหว่าง <strong>Closed Beta</strong> —
-                  ผู้ใช้ทุกคนได้ Pro features ฟรีระหว่าง trial 30 วัน. <br />
-                  เมื่อระบบเก็บเงินพร้อม → ส่ง email + แสดงปุ่ม "อัปเกรด" ที่นี่
-                </p>
-                <a
-                  href="mailto:support@aimexpense.com"
-                  className="mt-3 inline-flex items-center gap-1.5 text-sm font-semibold text-amber-900 hover:underline"
-                >
-                  ติดต่อ support@aimexpense.com →
-                </a>
-              </div>
-            </div>
-          </section>
-        )}
-
-        {/* ===== Manage subscription (Stripe Customer Portal — S26-B placeholder) ===== */}
-        {isOnPaidPlan && (
-          <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <div className="flex items-start gap-4">
-              <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-xl bg-blue-100 text-2xl">
-                🛠️
-              </div>
-              <div className="min-w-0 flex-1">
-                <h3 className="text-base font-bold text-slate-900">
-                  จัดการแผน + ใบเสร็จ
-                </h3>
-                <p className="mt-1 text-sm text-slate-600">
-                  ดูใบเสร็จย้อนหลัง / เปลี่ยนบัตร / ยกเลิกผ่าน Stripe Customer Portal
-                </p>
-                <button
-                  className="mt-3 inline-flex items-center gap-2 rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-400 disabled:cursor-not-allowed disabled:opacity-60"
-                  disabled
-                  title="Coming soon — S26-B"
-                >
-                  เปิด Customer Portal →
-                </button>
-              </div>
-            </div>
-          </section>
-        )}
-
-        {/* ===== Footer links ===== */}
-        <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 pt-4 text-xs text-slate-400">
-          <Link
-            href="/account/data"
-            className="transition hover:text-slate-600"
-          >
-            จัดการข้อมูลส่วนบุคคล
-          </Link>
-          <span aria-hidden>·</span>
-          <Link href="/pricing" className="transition hover:text-slate-600">
-            ดูราคาทั้งหมด
-          </Link>
-          <span aria-hidden>·</span>
-          <Link href="/privacy" className="transition hover:text-slate-600">
-            ความเป็นส่วนตัว
-          </Link>
-          <span aria-hidden>·</span>
-          <Link href="/terms" className="transition hover:text-slate-600">
-            ข้อกำหนด
-          </Link>
         </div>
+
+        {/* Trial countdown */}
+        {inTrial && (
+          <div
+            style={{
+              padding: "0.875rem 1rem",
+              background: "var(--color-accent-50)",
+              border: "1px solid var(--color-accent-200)",
+              borderRadius: "0.5rem",
+              fontSize: "0.875rem",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                gap: "1rem",
+                flexWrap: "wrap",
+              }}
+            >
+              <span style={{ color: "var(--color-accent-800)", fontWeight: 600 }}>
+                ⏳ Trial เหลืออีก{" "}
+                <span style={{ fontSize: "1.25rem", fontWeight: 800 }}>
+                  {trialDaysLeft}
+                </span>{" "}
+                วัน
+              </span>
+              <span
+                style={{
+                  fontSize: "0.75rem",
+                  color: "var(--color-accent-700)",
+                }}
+              >
+                หมด{" "}
+                {sub?.trialEndsAt &&
+                  new Date(sub.trialEndsAt).toLocaleDateString("th-TH")}
+              </span>
+            </div>
+            <div
+              style={{
+                marginTop: "0.5rem",
+                height: "6px",
+                background: "var(--color-accent-100)",
+                borderRadius: "999px",
+                overflow: "hidden",
+              }}
+            >
+              <div
+                style={{
+                  height: "100%",
+                  width: `${trialPctUsed}%`,
+                  background: "var(--color-accent-500)",
+                  transition: "width 200ms",
+                }}
+              />
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Usage stat cards */}
+      <div className="app-card" style={{ marginBottom: "1rem" }}>
+        <div className="app-card-header">
+          <h2 className="app-card-title">📊 การใช้งานเดือนนี้</h2>
+        </div>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
+            gap: "0.75rem",
+          }}
+        >
+          <UsageStatCard
+            icon="🧾"
+            label="OCR ใบเสร็จ"
+            used={ocrUsed}
+            limit={limits.ocrPerMonth}
+            hint="reset ทุกต้นเดือน"
+          />
+          <UsageStatCard
+            icon="👥"
+            label="ผู้ใช้ในองค์กร"
+            used={memberCount}
+            limit={limits.users}
+          />
+          <UsageStatCard
+            icon="🏢"
+            label="บริษัท"
+            used={1}
+            limit={limits.businesses}
+          />
+          <UsageStatCard
+            icon="📋"
+            label="โปรเจกต์"
+            used={0}
+            limit={-2}
+            hint="live ใน Sheets"
+          />
+          <UsageStatCard
+            icon="💬"
+            label="LINE Group"
+            used={0}
+            limit={limits.lineGroups}
+            hint="กำลังเปิดใน S26-B"
+          />
+        </div>
+      </div>
+
+      {/* Beta notice */}
+      {!isOnPaidPlan && plan !== "enterprise" && (
+        <div
+          className="app-card"
+          style={{
+            marginBottom: "1rem",
+            background: "var(--color-accent-50)",
+            border: "1px solid var(--color-accent-200)",
+          }}
+        >
+          <div style={{ display: "flex", gap: "0.875rem", alignItems: "flex-start" }}>
+            <div
+              style={{
+                flexShrink: 0,
+                width: "44px",
+                height: "44px",
+                background: "var(--color-accent-100)",
+                borderRadius: "0.625rem",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: "1.25rem",
+              }}
+            >
+              🚧
+            </div>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <h3
+                style={{
+                  fontSize: "0.9375rem",
+                  fontWeight: 700,
+                  color: "var(--color-accent-900)",
+                  margin: 0,
+                }}
+              >
+                ระบบเก็บเงินกำลังเปิดเร็ว ๆ นี้
+              </h3>
+              <p
+                style={{
+                  fontSize: "0.8125rem",
+                  color: "var(--color-accent-800)",
+                  marginTop: "0.375rem",
+                  lineHeight: 1.6,
+                }}
+              >
+                ตอนนี้อยู่ระหว่าง <strong>Closed Beta</strong> —
+                ผู้ใช้ทุกคนได้ Pro features ฟรีระหว่าง trial 30 วัน
+                เมื่อระบบเก็บเงินพร้อมจะส่ง email แจ้ง + แสดงปุ่มอัปเกรดที่นี่
+              </p>
+              <a
+                href="mailto:support@aimexpense.com"
+                style={{
+                  display: "inline-block",
+                  marginTop: "0.5rem",
+                  fontSize: "0.8125rem",
+                  fontWeight: 600,
+                  color: "var(--color-accent-900)",
+                  textDecoration: "underline",
+                }}
+              >
+                ติดต่อ support@aimexpense.com →
+              </a>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Manage subscription (Stripe Customer Portal placeholder) */}
+      {isOnPaidPlan && (
+        <div className="app-card" style={{ marginBottom: "1rem" }}>
+          <div className="app-card-header">
+            <h2 className="app-card-title">🛠️ จัดการแผน + ใบเสร็จ</h2>
+          </div>
+          <p style={{ fontSize: "0.875rem", color: "#64748b" }}>
+            ดูใบเสร็จย้อนหลัง / เปลี่ยนบัตร / ยกเลิกผ่าน Stripe Customer Portal
+          </p>
+          <button
+            className="app-btn app-btn-secondary"
+            disabled
+            title="Coming soon — S26-B"
+            style={{ marginTop: "0.5rem" }}
+          >
+            เปิด Customer Portal →
+          </button>
+        </div>
+      )}
+
+      {/* Footer links */}
+      <div
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          justifyContent: "center",
+          gap: "0.5rem 0.75rem",
+          padding: "1rem 0",
+          fontSize: "0.75rem",
+          color: "#94a3b8",
+        }}
+      >
+        <Link href="/account/data" style={{ color: "#64748b" }}>
+          จัดการข้อมูลส่วนบุคคล
+        </Link>
+        <span aria-hidden>·</span>
+        <Link href="/pricing" style={{ color: "#64748b" }}>
+          ดูราคาทั้งหมด
+        </Link>
+        <span aria-hidden>·</span>
+        <Link href="/privacy" style={{ color: "#64748b" }}>
+          ความเป็นส่วนตัว
+        </Link>
+        <span aria-hidden>·</span>
+        <Link href="/terms" style={{ color: "#64748b" }}>
+          ข้อกำหนด
+        </Link>
       </div>
     </div>
   );
@@ -349,119 +446,164 @@ export default async function AccountBillingPage() {
 
 // ===== Reusable usage stat card =====
 
-const COLOR_MAP: Record<
-  string,
-  { bg: string; bar: string; text: string; ring: string }
-> = {
-  emerald: {
-    bg: "bg-emerald-50",
-    bar: "bg-emerald-500",
-    text: "text-emerald-700",
-    ring: "ring-emerald-200",
-  },
-  sky: {
-    bg: "bg-sky-50",
-    bar: "bg-sky-500",
-    text: "text-sky-700",
-    ring: "ring-sky-200",
-  },
-  violet: {
-    bg: "bg-violet-50",
-    bar: "bg-violet-500",
-    text: "text-violet-700",
-    ring: "ring-violet-200",
-  },
-  amber: {
-    bg: "bg-amber-50",
-    bar: "bg-amber-500",
-    text: "text-amber-700",
-    ring: "ring-amber-200",
-  },
-  green: {
-    bg: "bg-green-50",
-    bar: "bg-green-500",
-    text: "text-green-700",
-    ring: "ring-green-200",
-  },
-};
-
 function UsageStatCard({
   icon,
   label,
   used,
   limit,
-  color,
   hint,
 }: {
   icon: string;
   label: string;
   used: number;
   limit: number;
-  color: string;
   hint?: string;
 }) {
-  const c = COLOR_MAP[color] || COLOR_MAP.sky;
   const isUnlimited = limit === -1;
   const isUnknown = limit === -2;
-  const pct = isUnlimited || isUnknown ? 0 : Math.min(100, (used / Math.max(1, limit)) * 100);
-  const dangerLevel = pct > 90 ? "danger" : pct > 75 ? "warn" : "ok";
+  const pct =
+    isUnlimited || isUnknown
+      ? 0
+      : Math.min(100, (used / Math.max(1, limit)) * 100);
+  const danger = pct > 90;
+  const warn = pct > 75 && pct <= 90;
 
-  const barColor =
-    dangerLevel === "danger"
-      ? "bg-red-500"
-      : dangerLevel === "warn"
-        ? "bg-amber-500"
-        : c.bar;
+  const barColor = danger
+    ? "#dc2626"
+    : warn
+      ? "#d97706"
+      : "var(--color-brand-500)";
 
   return (
     <div
-      className={`relative overflow-hidden rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition hover:shadow-md`}
+      style={{
+        background: "white",
+        border: "1px solid #e2e8f0",
+        borderRadius: "0.625rem",
+        padding: "0.875rem",
+        minWidth: 0,
+      }}
     >
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <span
-            className={`flex h-9 w-9 items-center justify-center rounded-lg ${c.bg} text-lg`}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: "0.625rem",
+          minWidth: 0,
+        }}
+      >
+        <div
+          style={{
+            width: "36px",
+            height: "36px",
+            background: "var(--color-brand-50)",
+            borderRadius: "0.5rem",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontSize: "1.125rem",
+            flexShrink: 0,
+          }}
+        >
+          {icon}
+        </div>
+        <div style={{ minWidth: 0, flex: 1, overflow: "hidden" }}>
+          <div
+            style={{
+              fontSize: "0.75rem",
+              color: "#64748b",
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+            }}
           >
-            {icon}
-          </span>
-          <div>
-            <div className="text-xs font-medium text-slate-500">{label}</div>
-            <div className="text-lg font-bold text-slate-900">
-              {used.toLocaleString("th-TH")}
-              <span className="ml-1 text-xs font-normal text-slate-400">
-                / {isUnknown ? "—" : formatLimit(limit)}
-              </span>
-            </div>
+            {label}
+          </div>
+          <div
+            style={{
+              fontSize: "1.0625rem",
+              fontWeight: 700,
+              color: "#0f172a",
+              lineHeight: 1.3,
+            }}
+          >
+            {used.toLocaleString("th-TH")}
+            <span
+              style={{
+                marginLeft: "0.25rem",
+                fontSize: "0.75rem",
+                fontWeight: 400,
+                color: "#94a3b8",
+              }}
+            >
+              / {formatLimit(limit)}
+            </span>
           </div>
         </div>
-        {dangerLevel === "danger" && !isUnlimited && (
-          <span className="rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-semibold text-red-700">
+        {danger && !isUnlimited && (
+          <span
+            style={{
+              padding: "0.125rem 0.375rem",
+              borderRadius: "999px",
+              fontSize: "0.625rem",
+              fontWeight: 700,
+              background: "#fee2e2",
+              color: "#991b1b",
+              flexShrink: 0,
+            }}
+          >
             ใกล้เต็ม
           </span>
         )}
-        {dangerLevel === "warn" && !isUnlimited && (
-          <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-700">
-            {Math.round(pct)}%
-          </span>
-        )}
         {isUnlimited && (
-          <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
+          <span
+            style={{
+              padding: "0.125rem 0.375rem",
+              borderRadius: "999px",
+              fontSize: "0.625rem",
+              fontWeight: 700,
+              background: "var(--color-brand-50)",
+              color: "var(--color-brand-700)",
+              flexShrink: 0,
+            }}
+          >
             ∞
           </span>
         )}
       </div>
       {!isUnlimited && !isUnknown && (
-        <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
+        <div
+          style={{
+            marginTop: "0.5rem",
+            height: "4px",
+            background: "#f1f5f9",
+            borderRadius: "999px",
+            overflow: "hidden",
+          }}
+        >
           <div
-            className={`h-full transition-all ${barColor}`}
-            style={{ width: `${pct}%` }}
+            style={{
+              height: "100%",
+              width: `${pct}%`,
+              background: barColor,
+              transition: "width 200ms",
+            }}
           />
         </div>
       )}
       {hint && (
-        <p className="mt-2 text-[10px] uppercase tracking-wider text-slate-400">
+        <div
+          style={{
+            marginTop: "0.375rem",
+            fontSize: "0.6875rem",
+            color: "#94a3b8",
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+          }}
+        >
           {hint}
-        </p>
+        </div>
       )}
     </div>
   );
