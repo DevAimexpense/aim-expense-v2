@@ -154,6 +154,18 @@ function shapeHeader(r: Record<string, string>) {
     createdAt: r.CreatedAt || "",
     updatedAt: r.UpdatedAt || "",
     pdfUrl: r.PdfUrl || "",
+    // Payment tracking (Phase 2)
+    paidAmount: parseFloat(r.PaidAmount) || 0,
+    paidDate: r.PaidDate || "",
+    paymentMethod: (r.PaymentMethod || "") as "" | "cash" | "transfer" | "cheque",
+    paymentWHTPercent: parseFloat(r.PaymentWHTPercent) || 0,
+    paymentWHTAmount: parseFloat(r.PaymentWHTAmount) || 0,
+    paymentAdjustmentAmount: parseFloat(r.PaymentAdjustmentAmount) || 0,
+    paymentAdjustmentNote: r.PaymentAdjustmentNote || "",
+    paymentEvidenceUrl: r.PaymentEvidenceUrl || "",
+    whtCertUrl: r.WHTCertUrl || "",
+    paymentRecordedAt: r.PaymentRecordedAt || "",
+    isPaid: (parseFloat(r.PaidAmount) || 0) > 0,
   };
 }
 
@@ -885,5 +897,116 @@ export const taxInvoiceRouter = router({
       });
 
       return { success: true, taxInvoiceId };
+    }),
+
+  /**
+   * Record customer payment on an issued tax invoice (S25B Phase 2).
+   *
+   * Captures:
+   *   - paidDate, paymentMethod, paymentEvidenceUrl
+   *   - WHT (% + computed baht) — if customer ลูกค้าหัก ณ ที่จ่าย
+   *   - adjustment amount (positive=เพิ่ม, negative=ลด) + optional note
+   *   - netReceived (defaults to grandTotal − WHT − adjustment, but user can override)
+   *   - whtCertUrl (optional — สามารถแนบทีหลังผ่าน attachWhtCert)
+   *
+   * Single-shot: re-calling overwrites previous payment record (no installments).
+   * Once recorded, status stays "issued" (TI compliance is on issuance, not on
+   * settlement). To reverse, void the TI.
+   */
+  recordPayment: permissionProcedure("manageTaxInvoices")
+    .input(
+      z.object({
+        taxInvoiceId: z.string(),
+        paidDate: z.string().min(1, "กรุณาระบุวันที่รับชำระ"),
+        paymentMethod: z.enum(["cash", "transfer", "cheque"]),
+        netReceived: z.number().min(0, "ยอดรับสุทธิต้องไม่ติดลบ"),
+        whtPercent: z.number().min(0).max(15).default(0),
+        whtAmount: z.number().min(0).default(0),
+        adjustmentAmount: z.number().default(0), // can be negative
+        adjustmentNote: z.string().max(500).optional(),
+        paymentEvidenceUrl: z.string().optional(),
+        whtCertUrl: z.string().optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const sheets = await getSheetsService(ctx.org.orgId);
+      const existing = await sheets.getTaxInvoiceById(input.taxInvoiceId);
+      if (!existing) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "ไม่พบใบกำกับภาษี" });
+      }
+      if (existing.Status !== "issued") {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: `บันทึกการชำระเงินไม่ได้ — สถานะปัจจุบัน: ${existing.Status} (ต้อง issued)`,
+        });
+      }
+
+      const now = new Date().toISOString();
+      await sheets.updateById(
+        SHEET_TABS.TAX_INVOICES,
+        "TaxInvoiceID",
+        input.taxInvoiceId,
+        {
+          PaidAmount: round2(input.netReceived),
+          PaidDate: input.paidDate,
+          PaymentMethod: input.paymentMethod,
+          PaymentWHTPercent: input.whtPercent,
+          PaymentWHTAmount: round2(input.whtAmount),
+          PaymentAdjustmentAmount: round2(input.adjustmentAmount),
+          PaymentAdjustmentNote: input.adjustmentNote || "",
+          PaymentEvidenceUrl: input.paymentEvidenceUrl || "",
+          WHTCertUrl: input.whtCertUrl || existing.WHTCertUrl || "",
+          PaymentRecordedAt: now,
+          UpdatedAt: now,
+        },
+      );
+
+      await prisma.auditLog.create({
+        data: {
+          orgId: ctx.org.orgId,
+          userId: ctx.session.userId,
+          action: "update",
+          entityType: "tax_invoice",
+          entityRef: input.taxInvoiceId,
+          summary: `บันทึกการชำระเงิน ${input.netReceived.toLocaleString()} บาท (${input.paymentMethod}) ใบกำกับภาษี ${existing.DocNumber}`,
+        },
+      });
+
+      return { success: true, netReceived: input.netReceived };
+    }),
+
+  /**
+   * Attach uploaded URL (evidence or WHT cert) to a tax invoice.
+   * Used by the upload API route after the file is on Drive.
+   */
+  attachUploadedFile: permissionProcedure("manageTaxInvoices")
+    .input(
+      z.object({
+        taxInvoiceId: z.string(),
+        fileType: z.enum(["evidence", "whtCert"]),
+        url: z.string(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const sheets = await getSheetsService(ctx.org.orgId);
+      const existing = await sheets.getTaxInvoiceById(input.taxInvoiceId);
+      if (!existing) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "ไม่พบใบกำกับภาษี" });
+      }
+      const updates: Record<string, string> = {
+        UpdatedAt: new Date().toISOString(),
+      };
+      if (input.fileType === "evidence") {
+        updates.PaymentEvidenceUrl = input.url;
+      } else {
+        updates.WHTCertUrl = input.url;
+      }
+      await sheets.updateById(
+        SHEET_TABS.TAX_INVOICES,
+        "TaxInvoiceID",
+        input.taxInvoiceId,
+        updates,
+      );
+      return { success: true };
     }),
 });

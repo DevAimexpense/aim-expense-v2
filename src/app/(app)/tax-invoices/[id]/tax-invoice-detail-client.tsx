@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { trpc } from "@/lib/trpc/client";
 import { TaxInvoiceStatusBadge } from "../tax-invoices-client";
+import { RecordTaxInvoicePaymentModal } from "./payment-modal";
 
 const formatTHB = (n: number) =>
   n.toLocaleString("th-TH", {
@@ -27,6 +28,7 @@ export function TaxInvoiceDetailClient({
   const [error, setError] = useState<string | null>(null);
   const [showVoidModal, setShowVoidModal] = useState(false);
   const [voidReason, setVoidReason] = useState("");
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
 
   const refresh = () => {
     utils.taxInvoice.getById.invalidate({ taxInvoiceId });
@@ -195,11 +197,18 @@ export function TaxInvoiceDetailClient({
         )}
         {header.status === "issued" && (
           <>
+            <button
+              onClick={() => setShowPaymentModal(true)}
+              disabled={isLoading}
+              className="app-btn app-btn-primary"
+            >
+              💰 {header.isPaid ? "แก้ไขการชำระเงิน" : "บันทึกการชำระเงิน"}
+            </button>
             <a
               href={`/documents/tax-invoice/${taxInvoiceId}`}
               target="_blank"
               rel="noopener noreferrer"
-              className="app-btn app-btn-primary"
+              className="app-btn app-btn-secondary"
             >
               📄 พิมพ์เอกสาร (PDF)
             </a>
@@ -424,6 +433,116 @@ export function TaxInvoiceDetailClient({
         </div>
       </div>
 
+      {/* Payment recorded card */}
+      {header.isPaid && (
+        <div
+          className="app-card"
+          style={{
+            marginTop: "1rem",
+            borderLeft: "6px solid #16a34a",
+          }}
+        >
+          <div className="app-card-header">
+            <h2 className="app-card-title">💰 บันทึกการชำระเงิน</h2>
+          </div>
+          <div className="app-form-grid cols-2" style={{ fontSize: "0.875rem" }}>
+            <div>
+              <div>
+                <strong>วันที่รับชำระ:</strong> {header.paidDate || "—"}
+              </div>
+              <div>
+                <strong>วิธีชำระ:</strong>{" "}
+                {header.paymentMethod === "cash"
+                  ? "เงินสด"
+                  : header.paymentMethod === "transfer"
+                    ? "เงินโอน"
+                    : header.paymentMethod === "cheque"
+                      ? "เช็ค"
+                      : "—"}
+              </div>
+              {header.paymentWHTPercent > 0 && (
+                <div>
+                  <strong>หัก ณ ที่จ่าย:</strong> {header.paymentWHTPercent}% ={" "}
+                  {formatTHB(header.paymentWHTAmount)} บาท
+                </div>
+              )}
+              {header.paymentAdjustmentAmount !== 0 && (
+                <div>
+                  <strong>ปรับ {header.paymentAdjustmentAmount > 0 ? "+" : ""}:</strong>{" "}
+                  {formatTHB(Math.abs(header.paymentAdjustmentAmount))} บาท
+                  {header.paymentAdjustmentNote && (
+                    <span style={{ color: "#64748b" }}>
+                      {" "}
+                      ({header.paymentAdjustmentNote})
+                    </span>
+                  )}
+                </div>
+              )}
+              <div
+                style={{
+                  fontSize: "1rem",
+                  fontWeight: 700,
+                  color: "#15803d",
+                  marginTop: "0.5rem",
+                }}
+              >
+                ยอดรับสุทธิ: {formatTHB(header.paidAmount)} บาท
+              </div>
+            </div>
+            <div>
+              {header.paymentEvidenceUrl ? (
+                <div style={{ marginBottom: "0.5rem" }}>
+                  📎{" "}
+                  <a
+                    href={header.paymentEvidenceUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{ color: "#0369a1" }}
+                  >
+                    หลักฐานการโอน
+                  </a>
+                </div>
+              ) : (
+                <div style={{ color: "#94a3b8" }}>
+                  📎 ยังไม่ได้แนบหลักฐานการโอน
+                </div>
+              )}
+              {header.paymentWHTPercent > 0 &&
+                (header.whtCertUrl ? (
+                  <div>
+                    📎{" "}
+                    <a
+                      href={header.whtCertUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{ color: "#0369a1" }}
+                    >
+                      ใบหัก ณ ที่จ่าย
+                    </a>
+                  </div>
+                ) : (
+                  <div style={{ color: "#94a3b8" }}>
+                    📎 ยังไม่ได้แนบใบหัก ณ ที่จ่าย
+                  </div>
+                ))}
+            </div>
+          </div>
+          {header.paymentRecordedAt && (
+            <div
+              style={{
+                fontSize: "0.6875rem",
+                color: "#94a3b8",
+                marginTop: "0.5rem",
+                textAlign: "right",
+              }}
+            >
+              บันทึกเมื่อ{" "}
+              {new Date(header.paymentRecordedAt).toLocaleString("th-TH")}
+            </div>
+          )}
+        </div>
+      )}
+
       {header.notes && (
         <div className="app-card" style={{ marginTop: "1rem" }}>
           <div className="app-card-header">
@@ -514,6 +633,36 @@ export function TaxInvoiceDetailClient({
             </div>
           </div>
         </div>
+      )}
+
+      {/* Payment modal */}
+      {showPaymentModal && (
+        <RecordTaxInvoicePaymentModal
+          taxInvoiceId={taxInvoiceId}
+          docNumber={header.docNumber}
+          subtotal={header.subtotal}
+          grandTotal={header.grandTotal}
+          initial={
+            header.isPaid
+              ? {
+                  paidDate: header.paidDate,
+                  paymentMethod: header.paymentMethod,
+                  paidAmount: header.paidAmount,
+                  whtPercent: header.paymentWHTPercent,
+                  whtAmount: header.paymentWHTAmount,
+                  adjustmentAmount: header.paymentAdjustmentAmount,
+                  adjustmentNote: header.paymentAdjustmentNote,
+                  paymentEvidenceUrl: header.paymentEvidenceUrl,
+                  whtCertUrl: header.whtCertUrl,
+                }
+              : undefined
+          }
+          onClose={() => setShowPaymentModal(false)}
+          onSuccess={() => {
+            setShowPaymentModal(false);
+            refresh();
+          }}
+        />
       )}
     </div>
   );

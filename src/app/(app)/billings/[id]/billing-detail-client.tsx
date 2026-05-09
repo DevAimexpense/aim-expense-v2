@@ -11,14 +11,6 @@ const formatTHB = (n: number) =>
     maximumFractionDigits: 2,
   });
 
-const PAYMENT_METHODS: { value: "transfer" | "cash" | "cheque" | "creditCard" | "other"; label: string }[] = [
-  { value: "transfer", label: "โอนเงิน" },
-  { value: "cash", label: "เงินสด" },
-  { value: "cheque", label: "เช็ค" },
-  { value: "creditCard", label: "บัตรเครดิต" },
-  { value: "other", label: "อื่น ๆ" },
-];
-
 export function BillingDetailClient({ billingId }: { billingId: string }) {
   const utils = trpc.useUtils();
   const detail = trpc.billing.getById.useQuery({ billingId });
@@ -26,7 +18,6 @@ export function BillingDetailClient({ billingId }: { billingId: string }) {
   const voidMut = trpc.billing.void.useMutation();
 
   const [error, setError] = useState<string | null>(null);
-  const [showPaymentModal, setShowPaymentModal] = useState(false);
 
   const refresh = () => {
     utils.billing.getById.invalidate({ billingId });
@@ -139,13 +130,6 @@ export function BillingDetailClient({ billingId }: { billingId: string }) {
         )}
         {(header.status === "sent" || header.status === "partial") && (
           <>
-            <button
-              onClick={() => setShowPaymentModal(true)}
-              disabled={isLoading}
-              className="app-btn app-btn-primary"
-            >
-              💰 บันทึกรับเงิน
-            </button>
             <button
               onClick={() =>
                 handleAction(voidMut, `ยกเลิกใบวางบิล ${header.docNumber}?`)
@@ -397,182 +381,9 @@ export function BillingDetailClient({ billingId }: { billingId: string }) {
         </div>
       )}
 
-      {showPaymentModal && (
-        <RecordPaymentModal
-          billingId={billingId}
-          balance={header.balance}
-          onClose={() => setShowPaymentModal(false)}
-          onSuccess={() => {
-            setShowPaymentModal(false);
-            refresh();
-          }}
-        />
-      )}
-    </div>
-  );
-}
-
-function RecordPaymentModal({
-  billingId,
-  balance,
-  onClose,
-  onSuccess,
-}: {
-  billingId: string;
-  balance: number;
-  onClose: () => void;
-  onSuccess: () => void;
-}) {
-  const recordMut = trpc.billing.recordPayment.useMutation();
-
-  const [amount, setAmount] = useState(balance);
-  const [paidDate, setPaidDate] = useState(
-    new Date().toISOString().slice(0, 10)
-  );
-  const [paymentMethod, setPaymentMethod] = useState<
-    "transfer" | "cash" | "cheque" | "creditCard" | "other"
-  >("transfer");
-  const [notes, setNotes] = useState("");
-  const [error, setError] = useState<string | null>(null);
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(null);
-    if (amount <= 0) {
-      setError("จำนวนเงินต้องมากกว่า 0");
-      return;
-    }
-    try {
-      await recordMut.mutateAsync({
-        billingId,
-        amount,
-        paidDate,
-        paymentMethod,
-        notes: notes.trim() || undefined,
-      });
-      onSuccess();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "เกิดข้อผิดพลาด");
-    }
-  };
-
-  return (
-    <div
-      className="app-modal-backdrop"
-      onClick={(e) => e.target === e.currentTarget && onClose()}
-    >
-      <div className="app-modal modal-lg">
-        <form onSubmit={handleSubmit}>
-          <div className="app-modal-header">
-            <h3 className="app-modal-title">💰 บันทึกรับเงิน</h3>
-            <button
-              type="button"
-              onClick={onClose}
-              className="app-btn app-btn-ghost app-btn-icon"
-            >
-              ✕
-            </button>
-          </div>
-          <div className="app-modal-body">
-            {error && <div className="app-error-msg">{error}</div>}
-            <p
-              style={{
-                fontSize: "0.8125rem",
-                color: "#64748b",
-                marginBottom: "0.75rem",
-              }}
-            >
-              คงค้าง:{" "}
-              <strong>
-                {balance.toLocaleString("th-TH", {
-                  minimumFractionDigits: 2,
-                  maximumFractionDigits: 2,
-                })}
-              </strong>{" "}
-              บาท
-            </p>
-            <div className="app-form-group">
-              <label className="app-label app-label-required">
-                จำนวนเงินที่รับ
-              </label>
-              <input
-                type="number"
-                value={amount}
-                onChange={(e) => setAmount(parseFloat(e.target.value) || 0)}
-                min={0.01}
-                max={balance}
-                step={0.01}
-                className="app-input num"
-                autoFocus
-              />
-              <p className="app-hint">
-                ระบบจะอัปเดตสถานะเป็น "รับบางส่วน" หรือ "ชำระครบ" อัตโนมัติ
-              </p>
-            </div>
-            <div className="app-form-grid cols-2">
-              <div className="app-form-group">
-                <label className="app-label app-label-required">วันที่รับ</label>
-                <input
-                  type="date"
-                  value={paidDate}
-                  onChange={(e) => setPaidDate(e.target.value)}
-                  className="app-input"
-                />
-              </div>
-              <div className="app-form-group">
-                <label className="app-label app-label-required">วิธีรับ</label>
-                <select
-                  value={paymentMethod}
-                  onChange={(e) =>
-                    setPaymentMethod(
-                      e.target.value as typeof paymentMethod
-                    )
-                  }
-                  className="app-select"
-                >
-                  {PAYMENT_METHODS.map((m) => (
-                    <option key={m.value} value={m.value}>
-                      {m.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-            <div className="app-form-group">
-              <label className="app-label">หมายเหตุ</label>
-              <textarea
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                rows={2}
-                className="app-textarea"
-                maxLength={500}
-              />
-            </div>
-          </div>
-          <div className="app-modal-footer">
-            <button
-              type="button"
-              onClick={onClose}
-              className="app-btn app-btn-secondary"
-            >
-              ยกเลิก
-            </button>
-            <button
-              type="submit"
-              disabled={recordMut.isPending}
-              className="app-btn app-btn-primary"
-            >
-              {recordMut.isPending ? (
-                <>
-                  <span className="app-spinner" /> กำลังบันทึก...
-                </>
-              ) : (
-                "บันทึกรับเงิน"
-              )}
-            </button>
-          </div>
-        </form>
-      </div>
+      {/* Payment modal moved to /tax-invoices flow (S25B Phase 2). The
+          legacy RecordPaymentModal below is unused and kept temporarily for
+          reference; remove with the next billing-router cleanup. */}
     </div>
   );
 }

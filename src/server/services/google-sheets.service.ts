@@ -271,6 +271,17 @@ export const SHEET_HEADERS: Record<string, string[]> = {
     "CreatedAt",
     "UpdatedAt",
     "PdfUrl",
+    // ===== S25B Phase 2: payment tracking (recordPayment) =====
+    "PaidAmount", // running total of net received
+    "PaidDate", // วันที่รับชำระ (latest)
+    "PaymentMethod", // "cash" | "transfer" | "cheque"
+    "PaymentWHTPercent", // % WHT ที่ลูกค้าหัก ณ จ่าย (0 if ไม่มี)
+    "PaymentWHTAmount", // baht — ยอดหัก ณ จ่ายจริง
+    "PaymentAdjustmentAmount", // baht — รายการปรับลด (negative) / เพิ่ม (positive)
+    "PaymentAdjustmentNote",
+    "PaymentEvidenceUrl", // หลักฐานการโอนเงิน (Drive)
+    "WHTCertUrl", // ใบหัก ณ ที่จ่าย (Drive, optional — แนบทีหลังได้)
+    "PaymentRecordedAt", // ISO timestamp
   ],
   [SHEET_TABS.TAX_INVOICE_LINES]: [
     "LineID",
