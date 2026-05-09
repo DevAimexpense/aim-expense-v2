@@ -540,6 +540,7 @@ export class GoogleSheetsService {
   private async getAllUncached(
     tabName: string,
   ): Promise<Record<string, string>[]> {
+    console.log(`[sheets-api] get tab=${tabName}`);
     const response = await this.sheets.spreadsheets.values.get({
       spreadsheetId: this.spreadsheetId,
       range: `${tabName}!A:ZZ`,
@@ -586,6 +587,7 @@ export class GoogleSheetsService {
 
     // Partial miss → fetch ALL tabs in 1 Sheets batchGet (cheaper than
     // mixing per-tab calls), then warm the cache for next time
+    console.log(`[sheets-api] batchGet tabs=${tabNames.join(",")}`);
     const ranges = tabNames.map((t) => `${t}!A:ZZ`);
     const response = await this.sheets.spreadsheets.values.batchGet({
       spreadsheetId: this.spreadsheetId,

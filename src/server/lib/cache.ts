@@ -37,13 +37,30 @@ export function isCacheEnabled(): boolean {
   return redis !== null;
 }
 
+// ===== Lightweight observability =====
+//
+// Per-process counters — read by an instrumentation endpoint or dumped on
+// SIGTERM in the future. Free, no external service needed. We log MISSes only
+// (hits are silent to keep log volume down on Vercel).
+const stats = { hits: 0, misses: 0, errors: 0 };
+
+export function getCacheStats(): { hits: number; misses: number; errors: number } {
+  return { ...stats };
+}
+
 /** Get a JSON-serialised value from cache. Returns null on miss/error/disabled. */
 export async function getCache<T>(key: string): Promise<T | null> {
   if (!redis) return null;
   try {
     const value = await redis.get<T>(key);
-    return (value ?? null) as T | null;
+    if (value !== null && value !== undefined) {
+      stats.hits++;
+      return value as T;
+    }
+    stats.misses++;
+    return null;
   } catch (err) {
+    stats.errors++;
     console.warn("[cache] get failed:", key, err);
     return null;
   }
@@ -54,8 +71,11 @@ export async function mgetCache<T>(keys: string[]): Promise<(T | null)[]> {
   if (!redis || keys.length === 0) return keys.map(() => null);
   try {
     const values = await redis.mget<T[]>(...keys);
-    return values.map((v) => (v ?? null) as T | null);
+    const out = values.map((v) => (v ?? null) as T | null);
+    out.forEach((v) => (v !== null ? stats.hits++ : stats.misses++));
+    return out;
   } catch (err) {
+    stats.errors++;
     console.warn("[cache] mget failed:", keys.length, "keys", err);
     return keys.map(() => null);
   }
