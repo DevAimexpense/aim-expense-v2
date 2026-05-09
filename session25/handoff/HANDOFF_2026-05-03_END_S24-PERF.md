@@ -116,31 +116,33 @@ git push
 
 ## 🔴 ก่อนเปิด launch — Pre-launch checklist (ขนาด 1000 users)
 
-### 1. Google Sheets API quota — ขอเพิ่ม (ทำเลย ก่อน S25)
-- เปิด https://console.cloud.google.com → เลือก project ของ Aim Expense
-- APIs & Services → Enabled APIs → Google Sheets API → Quotas
-- หา 3 quotas:
-  - "Read requests per minute per project" — default 300 → request **3000**
-  - "Read requests per minute per user" — default 60 → request **600**
-  - "Write requests per minute per project" — default 300 → request **600**
-- กรอก reason (English):
-  ```
-  Production SaaS application "Aim Expense" — accounting software for Thai SMBs
-  using Google Sheets as user-owned data storage (data sovereignty model).
-  Each customer's data lives in their own spreadsheet.
-  Expected ~1,000 concurrent users at launch with peak burst patterns.
-  Current 300/min quota will be exceeded during peak hours.
-  ```
-- Submit → รอ 1-3 วันทำการ — ฟรี
+### 1. Google Sheets API quota — ✅ requested 2026-05-03
 
-### 2. Vercel — upgrade Hobby → Pro
+**สถานะ:** พี่ submit quota request แล้ว — รอ Google approve (1-3 วันทำการ)
+
+**Pre-req ที่จำเป็นก่อนขอ:** Cloud Project ต้อง link Billing Account
+- Sheets API ฟรี 100% (no per-call charge)
+- Billing account ใช้แค่ verification — bill จริง = $0/month
+- ตั้ง budget alert $5 hard limit + disable paid APIs ที่ไม่ใช้
+- Workspace package ไม่เกี่ยว — เป็นเรื่อง Cloud Console เท่านั้น
+
+**Quota ที่ขอ:**
+- Read requests per minute per project: 300 → **3000**
+- Read requests per minute per user: 60 → **600**
+- Write requests per minute per project: 300 → **600**
+
+**Action S25:** ตรวจ email approval (`dev@aimexpense.com`) ก่อนเริ่ม Redis work
+
+### 2. Vercel — upgrade Hobby → Pro (defer ตอน launch)
 - ปัจจุบัน Hobby (downgraded 2026-05-02) — TOS ไม่อนุญาต commercial
-- launch = ต้อง Pro ($20/month base)
+- ก่อน launch = ต้อง Pro ($20/month base)
 - 1TB bandwidth + 1000 GB-hours serverless
+- 🟡 **Deferred:** ทำตอนใกล้ launch (ไม่ต้องทำใน S25 dev)
 
-### 3. Supabase — เช็ค Free tier limits
-- 500MB DB / 5GB egress / 50K MAU
+### 3. Supabase — upgrade เช็คขีดจำกัด (defer ตอน launch)
+- Free tier: 500MB DB / 5GB egress / 50K MAU
 - ถ้าเกิน → Pro $25/month (8GB DB, 250GB egress)
+- 🟡 **Deferred:** ทำตอนใกล้ launch + เช็ค metrics ใน Supabase dashboard ว่าเกินยัง
 
 ---
 
