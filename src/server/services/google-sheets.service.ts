@@ -5,6 +5,15 @@
 // ===========================================
 
 import { google, sheets_v4 } from "googleapis";
+import {
+  SHEETS_TTL_SEC,
+  getOrFetch,
+  invalidateTab,
+  mgetCache,
+  msetCache,
+  sheetsConfigMapKey,
+  sheetsTabKey,
+} from "@/server/lib/cache";
 
 // ===== Sheet Tab Names =====
 export const SHEET_TABS = {
@@ -436,6 +445,15 @@ export class GoogleSheetsService {
       }
     }
 
+    // If columns were added to existing tabs, drop the cache so next read
+    // re-fetches with the new header set (existing cached rows are missing
+    // the new keys until refresh).
+    if (Object.keys(columnsAdded).length > 0) {
+      await Promise.all(
+        Object.keys(columnsAdded).map((t) => invalidateTab(this.spreadsheetId, t)),
+      );
+    }
+
     if (missing.length === 0) return { added: [], columnsAdded };
 
     // Create missing tabs
@@ -505,8 +523,23 @@ export class GoogleSheetsService {
 
   /**
    * อ่านข้อมูลทั้ง tab (ยกเว้น header)
+   *
+   * Cached in Redis for {@link SHEETS_TTL_SEC}s — every write through
+   * this service invalidates the tab key so the next read sees fresh
+   * data within the same request. Cache miss falls through to Sheets
+   * API; cache backend errors fail open.
    */
   async getAll(tabName: string): Promise<Record<string, string>[]> {
+    return getOrFetch(
+      sheetsTabKey(this.spreadsheetId, tabName),
+      SHEETS_TTL_SEC,
+      () => this.getAllUncached(tabName),
+    );
+  }
+
+  private async getAllUncached(
+    tabName: string,
+  ): Promise<Record<string, string>[]> {
     const response = await this.sheets.spreadsheets.values.get({
       spreadsheetId: this.spreadsheetId,
       range: `${tabName}!A:ZZ`,
@@ -540,6 +573,19 @@ export class GoogleSheetsService {
   ): Promise<Record<string, Record<string, string>[]>> {
     if (tabNames.length === 0) return {};
 
+    // Try cache first — single Redis MGET round-trip
+    const keys = tabNames.map((t) => sheetsTabKey(this.spreadsheetId, t));
+    const cached = await mgetCache<Record<string, string>[]>(keys);
+    if (cached.every((v) => v !== null)) {
+      const out: Record<string, Record<string, string>[]> = {};
+      tabNames.forEach((t, i) => {
+        out[t] = cached[i] as Record<string, string>[];
+      });
+      return out;
+    }
+
+    // Partial miss → fetch ALL tabs in 1 Sheets batchGet (cheaper than
+    // mixing per-tab calls), then warm the cache for next time
     const ranges = tabNames.map((t) => `${t}!A:ZZ`);
     const response = await this.sheets.spreadsheets.values.batchGet({
       spreadsheetId: this.spreadsheetId,
@@ -565,6 +611,16 @@ export class GoogleSheetsService {
         return record;
       });
     }
+
+    // Warm cache (best-effort, fire-and-forget OK but await for consistency
+    // so a follow-up read in the same request sees the cached value)
+    await msetCache(
+      tabNames.map((t) => ({
+        key: sheetsTabKey(this.spreadsheetId, t),
+        value: result[t],
+      })),
+      SHEETS_TTL_SEC,
+    );
 
     return result;
   }
@@ -595,6 +651,9 @@ export class GoogleSheetsService {
 
   /**
    * เพิ่มแถวใหม่ (append)
+   *
+   * Invalidates the tab cache so subsequent reads see the new row(s).
+   * Also covers `appendRow()` and `appendRowByHeaders()` since they route here.
    */
   async appendRows(tabName: string, rows: (string | number)[][]): Promise<void> {
     await this.sheets.spreadsheets.values.append({
@@ -603,6 +662,7 @@ export class GoogleSheetsService {
       valueInputOption: "USER_ENTERED",
       requestBody: { values: rows },
     });
+    await invalidateTab(this.spreadsheetId, tabName);
   }
 
   /**
@@ -695,6 +755,7 @@ export class GoogleSheetsService {
       requestBody: { values: [updatedRow] },
     });
 
+    await invalidateTab(this.spreadsheetId, tabName);
     return true;
   }
 
@@ -752,6 +813,7 @@ export class GoogleSheetsService {
       },
     });
 
+    await invalidateTab(this.spreadsheetId, tabName);
     return true;
   }
 
@@ -926,14 +988,23 @@ export class GoogleSheetsService {
         valueInputOption: "USER_ENTERED",
         requestBody: { values: [[value]] },
       });
+      await invalidateTab(this.spreadsheetId, SHEET_TABS.CONFIG);
       return;
     }
 
-    // Append new row (Key, Value)
+    // Append new row (Key, Value) — appendRow → appendRows already invalidates
     await this.appendRow(SHEET_TABS.CONFIG, [key, value]);
   }
 
   async getConfigMap(): Promise<Record<string, string>> {
+    return getOrFetch(
+      sheetsConfigMapKey(this.spreadsheetId),
+      SHEETS_TTL_SEC,
+      () => this.getConfigMapUncached(),
+    );
+  }
+
+  private async getConfigMapUncached(): Promise<Record<string, string>> {
     try {
       const response = await this.sheets.spreadsheets.values.get({
         spreadsheetId: this.spreadsheetId,
