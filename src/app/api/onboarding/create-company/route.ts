@@ -163,14 +163,23 @@ export async function POST(req: NextRequest) {
         },
       });
 
+      // Enrol new orgs in 30-day Pro trial automatically (no card needed).
+      // After trial ends, the cron job at /api/cron/expire-trials downgrades
+      // them to "free" — until then, effectivePlan() returns "pro".
+      const TRIAL_DAYS = 30;
+      const trialEnds = new Date();
+      trialEnds.setDate(trialEnds.getDate() + TRIAL_DAYS);
       await tx.subscription.create({
         data: {
           orgId: newOrg.id,
           plan: "free",
           status: "active",
-          maxMembers: 2,
-          maxEvents: 3,
-          scanCredits: 8,
+          trialPlan: "pro",
+          trialStartedAt: new Date(),
+          trialEndsAt: trialEnds,
+          maxMembers: 5, // Pro limits while in trial
+          maxEvents: 20,
+          scanCredits: 300,
         },
       });
 
@@ -194,6 +203,37 @@ export async function POST(req: NextRequest) {
           acceptedTermsVersion: LEGAL_VERSION,
         },
       });
+
+      // Affiliate referral capture (S26)
+      // If user signed up with `?ref=CODE` (cookie set by middleware),
+      // record a pending Referral row so the partner can be credited
+      // later when the org converts to paid (Stripe webhook).
+      const refCookie = req.cookies.get("aim_ref")?.value;
+      if (refCookie && /^[A-Za-z0-9-]{4,16}$/.test(refCookie)) {
+        const partner = await tx.affiliatePartner.findUnique({
+          where: { code: refCookie },
+        });
+        // Self-referral guard — block if the partner is the same user
+        if (partner && partner.isActive && partner.userId !== session.userId) {
+          try {
+            await tx.referral.create({
+              data: {
+                partnerId: partner.id,
+                referredOrgId: newOrg.id,
+                code: refCookie,
+                status: "pending",
+              },
+            });
+            await tx.affiliatePartner.update({
+              where: { id: partner.id },
+              data: { totalReferrals: { increment: 1 } },
+            });
+          } catch (e) {
+            // Unique constraint or otherwise — log + ignore (don't fail signup)
+            console.warn("[create-company] referral capture failed:", e);
+          }
+        }
+      }
 
       return newOrg;
     });

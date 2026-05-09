@@ -29,6 +29,7 @@ model User {
   orgMembers           OrgMember[]
   ownedOrgs            Organization[]    @relation("OrgOwner")
   permissions          UserPermission[]
+  affiliatePartner     AffiliatePartner?
 
   @@map("users")
 }
@@ -170,8 +171,20 @@ model Subscription {
   orgId                String       @unique @map("org_id")
   plan                 String       @default("free")
   status               String       @default("active")
+  // === Trial (S26) — overrides plan if trialEndsAt > now ===
+  trialPlan            String?      @map("trial_plan")
+  trialStartedAt       DateTime?    @map("trial_started_at")
+  trialEndsAt          DateTime?    @map("trial_ends_at")
+  // === Stripe billing state (S26) ===
   stripeCustomerId     String?      @map("stripe_customer_id")
   stripeSubscriptionId String?      @map("stripe_subscription_id")
+  stripePriceId        String?      @map("stripe_price_id")
+  billingInterval      String?      @map("billing_interval") // "monthly" | "yearly"
+  currentPeriodEnd     DateTime?    @map("current_period_end")
+  cancelAtPeriodEnd    Boolean      @default(false) @map("cancel_at_period_end")
+  // === Beta flag — manual extend / free Pro for closed-beta testers ===
+  isBetaTester         Boolean      @default(false) @map("is_beta_tester")
+  // === Quotas (cached from PLAN_LIMITS for fast read; refreshed on plan change) ===
   maxMembers           Int          @default(2) @map("max_members")
   maxEvents            Int          @default(3) @map("max_events")
   scanCredits          Int          @default(8) @map("scan_credits")
@@ -184,6 +197,79 @@ model Subscription {
   org                  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
 
   @@map("subscriptions")
+}
+
+/// Per-org per-month usage counter for quota enforcement (OCR, future API calls, etc.).
+model UsageCounter {
+  id        String   @id @default(uuid())
+  orgId     String   @map("org_id")
+  yearMonth String   @map("year_month") // "2026-05"
+  metric    String // "ocr" — extend as needed
+  count     Int      @default(0)
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([orgId, yearMonth, metric])
+  @@map("usage_counters")
+}
+
+/// Affiliate / referral partner that distributes a code.
+/// `programType` differentiates customer-referral (mutual free month) from
+/// partner-affiliate (cash payout).
+model AffiliatePartner {
+  id              String       @id @default(uuid())
+  userId          String       @unique @map("user_id")
+  code            String       @unique
+  programType     String       @default("customer_referral") @map("program_type")
+  isActive        Boolean      @default(true) @map("is_active")
+  payoutMethod    String?      @map("payout_method") // "promptpay" | "stripe_connect"
+  payoutAccount   String?      @map("payout_account")
+  totalReferrals  Int          @default(0) @map("total_referrals")
+  totalCommission Decimal      @default(0) @db.Decimal(12, 2) @map("total_commission")
+  createdAt       DateTime     @default(now()) @map("created_at")
+
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  referrals   Referral[]
+  commissions Commission[]
+
+  @@map("affiliate_partners")
+}
+
+/// One referral = one signup that successfully applied a partner code.
+/// Status lifecycle: pending → confirmed (after first paid invoice) → refunded if reversed.
+model Referral {
+  id              String    @id @default(uuid())
+  partnerId       String    @map("partner_id")
+  referredOrgId   String    @unique @map("referred_org_id")
+  code            String
+  status          String    @default("pending") // pending | confirmed | refunded | invalid
+  signedUpAt      DateTime  @default(now()) @map("signed_up_at")
+  firstPaymentAt  DateTime? @map("first_payment_at")
+  confirmedAt     DateTime? @map("confirmed_at")
+  discountApplied String    @default("20pct_first_month_plus_100ocr") @map("discount_applied")
+
+  partner     AffiliatePartner @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  commissions Commission[]
+
+  @@map("referrals")
+}
+
+/// One commission entry = one scheduled payout for one month of a confirmed referral.
+/// Pay-after-month-2: monthIndex 1 has 0%, then 40/25/15 declining.
+model Commission {
+  id            String    @id @default(uuid())
+  partnerId     String    @map("partner_id")
+  referralId    String    @map("referral_id")
+  monthIndex    Int       @map("month_index")
+  amountTHB     Decimal   @db.Decimal(10, 2) @map("amount_thb")
+  status        String    @default("scheduled") // scheduled | paid | held | clawed_back
+  scheduledFor  DateTime  @map("scheduled_for")
+  paidAt        DateTime? @map("paid_at")
+  payoutBatchId String?   @map("payout_batch_id")
+
+  partner  AffiliatePartner @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  referral Referral         @relation(fields: [referralId], references: [id], onDelete: Cascade)
+
+  @@map("commissions")
 }
 
 model AuditLog {

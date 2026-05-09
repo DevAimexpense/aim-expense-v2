@@ -78,6 +78,19 @@ export function middleware(req: NextRequest) {
 
   const response = NextResponse.next();
 
+  // ===== Affiliate code capture (S26) =====
+  // Drop `aim_ref` cookie when ?ref=CODE is present in URL.
+  // Cookie persists 30 days → applied at sign-up to credit the partner.
+  const refParam = req.nextUrl.searchParams.get("ref");
+  if (refParam && /^[A-Za-z0-9-]{4,16}$/.test(refParam)) {
+    response.cookies.set("aim_ref", refParam, {
+      httpOnly: false, // readable by client for /pricing prefill
+      sameSite: "lax",
+      maxAge: 60 * 60 * 24 * 30, // 30 days
+      path: "/",
+    });
+  }
+
   // ===== Security Headers =====
   // Prevent clickjacking
   response.headers.set("X-Frame-Options", "SAMEORIGIN");

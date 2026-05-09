@@ -275,15 +275,20 @@ export const orgRouter = router({
           },
         });
 
-        // Create free subscription
+        // Auto-enrol in 30-day Pro trial (S26)
+        const trialEnds = new Date();
+        trialEnds.setDate(trialEnds.getDate() + 30);
         await tx.subscription.create({
           data: {
             orgId: newOrg.id,
             plan: "free",
             status: "active",
-            maxMembers: 2,
-            maxEvents: 3,
-            scanCredits: 8,
+            trialPlan: "pro",
+            trialStartedAt: new Date(),
+            trialEndsAt: trialEnds,
+            maxMembers: 5,
+            maxEvents: 20,
+            scanCredits: 300,
           },
         });
 
