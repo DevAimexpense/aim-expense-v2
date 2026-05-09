@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { COMPANY_NAME, CONTACT_EMAIL, LEGAL_VERSION } from "@/lib/legal/version";
+import { COMPANY_NAME, CONTACT_EMAIL, DPO_EMAIL, LEGAL_VERSION } from "@/lib/legal/version";
 
 export const metadata: Metadata = {
   title: `นโยบายความเป็นส่วนตัว · ${COMPANY_NAME}`,
@@ -46,7 +46,11 @@ export default function PrivacyPage() {
       <h3>1.4 ข้อมูลทางเทคนิค</h3>
       <ul>
         <li>คุกกี้ session (JWT) เพื่อรักษาสถานะการเข้าสู่ระบบ</li>
-        <li>บันทึกการใช้งาน (Audit Log) เช่น การอนุมัติรายจ่าย การแก้ไขข้อมูล</li>
+        <li>บันทึกการใช้งาน (Audit Log) เช่น การอนุมัติรายจ่าย การแก้ไขข้อมูล
+          (เก็บเฉพาะ ID และคำสรุปสั้น — ไม่มีจำนวนเงินหรือเนื้อหาใบเสร็จ)</li>
+        <li>บันทึกทางเทคนิค (IP, user-agent, timestamps) เก็บใน Vercel logs ≤ 30 วัน</li>
+        <li>Cache ของแถวข้อมูลใน Sheets เก็บชั่วคราวใน Upstash Redis (Singapore)
+          อายุไม่เกิน 60 วินาที — เพื่อ performance เท่านั้น</li>
       </ul>
 
       <h2>2. วัตถุประสงค์ในการใช้ข้อมูล</h2>
@@ -76,13 +80,21 @@ export default function PrivacyPage() {
       <h2>5. การเปิดเผยข้อมูลต่อบุคคลที่สาม</h2>
       <p>เราจะไม่ขายข้อมูลของท่าน เราใช้ผู้ให้บริการต่อไปนี้:</p>
       <ul>
-        <li><strong>LINE Corporation</strong> — สำหรับ LINE Login และ LINE Messaging API</li>
-        <li><strong>Google LLC</strong> — สำหรับ OAuth, Sheets, Drive</li>
-        <li><strong>OpenAI</strong> — สำหรับการอ่านข้อความจากใบเสร็จ/ใบแจ้งหนี้ด้วย AI (OCR)
+        <li><strong>LINE Corporation</strong> (ญี่ปุ่น) — สำหรับ LINE Login และ LINE Messaging API</li>
+        <li><strong>Google LLC</strong> (USA) — สำหรับ OAuth, Sheets, Drive</li>
+        <li><strong>Vercel</strong> (USA / Singapore) — hosting + serverless</li>
+        <li><strong>Supabase</strong> (Singapore) — ฐานข้อมูล PostgreSQL</li>
+        <li><strong>Upstash</strong> (Singapore) — Redis cache (TTL 30 วินาที)</li>
+        <li><strong>AksonOCR</strong> (ประเทศไทย) — OCR ใบเสร็จภาษาไทย (ระบบหลัก)</li>
+        <li><strong>OpenAI</strong> (USA) — GPT-4o สำหรับ OCR fallback (เปิด/ปิดได้);
           ภาพที่ส่งจะไม่ถูกนำไปฝึกโมเดล</li>
-        <li><strong>Supabase</strong> — สำหรับฐานข้อมูล PostgreSQL</li>
-        <li><strong>Stripe</strong> — สำหรับการเรียกเก็บเงิน (เฉพาะผู้ใช้ที่สมัครแพ็คเกจชำระเงิน)</li>
+        <li><strong>Sentry</strong> (USA) — error monitoring (ไม่มีเนื้อหาใบเสร็จ)</li>
+        <li><strong>Stripe</strong> (USA) — เก็บเงิน subscription (อนาคต — เฉพาะผู้ใช้แพ็คเกจชำระเงิน)</li>
       </ul>
+      <p>
+        รายชื่อเต็มและสถานที่เก็บข้อมูลอยู่ใน <a href="https://github.com/aim-expense/aim-expense/blob/main/docs/legal/SUB_PROCESSORS.md">SUB_PROCESSORS.md</a>
+        บน GitHub — อัพเดตล่าสุดเสมอ
+      </p>
 
       <h2>6. ระยะเวลาการเก็บรักษา</h2>
       <ul>
@@ -92,15 +104,21 @@ export default function PrivacyPage() {
       </ul>
 
       <h2>7. สิทธิของเจ้าของข้อมูล</h2>
-      <p>ท่านมีสิทธิตามกฎหมาย PDPA ดังนี้:</p>
+      <p>ท่านมีสิทธิตามมาตรา 30-37 PDPA ดังนี้:</p>
       <ul>
         <li>ขอเข้าถึง / ขอสำเนาข้อมูล</li>
         <li>ขอแก้ไขข้อมูลให้ถูกต้อง</li>
-        <li>ขอให้ลบหรือระงับการใช้</li>
+        <li>ขอให้ลบหรือระงับการใช้ / ลบบัญชี</li>
         <li>เพิกถอนความยินยอม</li>
         <li>คัดค้านการประมวลผล</li>
-        <li>ร้องเรียนต่อสำนักงานคณะกรรมการคุ้มครองข้อมูลส่วนบุคคล (สคส.)</li>
+        <li>ขอย้ายข้อมูล (data portability)</li>
+        <li>ร้องเรียนต่อสำนักงานคณะกรรมการคุ้มครองข้อมูลส่วนบุคคล (สคส. / PDPC)</li>
       </ul>
+      <p>
+        ใช้สิทธิได้ที่: <a href="/account/data">/account/data</a> ในแอป
+        หรือส่งอีเมลถึง <a href={`mailto:${DPO_EMAIL}`}>{DPO_EMAIL}</a>
+        — เราตอบกลับภายใน 30 วันตามที่ PDPA กำหนด
+      </p>
 
       <h2>8. ความปลอดภัย</h2>
       <ul>
@@ -122,11 +140,20 @@ export default function PrivacyPage() {
         เราจะแจ้งให้ทราบผ่านระบบ และจะขอความยินยอมใหม่ตามความเหมาะสม
       </p>
 
-      <h2>11. ติดต่อเจ้าหน้าที่คุ้มครองข้อมูล</h2>
+      <h2>11. การแจ้งเหตุละเมิด (Breach Notification)</h2>
+      <p>
+        เราจะแจ้ง สคส. (PDPC) ภายใน <strong>72 ชั่วโมง</strong> เมื่อพบเหตุละเมิดที่
+        มีความเสี่ยงต่อสิทธิของเจ้าของข้อมูล. หากเหตุละเมิดมีความเสี่ยงสูงเราจะแจ้งเจ้าของ
+        ข้อมูลที่ได้รับผลกระทบโดยตรงด้วย ตามมาตรา 37 PDPA
+      </p>
+
+      <h2>12. ติดต่อเจ้าหน้าที่คุ้มครองข้อมูล (DPO)</h2>
       <p>
         หากท่านมีคำถามหรือต้องการใช้สิทธิตาม PDPA โปรดติดต่อ:
         <br />
-        อีเมล: <a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a>
+        DPO อีเมล: <a href={`mailto:${DPO_EMAIL}`}>{DPO_EMAIL}</a>
+        <br />
+        ติดต่อทั่วไป: <a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a>
       </p>
     </div>
   );

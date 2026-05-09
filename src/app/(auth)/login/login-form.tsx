@@ -5,10 +5,12 @@ import { useSearchParams } from "next/navigation";
 
 export default function LoginForm() {
   const [isLoading, setIsLoading] = useState(false);
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
   const searchParams = useSearchParams();
   const error = searchParams.get("error");
 
   const handleLineLogin = () => {
+    if (!acceptedTerms) return;
     setIsLoading(true);
     window.location.href = "/api/auth/line";
   };
@@ -65,9 +67,30 @@ export default function LoginForm() {
               </div>
             )}
 
+            {/* PDPA-aligned consent checkbox */}
+            <label className="mb-4 flex cursor-pointer items-start gap-3 rounded-lg border border-slate-200 bg-slate-50/70 p-3 text-sm">
+              <input
+                type="checkbox"
+                checked={acceptedTerms}
+                onChange={(e) => setAcceptedTerms(e.target.checked)}
+                className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                aria-describedby="terms-text"
+              />
+              <span id="terms-text" className="text-slate-700">
+                ฉันยอมรับ{" "}
+                <a href="/terms" target="_blank" rel="noopener" className="font-medium text-brand-600 hover:underline">
+                  ข้อกำหนดการใช้งาน
+                </a>
+                {" และ "}
+                <a href="/privacy" target="_blank" rel="noopener" className="font-medium text-brand-600 hover:underline">
+                  นโยบายความเป็นส่วนตัว
+                </a>
+              </span>
+            </label>
+
             <button
               onClick={handleLineLogin}
-              disabled={isLoading}
+              disabled={isLoading || !acceptedTerms}
               className="group flex w-full items-center justify-center gap-3 rounded-xl bg-[#06c755] px-4 py-3 text-sm font-semibold text-white shadow-sm transition-all hover:bg-[#05b34a] hover:shadow-md active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 sm:text-base"
             >
               {isLoading ? (

@@ -303,6 +303,21 @@ export function Sidebar({
             </button>
           </form>
         )}
+        {!isCollapsed && (
+          <div className="sidebar-legal">
+            <Link href="/account/data" className="sidebar-legal-link">
+              ข้อมูลส่วนบุคคล
+            </Link>
+            <span aria-hidden>·</span>
+            <Link href="/privacy" className="sidebar-legal-link" target="_blank" rel="noopener">
+              ความเป็นส่วนตัว
+            </Link>
+            <span aria-hidden>·</span>
+            <Link href="/terms" className="sidebar-legal-link" target="_blank" rel="noopener">
+              ข้อกำหนด
+            </Link>
+          </div>
+        )}
       </div>
     </aside>
   );
