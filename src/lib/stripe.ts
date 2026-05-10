@@ -23,8 +23,8 @@ export const stripe = new Stripe(secret || "sk_test_dummy", {
 export type BillingInterval = "monthly" | "yearly";
 
 /**
- * Map (tier, interval) → lookup_key configured in Stripe Dashboard.
- * Naming convention enforced when pi creates products: `{tier}_{interval}`.
+ * Map (tier, interval) → lookup_key (Stripe Dashboard naming convention).
+ * Used as fallback when no env-based price ID is set.
  */
 export function lookupKeyFor(
   tier: PlanTier,
@@ -34,12 +34,27 @@ export function lookupKeyFor(
 }
 
 /**
+ * Resolve a Stripe price ID from env vars.
+ * Naming convention: `STRIPE_PRICE_{TIER}_{INTERVAL}` (uppercase).
+ * Returns `null` if not set — caller falls back to `lookup_keys` query.
+ */
+function envPriceIdFor(
+  tier: PlanTier,
+  interval: BillingInterval,
+): string | null {
+  const key = `STRIPE_PRICE_${tier.toUpperCase()}_${interval.toUpperCase()}`;
+  const v = process.env[key];
+  return v && v.startsWith("price_") ? v : null;
+}
+
+/**
  * Fetch the Stripe Price object for a (tier, interval) combo.
- * Throws if the lookup key isn't found in Stripe — caller should surface a
- * clean 4xx in that case.
  *
- * Cached at module level for the lifetime of the lambda (price IDs don't
- * change once products are configured).
+ * Resolution order:
+ *   1. env var `STRIPE_PRICE_{TIER}_{INTERVAL}` (fast, explicit)
+ *   2. Stripe API by `lookup_key` (fallback — requires lookup keys set in Dashboard)
+ *
+ * Throws if neither resolves. Cached at module level after first hit.
  */
 const priceCache = new Map<string, Stripe.Price>();
 
@@ -47,12 +62,30 @@ export async function getPriceByTierInterval(
   tier: PlanTier,
   interval: BillingInterval,
 ): Promise<Stripe.Price> {
-  const key = lookupKeyFor(tier, interval);
-  const cached = priceCache.get(key);
+  const cacheKey = `${tier}_${interval}`;
+  const cached = priceCache.get(cacheKey);
   if (cached) return cached;
 
+  // 1. Try env-configured price ID first
+  const envId = envPriceIdFor(tier, interval);
+  if (envId) {
+    try {
+      const price = await stripe.prices.retrieve(envId);
+      priceCache.set(cacheKey, price);
+      return price;
+    } catch (err) {
+      console.warn(
+        `[stripe] env price ID ${envId} failed (${tier} ${interval}), falling back to lookup_key:`,
+        err instanceof Error ? err.message : err,
+      );
+      // Fall through to lookup_key path below
+    }
+  }
+
+  // 2. Fall back to lookup_key on Stripe Dashboard
+  const lookupKey = lookupKeyFor(tier, interval);
   const list = await stripe.prices.list({
-    lookup_keys: [key],
+    lookup_keys: [lookupKey],
     expand: ["data.product"],
     active: true,
     limit: 1,
@@ -61,11 +94,13 @@ export async function getPriceByTierInterval(
   const price = list.data[0];
   if (!price) {
     throw new Error(
-      `Stripe price with lookup_key "${key}" not found. Did you create the product + lookup key in Stripe Dashboard?`,
+      `Stripe price not found for ${tier}/${interval}. ` +
+        `Set env var STRIPE_PRICE_${tier.toUpperCase()}_${interval.toUpperCase()} ` +
+        `or set lookup_key="${lookupKey}" on the price in Stripe Dashboard.`,
     );
   }
 
-  priceCache.set(key, price);
+  priceCache.set(cacheKey, price);
   return price;
 }
 
