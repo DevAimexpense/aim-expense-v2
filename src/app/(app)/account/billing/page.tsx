@@ -18,6 +18,7 @@ import {
 } from "@/lib/plans";
 import { getUsage } from "@/server/lib/usage";
 import { COMPANY_NAME } from "@/lib/legal/version";
+import { CustomerPortalButton } from "./portal-button";
 
 export const metadata: Metadata = {
   title: `แพ็คเกจของคุณ · ${COMPANY_NAME}`,
@@ -401,14 +402,9 @@ export default async function AccountBillingPage() {
           <p style={{ fontSize: "0.875rem", color: "#64748b" }}>
             ดูใบเสร็จย้อนหลัง / เปลี่ยนบัตร / ยกเลิกผ่าน Stripe Customer Portal
           </p>
-          <button
-            className="app-btn app-btn-secondary"
-            disabled
-            title="Coming soon — S26-B"
-            style={{ marginTop: "0.5rem" }}
-          >
-            เปิด Customer Portal →
-          </button>
+          <div style={{ marginTop: "0.5rem" }}>
+            <CustomerPortalButton />
+          </div>
         </div>
       )}
 

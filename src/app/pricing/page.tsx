@@ -1,6 +1,7 @@
 // ===========================================
 // /pricing — Public marketing page (no auth required)
-// 6-tier comparison from Excel pricing roadmap
+// 6-tier comparison from Excel pricing roadmap.
+// Server-rendered for SEO; tier cards + interval toggle are a client component.
 // ===========================================
 
 import Link from "next/link";
@@ -12,6 +13,7 @@ import {
   type PlanTier,
 } from "@/lib/plans";
 import { COMPANY_NAME } from "@/lib/legal/version";
+import { PricingCardsClient } from "./pricing-actions";
 
 export const metadata: Metadata = {
   title: `ราคา · ${COMPANY_NAME}`,
@@ -19,93 +21,13 @@ export const metadata: Metadata = {
     "ราคา Aim Expense — Free Forever ไปจนถึง Enterprise พร้อม 30-day Pro trial ไม่ต้องใช้บัตรเครดิต",
 };
 
-const formatTHB = (n: number) =>
-  n.toLocaleString("th-TH", { maximumFractionDigits: 0 });
-
-interface TierInfo {
-  tier: PlanTier;
-  highlight?: boolean;
-  tagline: string;
-  badge?: string;
-  ctaLabel: string;
-  ctaHref: string;
-  ctaIsExternal?: boolean;
-}
-
-const TIERS: TierInfo[] = [
-  {
-    tier: "free",
-    tagline: "เริ่มต้นใช้งาน — ไม่มีค่าใช้จ่าย",
-    badge: "Free Forever",
-    ctaLabel: "เริ่มฟรี",
-    ctaHref: "/login",
-  },
-  {
-    tier: "basic",
-    tagline: "สำหรับ freelance / ธุรกิจขนาดเล็ก",
-    ctaLabel: "เลือกแผน Basic",
-    ctaHref: "/account/billing?upgrade=basic",
-  },
-  {
-    tier: "pro",
-    tagline: "ครบที่สุด — เหมาะกับ SME ส่วนใหญ่",
-    badge: "ยอดนิยม ⭐",
-    highlight: true,
-    ctaLabel: "เลือกแผน Pro",
-    ctaHref: "/account/billing?upgrade=pro",
-  },
-  {
-    tier: "business",
-    tagline: "สำหรับทีม 5-10 คน + multi-step approval",
-    ctaLabel: "เลือกแผน Business",
-    ctaHref: "/account/billing?upgrade=business",
-  },
-  {
-    tier: "max",
-    tagline: "Mid-market + custom branding + API",
-    ctaLabel: "เลือกแผน Max",
-    ctaHref: "/account/billing?upgrade=max",
-  },
-  {
-    tier: "enterprise",
-    tagline: "ปรับตามความต้องการ + dedicated CSM",
-    ctaLabel: "ติดต่อฝ่ายขาย",
-    ctaHref: "mailto:sales@aimexpense.com",
-    ctaIsExternal: true,
-  },
-];
-
-const FEATURE_ROWS: { label: string; getValue: (t: PlanTier) => string }[] = [
-  {
-    label: "ผู้ใช้ในองค์กร",
-    getValue: (t) =>
-      PLAN_LIMITS[t].users === -1
-        ? "ไม่จำกัด"
-        : `${PLAN_LIMITS[t].users} คน`,
-  },
-  {
-    label: "บริษัท / Multi-business",
-    getValue: (t) =>
-      PLAN_LIMITS[t].businesses === -1
-        ? "ไม่จำกัด"
-        : `${PLAN_LIMITS[t].businesses} บริษัท`,
-  },
-  {
-    label: "OCR ใบเสร็จ / เดือน",
-    getValue: (t) =>
-      PLAN_LIMITS[t].ocrPerMonth === -1
-        ? "ไม่จำกัด"
-        : `${PLAN_LIMITS[t].ocrPerMonth} ครั้ง`,
-  },
-  {
-    label: "LINE Group bot",
-    getValue: (t) =>
-      PLAN_LIMITS[t].lineGroups === -1
-        ? "ไม่จำกัด"
-        : PLAN_LIMITS[t].lineGroups === 0
-          ? "—"
-          : `${PLAN_LIMITS[t].lineGroups} กลุ่ม`,
-  },
+const TIERS: PlanTier[] = [
+  "free",
+  "basic",
+  "pro",
+  "business",
+  "max",
+  "enterprise",
 ];
 
 const FEATURE_TOGGLES: { label: string; enabledOn: PlanTier[] }[] = [
@@ -141,33 +63,23 @@ const FEATURE_TOGGLES: { label: string; enabledOn: PlanTier[] }[] = [
     label: "ใบเสนอราคา / ใบวางบิล / ใบกำกับภาษี",
     enabledOn: ["pro", "business", "max", "enterprise"],
   },
-  {
-    label: "P&L per Project",
-    enabledOn: ["pro", "business", "max", "enterprise"],
-  },
-  {
-    label: "ภ.พ.30 + WHT Report",
-    enabledOn: ["pro", "business", "max", "enterprise"],
-  },
-  {
-    label: "Custom branding บน PDF",
-    enabledOn: ["max", "enterprise"],
-  },
-  {
-    label: "API access",
-    enabledOn: ["max", "enterprise"],
-  },
-  {
-    label: "Audit Log Export",
-    enabledOn: ["max", "enterprise"],
-  },
-  {
-    label: "SSO + SLA 99.9%",
-    enabledOn: ["enterprise"],
-  },
+  { label: "P&L per Project", enabledOn: ["pro", "business", "max", "enterprise"] },
+  { label: "ภ.พ.30 + WHT Report", enabledOn: ["pro", "business", "max", "enterprise"] },
+  { label: "Custom branding บน PDF", enabledOn: ["max", "enterprise"] },
+  { label: "API access", enabledOn: ["max", "enterprise"] },
+  { label: "Audit Log Export", enabledOn: ["max", "enterprise"] },
+  { label: "SSO + SLA 99.9%", enabledOn: ["enterprise"] },
 ];
 
 export default function PricingPage() {
+  // Bundle prices for client component (avoids re-importing PLAN_PRICING_THB there)
+  const prices = {
+    basic: PLAN_PRICING_THB.basic!,
+    pro: PLAN_PRICING_THB.pro!,
+    business: PLAN_PRICING_THB.business!,
+    max: PLAN_PRICING_THB.max!,
+  };
+
   return (
     <main className="min-h-screen bg-slate-50">
       {/* Top nav */}
@@ -204,98 +116,8 @@ export default function PricingPage() {
           </p>
         </div>
 
-        {/* Pricing cards (Free + Basic + Pro + Business + Max + Enterprise) */}
-        <div className="mx-auto mt-12 grid max-w-6xl grid-cols-1 gap-4 md:grid-cols-3 lg:grid-cols-6">
-          {TIERS.map((info) => {
-            const price = PLAN_PRICING_THB[info.tier];
-            return (
-              <div
-                key={info.tier}
-                className={`flex flex-col rounded-2xl border p-5 ${
-                  info.highlight
-                    ? "border-brand-500 bg-white shadow-lg ring-2 ring-brand-500"
-                    : "border-slate-200 bg-white shadow-sm"
-                }`}
-              >
-                {info.badge && (
-                  <span
-                    className={`mb-2 inline-block self-start rounded-full px-2 py-0.5 text-xs font-semibold ${
-                      info.highlight
-                        ? "bg-brand-600 text-white"
-                        : "bg-slate-100 text-slate-700"
-                    }`}
-                  >
-                    {info.badge}
-                  </span>
-                )}
-                <h3 className="text-lg font-bold text-slate-900">
-                  {PLAN_LABELS[info.tier]}
-                </h3>
-                <p className="mt-1 text-xs text-slate-500">{info.tagline}</p>
-
-                <div className="mt-4">
-                  {price ? (
-                    <>
-                      <div className="text-2xl font-bold text-slate-900">
-                        {formatTHB(price.monthly)}
-                        <span className="text-sm font-normal text-slate-500">
-                          {" "}
-                          ฿/เดือน
-                        </span>
-                      </div>
-                      <div className="text-xs text-slate-500">
-                        หรือ {formatTHB(price.yearly)} ฿/ปี (ประหยัด 17%)
-                      </div>
-                    </>
-                  ) : info.tier === "enterprise" ? (
-                    <div className="text-2xl font-bold text-slate-900">
-                      Custom
-                    </div>
-                  ) : (
-                    <div className="text-2xl font-bold text-slate-900">
-                      ฟรี
-                    </div>
-                  )}
-                </div>
-
-                <ul className="mt-4 space-y-1 text-xs text-slate-700">
-                  {FEATURE_ROWS.map((row) => (
-                    <li key={row.label}>
-                      <span className="text-slate-500">{row.label}:</span>{" "}
-                      <strong>{row.getValue(info.tier)}</strong>
-                    </li>
-                  ))}
-                </ul>
-
-                <div className="mt-auto pt-4">
-                  {info.ctaIsExternal ? (
-                    <a
-                      href={info.ctaHref}
-                      className={`block w-full rounded-lg px-3 py-2 text-center text-sm font-semibold ${
-                        info.highlight
-                          ? "bg-brand-600 text-white hover:bg-brand-700"
-                          : "border border-slate-300 bg-white text-slate-700 hover:border-slate-400"
-                      }`}
-                    >
-                      {info.ctaLabel}
-                    </a>
-                  ) : (
-                    <Link
-                      href={info.ctaHref}
-                      className={`block w-full rounded-lg px-3 py-2 text-center text-sm font-semibold ${
-                        info.highlight
-                          ? "bg-brand-600 text-white hover:bg-brand-700"
-                          : "border border-slate-300 bg-white text-slate-700 hover:border-slate-400"
-                      }`}
-                    >
-                      {info.ctaLabel}
-                    </Link>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
+        {/* Pricing cards (client — handles interval toggle + Stripe redirect) */}
+        <PricingCardsClient prices={prices} />
 
         {/* Detailed comparison table */}
         <div className="mx-auto mt-16 max-w-6xl overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -305,26 +127,65 @@ export default function PricingPage() {
                 <th className="px-4 py-3 text-left font-semibold text-slate-700">
                   Feature
                 </th>
-                {TIERS.map((info) => (
+                {TIERS.map((tier) => (
                   <th
-                    key={info.tier}
+                    key={tier}
                     className="px-4 py-3 text-center font-semibold text-slate-700"
                   >
-                    {PLAN_LABELS[info.tier]}
+                    {PLAN_LABELS[tier]}
                   </th>
                 ))}
               </tr>
             </thead>
             <tbody>
+              {/* Quantitative limits */}
+              <tr className="border-b border-slate-100 bg-slate-50/40">
+                <td className="px-4 py-2 font-medium text-slate-700">ผู้ใช้</td>
+                {TIERS.map((t) => (
+                  <td key={t} className="px-4 py-2 text-center text-slate-700">
+                    {PLAN_LIMITS[t].users === -1
+                      ? "∞"
+                      : PLAN_LIMITS[t].users}
+                  </td>
+                ))}
+              </tr>
+              <tr className="border-b border-slate-100 bg-slate-50/40">
+                <td className="px-4 py-2 font-medium text-slate-700">บริษัท</td>
+                {TIERS.map((t) => (
+                  <td key={t} className="px-4 py-2 text-center text-slate-700">
+                    {PLAN_LIMITS[t].businesses === -1
+                      ? "∞"
+                      : PLAN_LIMITS[t].businesses}
+                  </td>
+                ))}
+              </tr>
+              <tr className="border-b border-slate-100 bg-slate-50/40">
+                <td className="px-4 py-2 font-medium text-slate-700">OCR / เดือน</td>
+                {TIERS.map((t) => (
+                  <td key={t} className="px-4 py-2 text-center text-slate-700">
+                    {PLAN_LIMITS[t].ocrPerMonth === -1
+                      ? "∞"
+                      : PLAN_LIMITS[t].ocrPerMonth.toLocaleString("th-TH")}
+                  </td>
+                ))}
+              </tr>
+              <tr className="border-b border-slate-100 bg-slate-50/40">
+                <td className="px-4 py-2 font-medium text-slate-700">LINE Group</td>
+                {TIERS.map((t) => (
+                  <td key={t} className="px-4 py-2 text-center text-slate-700">
+                    {PLAN_LIMITS[t].lineGroups === -1
+                      ? "∞"
+                      : PLAN_LIMITS[t].lineGroups || "—"}
+                  </td>
+                ))}
+              </tr>
+              {/* Feature toggles */}
               {FEATURE_TOGGLES.map((row) => (
                 <tr key={row.label} className="border-b border-slate-100">
                   <td className="px-4 py-2.5 text-slate-700">{row.label}</td>
-                  {TIERS.map((info) => (
-                    <td
-                      key={info.tier}
-                      className="px-4 py-2.5 text-center"
-                    >
-                      {row.enabledOn.includes(info.tier) ? (
+                  {TIERS.map((tier) => (
+                    <td key={tier} className="px-4 py-2.5 text-center">
+                      {row.enabledOn.includes(tier) ? (
                         <span className="text-green-600">✓</span>
                       ) : (
                         <span className="text-slate-300">—</span>
@@ -359,7 +220,7 @@ export default function PricingPage() {
               <strong> ส่วนลด 20% เดือนแรก + 100 OCR ฟรี</strong>
             </p>
             <p className="mt-2 text-xs text-amber-700">
-              จะให้ใส่ตอน checkout — code ผูกกับบัญชีของท่านอัตโนมัติเมื่อเข้าผ่าน link
+              เข้าผ่าน link จาก partner (`?ref=CODE`) → จะ apply อัตโนมัติตอน checkout
             </p>
           </div>
         </div>
