@@ -106,6 +106,10 @@ export async function getPriceByTierInterval(
 
 /**
  * Coupon ID for the referral discount (20% off first invoice).
- * Created manually in Stripe Dashboard → Products → Coupons.
+ *
+ * Stripe auto-generates an ID if not specified at create time, so we read
+ * from env to support both: `STRIPE_REFERRAL_COUPON_ID` overrides the
+ * default. Created manually in Stripe Dashboard → Products → Coupons.
  */
-export const REFERRAL_COUPON_ID = "ref-20pct-month1";
+export const REFERRAL_COUPON_ID =
+  process.env.STRIPE_REFERRAL_COUPON_ID || "ref-20pct-month1";
