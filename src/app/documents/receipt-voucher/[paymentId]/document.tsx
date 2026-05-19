@@ -4,7 +4,14 @@ import { useEffect, useState } from "react";
 import { saveDocumentPdf, runAutoSaveIfRequested } from "@/lib/utils/save-doc-pdf";
 
 interface Props {
-  company: { name: string; taxId: string; address: string };
+  company: {
+    name: string;
+    taxId: string;
+    address: string;
+    logoUrl?: string | null;
+    signatureUrl?: string | null;
+    signatoryName?: string | null;
+  };
   requester: { name: string };
   payee: { name: string; taxId: string; address: string };
   payment: {
@@ -113,6 +120,10 @@ export function ReceiptVoucherDocument({ company, requester, payee, payment }: P
       )}
 
       <div className="doc">
+        {company.logoUrl && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={company.logoUrl} alt="" className="company-logo" />
+        )}
         {/* Title + top-right meta */}
         <div className="title-row">
           <div className="doc-title">ใบสำคัญรับเงิน</div>
@@ -195,8 +206,15 @@ export function ReceiptVoucherDocument({ company, requester, payee, payment }: P
             <div className="sig-label">ผู้รับเงิน</div>
           </div>
           <div className="sig-col">
+            {company.signatureUrl && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={company.signatureUrl} alt="" className="sig-img" />
+            )}
             <div className="sig-line">ลงชื่อ ...................................................</div>
             <div className="sig-label">ผู้จ่ายเงิน</div>
+            {company.signatoryName && (
+              <div className="sig-name">({company.signatoryName})</div>
+            )}
           </div>
         </div>
 
@@ -218,6 +236,14 @@ export function ReceiptVoucherDocument({ company, requester, payee, payment }: P
           font-family: "IBM Plex Sans Thai", "Sarabun", sans-serif;
           color: #0f172a;
           font-size: 0.875rem;
+        }
+
+        .company-logo {
+          display: block;
+          max-height: 56px;
+          max-width: 200px;
+          object-fit: contain;
+          margin-bottom: 0.75rem;
         }
 
         .title-row {
@@ -356,6 +382,20 @@ export function ReceiptVoucherDocument({ company, requester, payee, payment }: P
         .sig-label {
           font-size: 0.875rem;
           margin-left: 2rem;
+        }
+
+        .sig-img {
+          display: block;
+          height: 46px;
+          object-fit: contain;
+          margin: 0 0 -0.25rem 2rem;
+        }
+
+        .sig-name {
+          font-size: 0.75rem;
+          color: #64748b;
+          margin-left: 2rem;
+          margin-top: 0.125rem;
         }
 
         .note {

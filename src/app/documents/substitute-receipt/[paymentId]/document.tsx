@@ -4,7 +4,14 @@ import { useEffect, useState } from "react";
 import { saveDocumentPdf, runAutoSaveIfRequested } from "@/lib/utils/save-doc-pdf";
 
 interface Props {
-  company: { name: string; taxId: string; address: string };
+  company: {
+    name: string;
+    taxId: string;
+    address: string;
+    logoUrl?: string | null;
+    signatureUrl?: string | null;
+    signatoryName?: string | null;
+  };
   requester: { name: string };
   payee: { name: string };
   payment: {
@@ -110,6 +117,10 @@ export function SubstituteReceiptDocument({ company, requester, payee, payment }
       )}
 
       <div className="doc">
+        {company.logoUrl && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={company.logoUrl} alt="" className="company-logo" />
+        )}
         {/* Title */}
         <div className="doc-title">ใบรับรองแทนใบเสร็จรับเงิน</div>
 
@@ -192,9 +203,15 @@ export function SubstituteReceiptDocument({ company, requester, payee, payment }
             <div className="sig-name">({requester.name || "................................"})</div>
           </div>
           <div className="sig-box">
+            {company.signatureUrl && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={company.signatureUrl} alt="" className="sig-img" />
+            )}
             <div className="sig-line">ลงชื่อ .....................................................</div>
             <div className="sig-label">(ผู้อนุมัติ)</div>
-            <div className="sig-name">(................................)</div>
+            <div className="sig-name">
+              ({company.signatoryName || "................................"})
+            </div>
           </div>
         </div>
 
@@ -215,11 +232,26 @@ export function SubstituteReceiptDocument({ company, requester, payee, payment }
           font-size: 0.875rem;
         }
 
+        .company-logo {
+          display: block;
+          max-height: 56px;
+          max-width: 200px;
+          object-fit: contain;
+          margin-bottom: 1rem;
+        }
+
         .doc-title {
           text-align: center;
           font-size: 1.5rem;
           font-weight: 700;
           margin-bottom: 2rem;
+        }
+
+        .sig-img {
+          display: block;
+          margin: 0 auto -0.25rem;
+          height: 46px;
+          object-fit: contain;
         }
 
         .company-row {

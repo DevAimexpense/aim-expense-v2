@@ -8,8 +8,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session";
 import { getOrgContext } from "@/lib/auth/middleware";
 import { parseReceipt, type DocumentType } from "@/lib/ocr";
-import { prisma } from "@/lib/prisma";
 import { validateUploadedFile } from "@/lib/security/file-validation";
+import { checkQuotaOnly, incrementAndCheckQuota } from "@/server/lib/usage";
 
 export async function POST(req: NextRequest) {
   const session = await getSession();
@@ -30,21 +30,16 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "ไม่พบไฟล์" }, { status: 400 });
     }
 
-    // Check OCR scan quota
-    const subscription = await prisma.subscription.findUnique({
-      where: { orgId: org.orgId },
-    });
-    if (subscription) {
-      const used = subscription.creditsUsed;
-      const limit = subscription.scanCredits + subscription.bonusCredits;
-      if (limit > 0 && used >= limit) {
-        return NextResponse.json(
-          {
-            error: `OCR quota หมดแล้ว (${used}/${limit}) — upgrade plan หรือซื้อ credit pack`,
-          },
-          { status: 429 }
-        );
-      }
+    // Check monthly OCR quota (read-only) — refuse early before expensive OCR
+    const quota = await checkQuotaOnly(org.orgId, "ocr");
+    if (!quota.ok) {
+      return NextResponse.json(
+        {
+          error: `OCR quota หมดแล้วเดือนนี้ (${quota.current}/${quota.limit}) — อัปเกรดแพ็คเกจหรือซื้อ OCR เพิ่ม`,
+          quota,
+        },
+        { status: 429 },
+      );
     }
 
     // Parse
@@ -65,17 +60,19 @@ export async function POST(req: NextRequest) {
 
     console.log(`[ocr] OCR success: confidence=${result.confidence}, vendor=${result.vendorName}`);
 
-    // Increment usage (best effort, don't block response)
-    if (subscription) {
-      prisma.subscription
-        .update({
-          where: { orgId: org.orgId },
-          data: { creditsUsed: { increment: 1 } },
-        })
-        .catch((err) => console.error("[ocr] failed to update credits:", err));
-    }
+    // Count this scan against the monthly quota — only after a successful
+    // parse, so a failed OCR never costs the user a credit.
+    const usage = await incrementAndCheckQuota(org.orgId, "ocr");
 
-    return NextResponse.json({ success: true, data: result });
+    return NextResponse.json({
+      success: true,
+      data: result,
+      quota: {
+        used: usage.current,
+        limit: usage.limit,
+        remaining: usage.limit === -1 ? null : usage.remaining,
+      },
+    });
   } catch (err) {
     console.error("[ocr/receipt] ERROR:", err);
     if (err instanceof Error) {

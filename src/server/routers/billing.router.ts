@@ -13,6 +13,7 @@ import {
   SHEET_TABS,
 } from "../services/google-sheets.service";
 import { computeNextDocNumber } from "../lib/doc-number";
+import { resolveIssuerBranch } from "../lib/issuer-branch";
 import { prisma } from "@/lib/prisma";
 
 // ===== Schemas =====
@@ -45,6 +46,7 @@ const BillingCreateInput = z.object({
   docDate: z.string().min(1),
   dueDate: z.string().min(1),
   customerId: z.string().min(1),
+  branchId: z.string().optional(), // issuing branch — omit = HQ
   sourceQuotationId: z.string().optional(),
   eventId: z.string().optional(),
   projectName: z.string().max(200).optional(),
@@ -268,6 +270,8 @@ export const billingRouter = router({
         input.whtPercent
       );
 
+      const issuer = await resolveIssuerBranch(ctx.org.orgId, input.branchId);
+
       const now = new Date().toISOString();
 
       try {
@@ -281,6 +285,8 @@ export const billingRouter = router({
           CustomerTaxIdSnapshot: customer.TaxID || "",
           CustomerAddressSnapshot:
             customer.BillingAddress || customer.Address || "",
+          IssuerBranchSnapshot: issuer.branchLabel,
+          IssuerAddressSnapshot: issuer.address,
           SourceQuotationID: input.sourceQuotationId || "",
           EventID: input.eventId || "",
           ProjectName: input.projectName || "",

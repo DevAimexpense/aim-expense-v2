@@ -14,6 +14,8 @@ import { encryptToken } from "@/lib/google/token-encryption";
 import { getDefaultPermissions } from "@/lib/permissions";
 import { getSheetsService, ensureTabsCached } from "../lib/sheets-context";
 import { getAllDocPrefixes, isValidDocPrefix } from "../lib/doc-number";
+import { checkBusinessQuota } from "../lib/business-quota";
+import { PLAN_LABELS } from "@/lib/plans";
 import { TRPCError } from "@trpc/server";
 
 /**
@@ -185,37 +187,54 @@ export const orgRouter = router({
   create: protectedProcedure
     .input(
       z.object({
-        name: z.string().min(1, "กรุณากรอกชื่อองค์กร"),
-        slug: z
+        name: z.string().trim().min(1, "กรุณากรอกชื่อองค์กร").max(200),
+        taxId: z
           .string()
-          .min(2)
-          .max(50)
-          .regex(/^[a-z0-9-]+$/, "ใช้ตัวอักษรพิมพ์เล็ก ตัวเลข และ - เท่านั้น")
-          .optional(),
+          .trim()
+          .regex(/^\d{13}$/, "เลขผู้เสียภาษีต้องเป็นตัวเลข 13 หลัก"),
+        branchType: z.enum(["HQ", "Branch"]).default("HQ"),
+        branchNumber: z
+          .string()
+          .trim()
+          .regex(/^\d{5}$/, "เลขสาขาต้องเป็นตัวเลข 5 หลัก")
+          .default("00000"),
+        address: z.string().trim().min(1, "กรุณากรอกที่อยู่").max(500),
+        phone: z.string().trim().max(30).nullable().optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
       const userId = ctx.session.userId;
 
-      // Check if user already owns an org
-      const existingOrg = await prisma.organization.findFirst({
-        where: { ownerId: userId },
-      });
-      if (existingOrg) {
+      // Multi-business gate — enforce the per-account business allowance
+      const quota = await checkBusinessQuota(userId);
+      if (!quota.ok) {
         throw new TRPCError({
-          code: "CONFLICT",
-          message: "คุณมีองค์กรอยู่แล้ว",
+          code: "FORBIDDEN",
+          message:
+            quota.limit === 1
+              ? `แผน ${PLAN_LABELS[quota.plan]} สร้างได้ 1 บริษัท — อัปเกรดเป็น Pro เพื่อสร้างบริษัทเพิ่ม`
+              : `แผน ${PLAN_LABELS[quota.plan]} สร้างได้สูงสุด ${quota.limit} บริษัท (สร้างไปแล้ว ${quota.current}) — อัปเกรดแผนเพื่อสร้างเพิ่ม`,
         });
       }
 
-      // Generate slug
-      const slug =
-        input.slug ||
+      const branchNumber =
+        input.branchType === "HQ" ? "00000" : input.branchNumber;
+
+      // Generate a unique slug from the org name
+      const baseSlug =
         input.name
           .toLowerCase()
           .replace(/[^a-z0-9]+/g, "-")
-          .replace(/^-|-$/g, "") ||
-        `org-${Date.now()}`;
+          .replace(/^-|-$/g, "")
+          .slice(0, 50) || `org-${Date.now()}`;
+      let slug = baseSlug;
+      for (let attempt = 0; attempt < 5; attempt++) {
+        const clash = await prisma.organization.findUnique({
+          where: { slug },
+        });
+        if (!clash) break;
+        slug = `${baseSlug.slice(0, 44)}-${Math.random().toString(36).slice(2, 6)}`;
+      }
 
       // Get access token
       const accessToken = await getValidAccessToken(userId);
@@ -244,8 +263,11 @@ export const orgRouter = router({
             name: input.name,
             slug,
             ownerId: userId,
-            taxId: "",
-            address: "",
+            taxId: input.taxId,
+            address: input.address,
+            phone: input.phone || null,
+            branchType: input.branchType,
+            branchNumber,
             googleSpreadsheetId: spreadsheetId,
             googleDriveFolderId: driveFolderId,
             driveReceiptsFolderId: driveFolders.receiptsId,
@@ -328,6 +350,10 @@ export const orgRouter = router({
         branchNumber: z.string().regex(/^\d{5}$/, "เลขสาขาต้องเป็นตัวเลข 5 หลัก").optional(),
         address: z.string().optional(),
         phone: z.string().optional(),
+        // Branding — data-URL images (empty string clears the field).
+        logoUrl: z.string().max(900_000).nullable().optional(),
+        signatureUrl: z.string().max(900_000).nullable().optional(),
+        signatoryName: z.string().max(120).nullable().optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {

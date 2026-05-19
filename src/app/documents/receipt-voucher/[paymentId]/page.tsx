@@ -57,7 +57,14 @@ export default async function ReceiptVoucherPage({
 
   return (
     <ReceiptVoucherDocument
-      company={{ name: org.name, taxId: org.taxId, address: org.address }}
+      company={{
+        name: org.name,
+        taxId: org.taxId,
+        address: org.address,
+        logoUrl: org.logoUrl,
+        signatureUrl: org.signatureUrl,
+        signatoryName: org.signatoryName,
+      }}
       requester={{ name: payment.CreatedBy || session.displayName }}
       payee={{
         name: payee?.PayeeName || "",

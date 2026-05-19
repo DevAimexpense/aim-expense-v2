@@ -2,7 +2,9 @@
 
 import { useState } from "react";
 import { trpc } from "@/lib/trpc/client";
+import { imageFileToDataUrl } from "@/lib/utils/image-to-dataurl";
 import { CompanyBanksSection } from "./company-banks-section";
+import { BranchesSection } from "./branches-section";
 import { DocPrefixSection } from "./doc-prefix-section";
 
 interface Props {
@@ -14,6 +16,9 @@ interface Props {
     branchNumber: string;
     address: string;
     phone: string | null;
+    logoUrl: string | null;
+    signatureUrl: string | null;
+    signatoryName: string | null;
   };
   isAdmin: boolean;
   sheetUrl: string | null;
@@ -32,6 +37,11 @@ export function OrgSettingsForm({ org, isAdmin, sheetUrl, driveUrl }: Props) {
     address: org.address,
     phone: org.phone || "",
   });
+  const [logoUrl, setLogoUrl] = useState<string | null>(org.logoUrl);
+  const [signatureUrl, setSignatureUrl] = useState<string | null>(
+    org.signatureUrl,
+  );
+  const [signatoryName, setSignatoryName] = useState(org.signatoryName || "");
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
 
@@ -60,6 +70,9 @@ export function OrgSettingsForm({ org, isAdmin, sheetUrl, driveUrl }: Props) {
           form.branchType === "HQ" ? "00000" : form.branchNumber,
         address: form.address.trim(),
         phone: form.phone.trim() || undefined,
+        logoUrl,
+        signatureUrl,
+        signatoryName: signatoryName.trim() || null,
       });
       setSuccess(true);
       utils.org.current.invalidate();
@@ -254,6 +267,60 @@ export function OrgSettingsForm({ org, isAdmin, sheetUrl, driveUrl }: Props) {
               />
             </div>
 
+            <div
+              style={{
+                marginTop: "0.5rem",
+                marginBottom: "1rem",
+                paddingTop: "1rem",
+                borderTop: "1px solid #e2e8f0",
+              }}
+            >
+              <h3
+                style={{
+                  fontSize: "0.9375rem",
+                  fontWeight: 600,
+                  color: "#0f172a",
+                  marginBottom: "0.25rem",
+                }}
+              >
+                โลโก้ และลายเซ็น
+              </h3>
+              <p className="app-card-subtitle" style={{ marginTop: 0 }}>
+                ใช้แสดงบนใบเสนอราคา ใบวางบิล ใบเสร็จ และเอกสารต่าง ๆ
+              </p>
+            </div>
+
+            <ImageUploadField
+              label="โลโก้บริษัท"
+              hint="แสดงที่มุมซ้ายบนของเอกสาร — แนะนำพื้นหลังโปร่งใส (PNG)"
+              value={logoUrl}
+              onChange={setLogoUrl}
+              disabled={!isAdmin}
+              maxDim={320}
+            />
+
+            <ImageUploadField
+              label="ลายเซ็นผู้รับมอบอำนาจ"
+              hint="แสดงในช่องลงนามของเอกสาร — แนะนำพื้นหลังโปร่งใส (PNG)"
+              value={signatureUrl}
+              onChange={setSignatureUrl}
+              disabled={!isAdmin}
+              maxDim={400}
+            />
+
+            <div className="app-form-group">
+              <label className="app-label">ชื่อผู้รับมอบอำนาจ</label>
+              <input
+                type="text"
+                value={signatoryName}
+                onChange={(e) => setSignatoryName(e.target.value)}
+                disabled={!isAdmin}
+                className="app-input"
+                placeholder="เช่น นายสมชาย ใจดี"
+                maxLength={120}
+              />
+            </div>
+
             {isAdmin && (
               <button
                 type="submit"
@@ -329,6 +396,10 @@ export function OrgSettingsForm({ org, isAdmin, sheetUrl, driveUrl }: Props) {
           </div>
 
           <div style={{ marginTop: "1rem" }}>
+            <BranchesSection isAdmin={isAdmin} />
+          </div>
+
+          <div style={{ marginTop: "1rem" }}>
             <DocPrefixSection isAdmin={isAdmin} />
           </div>
 
@@ -360,6 +431,118 @@ export function OrgSettingsForm({ org, isAdmin, sheetUrl, driveUrl }: Props) {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ===== Reusable image upload field (logo / signature) =====
+
+function ImageUploadField({
+  label,
+  hint,
+  value,
+  onChange,
+  disabled,
+  maxDim,
+}: {
+  label: string;
+  hint: string;
+  value: string | null;
+  onChange: (v: string | null) => void;
+  disabled: boolean;
+  maxDim: number;
+}) {
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setErr(null);
+    if (!file.type.startsWith("image/")) {
+      setErr("กรุณาเลือกไฟล์รูปภาพ");
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setErr("ไฟล์ใหญ่เกิน 5MB");
+      return;
+    }
+    setBusy(true);
+    try {
+      onChange(await imageFileToDataUrl(file, maxDim));
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "อัปโหลดไม่สำเร็จ");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="app-form-group">
+      <label className="app-label">{label}</label>
+      <p className="app-card-subtitle" style={{ marginTop: 0, marginBottom: "0.5rem" }}>
+        {hint}
+      </p>
+      {value && (
+        <div
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "0.5rem 0.75rem",
+            border: "1px solid #e2e8f0",
+            borderRadius: "0.5rem",
+            background:
+              "repeating-conic-gradient(#f1f5f9 0% 25%, #ffffff 0% 50%) 50% / 16px 16px",
+          }}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={value}
+            alt={label}
+            style={{ maxWidth: "180px", maxHeight: "80px", objectFit: "contain" }}
+          />
+        </div>
+      )}
+      {!disabled && (
+        <div
+          style={{
+            display: "flex",
+            gap: "0.5rem",
+            alignItems: "center",
+            marginTop: "0.5rem",
+          }}
+        >
+          <label
+            className="app-btn app-btn-secondary app-btn-sm"
+            style={{ cursor: busy ? "wait" : "pointer" }}
+          >
+            {busy ? "กำลังประมวลผล…" : value ? "เปลี่ยนรูป" : "อัปโหลดรูป"}
+            <input
+              type="file"
+              accept="image/*"
+              onChange={handleFile}
+              disabled={busy}
+              style={{ display: "none" }}
+            />
+          </label>
+          {value && (
+            <button
+              type="button"
+              className="app-btn app-btn-ghost app-btn-sm"
+              onClick={() => onChange(null)}
+            >
+              ลบ
+            </button>
+          )}
+        </div>
+      )}
+      {err && (
+        <div className="app-error-msg" style={{ marginTop: "0.5rem" }}>
+          {err}
+        </div>
+      )}
     </div>
   );
 }

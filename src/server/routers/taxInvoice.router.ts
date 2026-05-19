@@ -18,6 +18,7 @@ import {
   SHEET_TABS,
 } from "../services/google-sheets.service";
 import { computeNextDocNumber } from "../lib/doc-number";
+import { resolveIssuerBranch } from "../lib/issuer-branch";
 import { prisma } from "@/lib/prisma";
 
 // ===== Schemas =====
@@ -36,6 +37,7 @@ const TaxInvoiceStatus = z.enum(["draft", "issued", "void"]);
 const TaxInvoiceCreateInput = z.object({
   docDate: z.string().min(1),
   customerId: z.string().min(1),
+  branchId: z.string().optional(), // issuing branch — omit = HQ
   sourceBillingId: z.string().optional(),
   sourceQuotationId: z.string().optional(),
   eventId: z.string().optional(),
@@ -270,6 +272,8 @@ export const taxInvoiceRouter = router({
         input.discountAmount,
       );
 
+      const issuer = await resolveIssuerBranch(ctx.org.orgId, input.branchId);
+
       const now = new Date().toISOString();
 
       try {
@@ -285,6 +289,8 @@ export const taxInvoiceRouter = router({
             customer.BranchNumber || "",
           ),
           CustomerAddressSnapshot: customer.Address || customer.BillingAddress || "",
+          IssuerBranchSnapshot: issuer.branchLabel,
+          IssuerAddressSnapshot: issuer.address,
           SourceBillingID: input.sourceBillingId || "",
           SourceQuotationID: input.sourceQuotationId || "",
           EventID: input.eventId || "",

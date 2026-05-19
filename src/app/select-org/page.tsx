@@ -162,7 +162,7 @@ export default function SelectOrgPage() {
               }}
             >
               <a
-                href="/onboarding/google"
+                href="/businesses/new"
                 style={{
                   flex: 1,
                   padding: "0.75rem",

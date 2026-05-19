@@ -3,6 +3,7 @@
 // ===========================================
 // /pricing client-side bits — interval toggle + tier upgrade buttons
 // Server page renders the static comparison; this handles the dynamic actions.
+// Visual language matches the app's app-card / app-btn / brand palette.
 // ===========================================
 
 import { useEffect, useState } from "react";
@@ -34,7 +35,7 @@ export function IntervalToggle({
         display: "inline-flex",
         gap: "0.25rem",
         background: "white",
-        border: "1px solid #e2e8f0",
+        border: "1px solid var(--border-color)",
         borderRadius: "999px",
         padding: "0.25rem",
       }}
@@ -79,8 +80,11 @@ export function IntervalToggle({
             fontSize: "0.6875rem",
             fontWeight: 700,
             background:
-              interval === "yearly" ? "rgba(255,255,255,0.25)" : "#fef3c7",
-            color: interval === "yearly" ? "white" : "#854d0e",
+              interval === "yearly"
+                ? "rgba(255,255,255,0.25)"
+                : "var(--color-accent-100)",
+            color:
+              interval === "yearly" ? "white" : "var(--color-accent-800)",
             padding: "0.0625rem 0.375rem",
             borderRadius: "999px",
             marginLeft: "0.25rem",
@@ -140,30 +144,17 @@ export function TierUpgradeButton({
         type="button"
         onClick={onClick}
         disabled={loading}
-        style={{
-          display: "block",
-          width: "100%",
-          padding: "0.625rem 0.875rem",
-          fontSize: "0.875rem",
-          fontWeight: 700,
-          borderRadius: "0.5rem",
-          background: highlight ? "var(--color-brand-600)" : "white",
-          color: highlight ? "white" : "#0f172a",
-          border: highlight ? "none" : "1px solid #cbd5e1",
-          cursor: loading ? "wait" : "pointer",
-          textAlign: "center",
-          transition: "all 150ms",
-          opacity: loading ? 0.7 : 1,
-        }}
+        className={`app-btn ${highlight ? "app-btn-primary" : "app-btn-secondary"}`}
+        style={{ width: "100%", fontWeight: 700 }}
       >
         {loading ? "กำลังเปิด Stripe…" : label}
       </button>
       {error && (
         <p
           style={{
-            marginTop: "0.25rem",
+            marginTop: "0.375rem",
             fontSize: "0.75rem",
-            color: "#dc2626",
+            color: "var(--color-error)",
             textAlign: "center",
           }}
         >
@@ -181,18 +172,8 @@ export function ContactSalesButton() {
   return (
     <a
       href="mailto:sales@aimexpense.com?subject=Enterprise%20inquiry"
-      style={{
-        display: "block",
-        width: "100%",
-        padding: "0.625rem 0.875rem",
-        fontSize: "0.875rem",
-        fontWeight: 700,
-        borderRadius: "0.5rem",
-        background: "#0f172a",
-        color: "white",
-        textAlign: "center",
-        textDecoration: "none",
-      }}
+      className="app-btn app-btn-secondary"
+      style={{ width: "100%", fontWeight: 700 }}
     >
       ติดต่อฝ่ายขาย
     </a>
@@ -206,19 +187,8 @@ export function StartFreeButton() {
   return (
     <a
       href="/login"
-      style={{
-        display: "block",
-        width: "100%",
-        padding: "0.625rem 0.875rem",
-        fontSize: "0.875rem",
-        fontWeight: 700,
-        borderRadius: "0.5rem",
-        background: "white",
-        color: "#0f172a",
-        border: "1px solid #cbd5e1",
-        textAlign: "center",
-        textDecoration: "none",
-      }}
+      className="app-btn app-btn-secondary"
+      style={{ width: "100%", fontWeight: 700 }}
     >
       เริ่มฟรี
     </a>
@@ -264,9 +234,15 @@ export function PricingCardsClient({ prices }: { prices: PriceMap }) {
   ];
 
   return (
-    <div style={{ marginTop: "2rem" }}>
+    <div style={{ marginTop: "1.75rem" }}>
       {/* Interval toggle */}
-      <div style={{ display: "flex", justifyContent: "center", marginBottom: "1.5rem" }}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "center",
+          marginBottom: "1.5rem",
+        }}
+      >
         <IntervalToggle interval={interval} setInterval={setIntervalState} />
       </div>
 
@@ -284,8 +260,8 @@ export function PricingCardsClient({ prices }: { prices: PriceMap }) {
             textAlign: "center",
           }}
         >
-          🎁 Code <strong>{refCode}</strong> applied — ส่วนลด 20% เดือนแรก + 100 OCR ฟรี
-          (จะคำนวณตอน checkout)
+          🎁 Code <strong>{refCode}</strong> applied — ส่วนลด 20% เดือนแรก + 100
+          OCR ฟรี (จะคำนวณตอน checkout)
         </div>
       )}
 
@@ -293,33 +269,33 @@ export function PricingCardsClient({ prices }: { prices: PriceMap }) {
         style={{
           display: "grid",
           gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
-          gap: "0.75rem",
-          maxWidth: "1200px",
-          margin: "0 auto",
+          gap: "0.875rem",
         }}
       >
         {tiers.map((t) => {
           const price =
-            t.tier === "basic" || t.tier === "pro" ||
-            t.tier === "business" || t.tier === "max"
+            t.tier === "basic" ||
+            t.tier === "pro" ||
+            t.tier === "business" ||
+            t.tier === "max"
               ? prices[t.tier as "basic" | "pro" | "business" | "max"][interval]
               : null;
           return (
             <div
               key={t.tier}
+              className="app-card"
               style={{
-                background: "white",
-                border: t.highlight
-                  ? "2px solid var(--color-brand-500)"
-                  : "1px solid #e2e8f0",
-                borderRadius: "1rem",
-                padding: "1.25rem",
-                boxShadow: t.highlight
-                  ? "0 10px 20px -5px rgba(37, 99, 235, 0.2)"
-                  : "0 1px 3px rgba(0,0,0,0.04)",
                 display: "flex",
                 flexDirection: "column",
                 gap: "0.75rem",
+                ...(t.highlight
+                  ? {
+                      borderColor: "var(--color-brand-500)",
+                      borderWidth: "2px",
+                      boxShadow:
+                        "0 10px 20px -5px rgba(37, 99, 235, 0.18)",
+                    }
+                  : {}),
               }}
             >
               {t.badge && (
@@ -365,7 +341,7 @@ export function PricingCardsClient({ prices }: { prices: PriceMap }) {
                       style={{
                         fontSize: "1.5rem",
                         fontWeight: 800,
-                        color: "#0f172a",
+                        color: "var(--color-brand-700)",
                       }}
                     >
                       {formatTHB(price)}{" "}
@@ -381,9 +357,22 @@ export function PricingCardsClient({ prices }: { prices: PriceMap }) {
                     </div>
                     {interval === "yearly" && (
                       <div
-                        style={{ fontSize: "0.6875rem", color: "#16a34a" }}
+                        style={{
+                          fontSize: "0.6875rem",
+                          color: "var(--color-success)",
+                        }}
                       >
-                        ประหยัด {formatTHB(prices[t.tier as "basic" | "pro" | "business" | "max"].monthly * 12 - prices[t.tier as "basic" | "pro" | "business" | "max"].yearly)} ฿/ปี
+                        ประหยัด{" "}
+                        {formatTHB(
+                          prices[
+                            t.tier as "basic" | "pro" | "business" | "max"
+                          ].monthly *
+                            12 -
+                            prices[
+                              t.tier as "basic" | "pro" | "business" | "max"
+                            ].yearly,
+                        )}{" "}
+                        ฿/ปี
                       </div>
                     )}
                   </>

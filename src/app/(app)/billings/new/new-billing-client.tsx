@@ -99,14 +99,17 @@ export function NewBillingClient({ mode, initial }: Props) {
   const utils = trpc.useUtils();
   const customersQuery = trpc.customer.list.useQuery();
   const eventsQuery = trpc.event.list.useQuery();
+  const branchesQuery = trpc.branch.list.useQuery();
   const customers = customersQuery.data || [];
   const events = eventsQuery.data || [];
+  const branches = branchesQuery.data || [];
 
   const createMut = trpc.billing.create.useMutation();
   const updateMut = trpc.billing.update.useMutation();
 
   const [form, setForm] = useState(() => ({
     customerId: initial?.customerId || "",
+    branchId: "",
     docDate: initial?.docDate || todayISO(),
     dueDate: initial?.dueDate || plus30DaysISO(),
     projectName: initial?.projectName || "",
@@ -221,6 +224,7 @@ export function NewBillingClient({ mode, initial }: Props) {
       docDate: form.docDate,
       dueDate: form.dueDate,
       customerId: form.customerId,
+      branchId: form.branchId || undefined,
       eventId: form.eventId || undefined,
       projectName: form.projectName.trim() || undefined,
       vatIncluded: form.vatIncluded,
@@ -300,6 +304,26 @@ export function NewBillingClient({ mode, initial }: Props) {
               </Link>
             </p>
           </div>
+
+          {mode === "create" && branches.length > 0 && (
+            <div className="app-form-group">
+              <label className="app-label">สาขาที่ออกเอกสาร</label>
+              <select
+                value={form.branchId}
+                onChange={(e) =>
+                  setForm({ ...form, branchId: e.target.value })
+                }
+                className="app-select"
+              >
+                <option value="">สำนักงานใหญ่</option>
+                {branches.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    สาขา {b.branchNumber} — {b.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           {selectedCustomer && (
             <div

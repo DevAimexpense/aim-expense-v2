@@ -90,8 +90,10 @@ export function NewTaxInvoiceClient({
   const utils = trpc.useUtils();
   const customersQuery = trpc.customer.list.useQuery();
   const eventsQuery = trpc.event.list.useQuery();
+  const branchesQuery = trpc.branch.list.useQuery();
   const customers = customersQuery.data || [];
   const events = eventsQuery.data || [];
+  const branches = branchesQuery.data || [];
 
   const createMut = trpc.taxInvoice.create.useMutation();
   const updateMut = trpc.taxInvoice.update.useMutation();
@@ -135,6 +137,7 @@ export function NewTaxInvoiceClient({
 
   const [form, setForm] = useState(() => ({
     customerId: initial?.customerId || "",
+    branchId: "",
     docDate: initial?.docDate || todayISO(),
     projectName: initial?.projectName || "",
     eventId: initial?.eventId || "",
@@ -233,6 +236,7 @@ export function NewTaxInvoiceClient({
     const payload = {
       docDate: form.docDate,
       customerId: form.customerId,
+      branchId: form.branchId || undefined,
       eventId: form.eventId || undefined,
       projectName: form.projectName.trim() || undefined,
       vatIncluded: form.vatIncluded,
@@ -344,6 +348,26 @@ export function NewTaxInvoiceClient({
               </Link>
             </p>
           </div>
+
+          {mode === "create" && branches.length > 0 && (
+            <div className="app-form-group">
+              <label className="app-label">สาขาที่ออกเอกสาร</label>
+              <select
+                value={form.branchId}
+                onChange={(e) =>
+                  setForm({ ...form, branchId: e.target.value })
+                }
+                className="app-select"
+              >
+                <option value="">สำนักงานใหญ่</option>
+                {branches.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    สาขา {b.branchNumber} — {b.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           {selectedCustomer && (
             <div

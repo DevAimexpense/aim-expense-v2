@@ -61,6 +61,7 @@ const newLineId = () => Math.random().toString(36).slice(2, 9);
 
 interface FormState {
   customerId: string;
+  branchId: string;
   docDate: string;
   validUntil: string;
   projectName: string;
@@ -105,14 +106,17 @@ export function NewQuotationClient({ mode, initial }: Props) {
   const utils = trpc.useUtils();
   const customersQuery = trpc.customer.list.useQuery();
   const eventsQuery = trpc.event.list.useQuery();
+  const branchesQuery = trpc.branch.list.useQuery();
   const customers = customersQuery.data || [];
   const events = eventsQuery.data || [];
+  const branches = branchesQuery.data || [];
 
   const createMut = trpc.quotation.create.useMutation();
   const updateMut = trpc.quotation.update.useMutation();
 
   const [form, setForm] = useState<FormState>(() => ({
     customerId: initial?.customerId || "",
+    branchId: "",
     docDate: initial?.docDate || todayISO(),
     validUntil: initial?.validUntil || plus30DaysISO(),
     projectName: initial?.projectName || "",
@@ -219,6 +223,7 @@ export function NewQuotationClient({ mode, initial }: Props) {
       docDate: form.docDate,
       validUntil: form.validUntil,
       customerId: form.customerId,
+      branchId: form.branchId || undefined,
       eventId: form.eventId || undefined,
       projectName: form.projectName.trim() || undefined,
       vatIncluded: form.vatIncluded,
@@ -309,6 +314,26 @@ export function NewQuotationClient({ mode, initial }: Props) {
               </button>
             </div>
           </div>
+
+          {mode === "create" && branches.length > 0 && (
+            <div className="app-form-group">
+              <label className="app-label">สาขาที่ออกเอกสาร</label>
+              <select
+                value={form.branchId}
+                onChange={(e) =>
+                  setForm({ ...form, branchId: e.target.value })
+                }
+                className="app-select"
+              >
+                <option value="">สำนักงานใหญ่</option>
+                {branches.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    สาขา {b.branchNumber} — {b.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           {selectedCustomer && (
             <div

@@ -75,6 +75,8 @@ model Organization {
   address                String
   phone                  String?
   logoUrl                String?          @map("logo_url")
+  signatureUrl           String?          @map("signature_url")
+  signatoryName          String?          @map("signatory_name")
   googleSpreadsheetId    String?          @map("google_spreadsheet_id")
   googleDriveFolderId    String?          @map("google_drive_folder_id")
   driveReceiptsFolderId  String?          @map("drive_receipts_folder_id")
@@ -86,6 +88,7 @@ model Organization {
   branchNumber           String           @default("00000") @map("branch_number")
   branchType             String           @default("HQ") @map("branch_type")
   auditLogs              AuditLog[]
+  branches               Branch[]
   invitations            Invitation[]
   members                OrgMember[]
   owner                  User             @relation("OrgOwner", fields: [ownerId], references: [id])
@@ -93,6 +96,25 @@ model Organization {
   permissions            UserPermission[]
 
   @@map("organizations")
+}
+
+/// Additional branch locations of a business (สาขา).
+/// The Organization itself is the HQ/main registration; extra branches of the
+/// same juristic person (same taxId) live here and do NOT consume a business
+/// quota slot. branchNumber is the 5-digit RD branch code.
+model Branch {
+  id           String       @id @default(uuid())
+  orgId        String       @map("org_id")
+  name         String
+  branchNumber String       @map("branch_number")
+  address      String
+  phone        String?
+  createdAt    DateTime     @default(now()) @map("created_at")
+  updatedAt    DateTime     @updatedAt @map("updated_at")
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, branchNumber])
+  @@map("branches")
 }
 
 model OrgMember {

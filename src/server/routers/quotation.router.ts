@@ -13,6 +13,7 @@ import {
   SHEET_TABS,
 } from "../services/google-sheets.service";
 import { computeNextDocNumber } from "../lib/doc-number";
+import { resolveIssuerBranch } from "../lib/issuer-branch";
 import { prisma } from "@/lib/prisma";
 
 // ===== Schemas =====
@@ -38,6 +39,7 @@ const QuotationCreateInput = z.object({
   docDate: z.string().min(1), // YYYY-MM-DD
   validUntil: z.string().min(1),
   customerId: z.string().min(1),
+  branchId: z.string().optional(), // issuing branch — omit = HQ
   eventId: z.string().optional(),
   projectName: z.string().max(200).optional(),
   vatIncluded: z.boolean(),
@@ -241,6 +243,9 @@ export const quotationRouter = router({
         input.discountAmount
       );
 
+      // Snapshot issuing branch (HQ unless a branch is chosen)
+      const issuer = await resolveIssuerBranch(ctx.org.orgId, input.branchId);
+
       const now = new Date().toISOString();
 
       // 2. Header write — wrap whole flow in try/catch + cleanup
@@ -254,6 +259,8 @@ export const quotationRouter = router({
           CustomerNameSnapshot: customer.CustomerName || "",
           CustomerTaxIdSnapshot: customer.TaxID || "",
           CustomerAddressSnapshot: customer.Address || "",
+          IssuerBranchSnapshot: issuer.branchLabel,
+          IssuerAddressSnapshot: issuer.address,
           Status: "draft",
           EventID: input.eventId || "",
           ProjectName: input.projectName || "",

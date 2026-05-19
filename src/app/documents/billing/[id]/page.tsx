@@ -42,6 +42,9 @@ export default async function BillingDocumentPage({
         phone: true,
         branchType: true,
         branchNumber: true,
+        logoUrl: true,
+        signatureUrl: true,
+        signatoryName: true,
       },
     }),
   ]);
@@ -73,12 +76,16 @@ export default async function BillingDocumentPage({
       org={{
         name: org.name,
         taxId: org.taxId,
-        address: org.address || "",
+        address: header.IssuerAddressSnapshot || org.address || "",
         phone: org.phone || "",
         branchInfo:
-          org.branchType === "Branch" && org.branchNumber
+          header.IssuerBranchSnapshot ||
+          (org.branchType === "Branch" && org.branchNumber
             ? `สาขา ${org.branchNumber}`
-            : "สำนักงานใหญ่",
+            : "สำนักงานใหญ่"),
+        logoUrl: org.logoUrl,
+        signatureUrl: org.signatureUrl,
+        signatoryName: org.signatoryName,
       }}
       header={{
         docNumber: header.DocNumber,

@@ -169,6 +169,8 @@ export const SHEET_HEADERS: Record<string, string[]> = {
     "CustomerNameSnapshot",
     "CustomerTaxIdSnapshot",
     "CustomerAddressSnapshot",
+    "IssuerBranchSnapshot", // สาขาผู้ออกเอกสาร — "สำนักงานใหญ่" / "สาขา 00001"
+    "IssuerAddressSnapshot", // ที่อยู่สาขาผู้ออกเอกสาร
     "Status", // draft | sent | accepted | rejected | void | converted
     "EventID", // optional — link to internal Event/project
     "ProjectName",
@@ -206,6 +208,8 @@ export const SHEET_HEADERS: Record<string, string[]> = {
     "CustomerNameSnapshot",
     "CustomerTaxIdSnapshot",
     "CustomerAddressSnapshot",
+    "IssuerBranchSnapshot", // สาขาผู้ออกเอกสาร — "สำนักงานใหญ่" / "สาขา 00001"
+    "IssuerAddressSnapshot", // ที่อยู่สาขาผู้ออกเอกสาร
     "SourceQuotationID", // optional — if converted from Quotation
     "EventID",
     "ProjectName",
@@ -251,6 +255,8 @@ export const SHEET_HEADERS: Record<string, string[]> = {
     "CustomerTaxIdSnapshot",
     "CustomerBranchSnapshot", // "00000" / "00001" — RD layout requires
     "CustomerAddressSnapshot",
+    "IssuerBranchSnapshot", // สาขาผู้ออกเอกสาร — "สำนักงานใหญ่" / "สาขา 00001"
+    "IssuerAddressSnapshot", // ที่อยู่สาขาผู้ออกเอกสาร
     "SourceBillingID", // optional
     "SourceQuotationID", // optional (direct quotation→TI)
     "EventID",

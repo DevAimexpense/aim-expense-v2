@@ -6,6 +6,7 @@ import { router } from "../trpc";
 import { eventRouter } from "./event.router";
 import { paymentRouter } from "./payment.router";
 import { orgRouter } from "./org.router";
+import { branchRouter } from "./branch.router";
 import { payeeRouter } from "./payee.router";
 import { bankRouter } from "./bank.router";
 import { companyBankRouter } from "./company-bank.router";
@@ -14,6 +15,7 @@ import { userRouter } from "./user.router";
 import { eventAssignmentRouter } from "./event-assignment.router";
 import { reportRouter } from "./report.router";
 import { customerRouter } from "./customer.router";
+import { dbdRouter } from "./dbd.router";
 import { quotationRouter } from "./quotation.router";
 import { billingRouter } from "./billing.router";
 import { taxInvoiceRouter } from "./taxInvoice.router";
@@ -22,6 +24,7 @@ export const appRouter = router({
   event: eventRouter,
   payment: paymentRouter,
   org: orgRouter,
+  branch: branchRouter,
   payee: payeeRouter,
   bank: bankRouter,
   companyBank: companyBankRouter,
@@ -30,6 +33,7 @@ export const appRouter = router({
   eventAssignment: eventAssignmentRouter,
   report: reportRouter,
   customer: customerRouter,
+  dbd: dbdRouter,
   quotation: quotationRouter,
   billing: billingRouter,
   taxInvoice: taxInvoiceRouter,

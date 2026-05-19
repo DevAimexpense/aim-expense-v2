@@ -9,6 +9,9 @@ interface DocData {
     address: string;
     phone: string;
     branchInfo: string;
+    logoUrl?: string | null;
+    signatureUrl?: string | null;
+    signatoryName?: string | null;
   };
   header: {
     docNumber: string;
@@ -283,6 +286,12 @@ export function BillingDocument({ billingId, org, header, lines }: Props) {
           padding-bottom: 1rem;
           border-bottom: 2px solid #7c3aed;
         }
+        .company-logo {
+          max-height: 56px;
+          max-width: 200px;
+          object-fit: contain;
+          margin-bottom: 0.5rem;
+        }
         .company-name {
           font-size: 1.125rem;
           font-weight: 700;
@@ -439,6 +448,12 @@ export function BillingDocument({ billingId, org, header, lines }: Props) {
         .sig-col {
           text-align: center;
         }
+        .sig-img {
+          display: block;
+          margin: 0 auto -0.5rem;
+          height: 48px;
+          object-fit: contain;
+        }
         .sig-line {
           margin-bottom: 0.375rem;
         }
@@ -496,6 +511,10 @@ function DocPage({
     <div className={`doc-page doc-page-${copyType}`}>
       <div className="doc-header">
         <div className="company">
+          {org.logoUrl && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={org.logoUrl} alt="" className="company-logo" />
+          )}
           <div className="company-name">{org.name}</div>
           <div className="company-line">
             เลขประจำตัวผู้เสียภาษี: {formatTaxId(org.taxId)} • {org.branchInfo}
@@ -663,12 +682,18 @@ function DocPage({
 
       <div className="signatures">
         <div className="sig-col">
+          {org.signatureUrl && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={org.signatureUrl} alt="" className="sig-img" />
+          )}
           <div className="sig-line">
             ลงชื่อ ...................................................
           </div>
           <div className="sig-label">ผู้เรียกเก็บ</div>
-          {header.preparedBy && (
-            <div className="sig-name">({header.preparedBy})</div>
+          {(org.signatoryName || header.preparedBy) && (
+            <div className="sig-name">
+              ({org.signatoryName || header.preparedBy})
+            </div>
           )}
         </div>
         <div className="sig-col">

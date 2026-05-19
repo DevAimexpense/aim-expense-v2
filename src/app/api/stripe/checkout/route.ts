@@ -130,7 +130,9 @@ export async function POST(req: NextRequest) {
   try {
     const checkoutSession = await stripe.checkout.sessions.create({
       mode: "subscription",
-      payment_method_types: ["card", "promptpay"],
+      // PromptPay is a single-payment method and cannot be used in
+      // `subscription` mode — only card supports recurring billing.
+      payment_method_types: ["card"],
       customer: stripeCustomerId,
       line_items: [{ price: priceId, quantity: 1 }],
       // Apply coupon as session-level `discounts` (only if valid + present)

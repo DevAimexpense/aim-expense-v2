@@ -2,6 +2,8 @@
 // /pricing — Public marketing page (no auth required)
 // 6-tier comparison from Excel pricing roadmap.
 // Server-rendered for SEO; tier cards + interval toggle are a client component.
+// Uses the project's app-page / app-card / app-btn + brand palette
+// (matches /account/billing — see commit eb2b3d7).
 // ===========================================
 
 import Link from "next/link";
@@ -81,36 +83,93 @@ export default function PricingPage() {
   };
 
   return (
-    <main className="min-h-screen bg-slate-50">
-      {/* Top nav */}
-      <header className="border-b border-slate-200 bg-white">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
-          <Link href="/" className="flex items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-brand-500 to-brand-700 text-sm font-bold text-white">
+    <main style={{ minHeight: "100vh", background: "var(--bg-secondary)" }}>
+      {/* Top nav — /pricing is public, so it carries its own header */}
+      <header
+        style={{
+          borderBottom: "1px solid var(--border-color)",
+          background: "white",
+        }}
+      >
+        <div
+          style={{
+            maxWidth: "1400px",
+            margin: "0 auto",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            padding: "0.75rem 1.5rem",
+          }}
+        >
+          <Link
+            href="/"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "0.5rem",
+              textDecoration: "none",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                height: "32px",
+                width: "32px",
+                alignItems: "center",
+                justifyContent: "center",
+                borderRadius: "0.5rem",
+                background:
+                  "linear-gradient(135deg, var(--color-brand-500), var(--color-brand-700))",
+                fontSize: "0.875rem",
+                fontWeight: 700,
+                color: "white",
+              }}
+            >
               A
             </div>
-            <span className="font-semibold text-slate-900">{COMPANY_NAME}</span>
+            <span style={{ fontWeight: 600, color: "#0f172a" }}>
+              {COMPANY_NAME}
+            </span>
           </Link>
-          <Link
-            href="/login"
-            className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-700"
-          >
+          <Link href="/login" className="app-btn app-btn-primary">
             เข้าสู่ระบบ
           </Link>
         </div>
       </header>
 
-      <div className="mx-auto max-w-7xl px-6 py-12">
+      <div className="app-page">
         {/* Hero */}
-        <div className="mx-auto max-w-3xl text-center">
-          <p className="text-sm font-medium uppercase tracking-wider text-brand-600">
+        <div
+          style={{
+            maxWidth: "720px",
+            margin: "0 auto",
+            textAlign: "center",
+          }}
+        >
+          <p
+            style={{
+              fontSize: "0.75rem",
+              fontWeight: 600,
+              textTransform: "uppercase",
+              letterSpacing: "0.08em",
+              color: "var(--color-brand-600)",
+            }}
+          >
             ราคาที่เหมาะกับธุรกิจของคุณ
           </p>
-          <h1 className="mt-2 text-3xl font-bold text-slate-900 sm:text-4xl">
+          <h1
+            className="app-page-title"
+            style={{ marginTop: "0.5rem", fontSize: "1.875rem" }}
+          >
             ลงทุนกับเครื่องมือที่ทำให้บัญชีของคุณง่ายขึ้น
           </h1>
-          <p className="mt-3 text-slate-600">
-            <strong>ทดลองฟรี 30 วัน — ใช้ Pro feature ครบ ไม่ต้องใช้บัตรเครดิต</strong>
+          <p
+            className="app-page-subtitle"
+            style={{ marginTop: "0.625rem", lineHeight: 1.7 }}
+          >
+            <strong style={{ color: "#334155" }}>
+              ทดลองฟรี 30 วัน — ใช้ Pro feature ครบ ไม่ต้องใช้บัตรเครดิต
+            </strong>
             <br />
             หลังหมด trial → กลายเป็น Free Forever (5 OCR/เดือน) หรืออัปเกรดได้ตลอด
           </p>
@@ -120,17 +179,32 @@ export default function PricingPage() {
         <PricingCardsClient prices={prices} />
 
         {/* Detailed comparison table */}
-        <div className="mx-auto mt-16 max-w-6xl overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
-          <table className="w-full text-sm">
+        <div
+          className="app-card"
+          style={{ marginTop: "2.5rem", padding: 0, overflowX: "auto" }}
+        >
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.875rem" }}>
             <thead>
-              <tr className="border-b border-slate-200 bg-slate-50">
-                <th className="px-4 py-3 text-left font-semibold text-slate-700">
+              <tr style={{ background: "var(--color-brand-50)" }}>
+                <th
+                  style={{
+                    padding: "0.75rem 1rem",
+                    textAlign: "left",
+                    fontWeight: 600,
+                    color: "var(--color-brand-900)",
+                  }}
+                >
                   Feature
                 </th>
                 {TIERS.map((tier) => (
                   <th
                     key={tier}
-                    className="px-4 py-3 text-center font-semibold text-slate-700"
+                    style={{
+                      padding: "0.75rem 1rem",
+                      textAlign: "center",
+                      fontWeight: 600,
+                      color: "var(--color-brand-900)",
+                    }}
                   >
                     {PLAN_LABELS[tier]}
                   </th>
@@ -139,56 +213,66 @@ export default function PricingPage() {
             </thead>
             <tbody>
               {/* Quantitative limits */}
-              <tr className="border-b border-slate-100 bg-slate-50/40">
-                <td className="px-4 py-2 font-medium text-slate-700">ผู้ใช้</td>
-                {TIERS.map((t) => (
-                  <td key={t} className="px-4 py-2 text-center text-slate-700">
-                    {PLAN_LIMITS[t].users === -1
-                      ? "∞"
-                      : PLAN_LIMITS[t].users}
+              {(
+                [
+                  ["ผู้ใช้", "users"],
+                  ["บริษัท", "businesses"],
+                  ["OCR / เดือน", "ocrPerMonth"],
+                  ["LINE Group", "lineGroups"],
+                ] as const
+              ).map(([label, key]) => (
+                <tr
+                  key={key}
+                  style={{
+                    borderTop: "1px solid #f1f5f9",
+                    background: "#f8fafc",
+                  }}
+                >
+                  <td
+                    style={{
+                      padding: "0.5rem 1rem",
+                      fontWeight: 500,
+                      color: "#334155",
+                    }}
+                  >
+                    {label}
                   </td>
-                ))}
-              </tr>
-              <tr className="border-b border-slate-100 bg-slate-50/40">
-                <td className="px-4 py-2 font-medium text-slate-700">บริษัท</td>
-                {TIERS.map((t) => (
-                  <td key={t} className="px-4 py-2 text-center text-slate-700">
-                    {PLAN_LIMITS[t].businesses === -1
-                      ? "∞"
-                      : PLAN_LIMITS[t].businesses}
-                  </td>
-                ))}
-              </tr>
-              <tr className="border-b border-slate-100 bg-slate-50/40">
-                <td className="px-4 py-2 font-medium text-slate-700">OCR / เดือน</td>
-                {TIERS.map((t) => (
-                  <td key={t} className="px-4 py-2 text-center text-slate-700">
-                    {PLAN_LIMITS[t].ocrPerMonth === -1
-                      ? "∞"
-                      : PLAN_LIMITS[t].ocrPerMonth.toLocaleString("th-TH")}
-                  </td>
-                ))}
-              </tr>
-              <tr className="border-b border-slate-100 bg-slate-50/40">
-                <td className="px-4 py-2 font-medium text-slate-700">LINE Group</td>
-                {TIERS.map((t) => (
-                  <td key={t} className="px-4 py-2 text-center text-slate-700">
-                    {PLAN_LIMITS[t].lineGroups === -1
-                      ? "∞"
-                      : PLAN_LIMITS[t].lineGroups || "—"}
-                  </td>
-                ))}
-              </tr>
+                  {TIERS.map((t) => {
+                    const v = PLAN_LIMITS[t][key];
+                    return (
+                      <td
+                        key={t}
+                        style={{
+                          padding: "0.5rem 1rem",
+                          textAlign: "center",
+                          color: "#334155",
+                        }}
+                      >
+                        {v === -1
+                          ? "∞"
+                          : v === 0 && key === "lineGroups"
+                            ? "—"
+                            : v.toLocaleString("th-TH")}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
               {/* Feature toggles */}
               {FEATURE_TOGGLES.map((row) => (
-                <tr key={row.label} className="border-b border-slate-100">
-                  <td className="px-4 py-2.5 text-slate-700">{row.label}</td>
+                <tr key={row.label} style={{ borderTop: "1px solid #f1f5f9" }}>
+                  <td style={{ padding: "0.625rem 1rem", color: "#334155" }}>
+                    {row.label}
+                  </td>
                   {TIERS.map((tier) => (
-                    <td key={tier} className="px-4 py-2.5 text-center">
+                    <td
+                      key={tier}
+                      style={{ padding: "0.625rem 1rem", textAlign: "center" }}
+                    >
                       {row.enabledOn.includes(tier) ? (
-                        <span className="text-green-600">✓</span>
+                        <span style={{ color: "var(--color-success)" }}>✓</span>
                       ) : (
-                        <span className="text-slate-300">—</span>
+                        <span style={{ color: "#cbd5e1" }}>—</span>
                       )}
                     </td>
                   ))}
@@ -199,42 +283,103 @@ export default function PricingPage() {
         </div>
 
         {/* Add-ons + Affiliate */}
-        <div className="mx-auto mt-12 grid max-w-6xl gap-4 md:grid-cols-2">
-          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <h2 className="text-lg font-semibold text-slate-900">
-              🛒 Add-ons (ซื้อเพิ่มได้ทุกแผน)
-            </h2>
-            <ul className="mt-3 space-y-1.5 text-sm text-slate-700">
+        <div
+          style={{
+            marginTop: "1.5rem",
+            display: "grid",
+            gap: "1rem",
+            gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+          }}
+        >
+          <div className="app-card">
+            <div className="app-card-header">
+              <h2 className="app-card-title">🛒 Add-ons (ซื้อเพิ่มได้ทุกแผน)</h2>
+            </div>
+            <ul
+              style={{
+                listStyle: "none",
+                display: "flex",
+                flexDirection: "column",
+                gap: "0.375rem",
+                fontSize: "0.875rem",
+                color: "#334155",
+              }}
+            >
               <li>• +100 OCR scans = <strong>89 ฿</strong> (one-time top-up)</li>
               <li>• +1 user seat = <strong>49 ฿</strong>/เดือน</li>
               <li>• Custom doc template = <strong>1,990 ฿</strong> one-time</li>
-              <li>• Migration จาก Paypers/Excel = <strong>ส่วนลด 50% เดือนแรก</strong></li>
+              <li>
+                • Migration จาก Paypers/Excel ={" "}
+                <strong>ส่วนลด 50% เดือนแรก</strong>
+              </li>
             </ul>
           </div>
-          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-6 shadow-sm">
-            <h2 className="text-lg font-semibold text-amber-900">
-              🎁 มี code อัปเกรด?
-            </h2>
-            <p className="mt-3 text-sm text-amber-800">
-              ใส่ referral code ของเพื่อน หรือ partner code → รับ
-              <strong> ส่วนลด 20% เดือนแรก + 100 OCR ฟรี</strong>
+          <div
+            className="app-card"
+            style={{
+              background: "var(--color-accent-50)",
+              borderColor: "var(--color-accent-200)",
+            }}
+          >
+            <div className="app-card-header">
+              <h2
+                className="app-card-title"
+                style={{ color: "var(--color-accent-900)" }}
+              >
+                🎁 มี code อัปเกรด?
+              </h2>
+            </div>
+            <p
+              style={{
+                fontSize: "0.875rem",
+                color: "var(--color-accent-800)",
+                lineHeight: 1.7,
+              }}
+            >
+              ใส่ referral code ของเพื่อน หรือ partner code → รับ{" "}
+              <strong>ส่วนลด 20% เดือนแรก + 100 OCR ฟรี</strong>
             </p>
-            <p className="mt-2 text-xs text-amber-700">
-              เข้าผ่าน link จาก partner (`?ref=CODE`) → จะ apply อัตโนมัติตอน checkout
+            <p
+              style={{
+                marginTop: "0.5rem",
+                fontSize: "0.75rem",
+                color: "var(--color-accent-700)",
+              }}
+            >
+              เข้าผ่าน link จาก partner (?ref=CODE) → จะ apply อัตโนมัติตอน
+              checkout
             </p>
           </div>
         </div>
 
         {/* Footer FAQ */}
-        <div className="mx-auto mt-12 max-w-3xl text-center text-sm text-slate-500">
+        <div
+          style={{
+            margin: "2rem auto 0",
+            maxWidth: "640px",
+            textAlign: "center",
+            fontSize: "0.875rem",
+            color: "#64748b",
+          }}
+        >
           <p>
             มีคำถามเรื่องราคา?{" "}
-            <a href="mailto:support@aimexpense.com" className="text-brand-600 hover:underline">
+            <a
+              href="mailto:support@aimexpense.com"
+              style={{ color: "var(--color-brand-600)" }}
+            >
               support@aimexpense.com
             </a>
           </p>
-          <p className="mt-2 text-xs text-slate-400">
-            ราคารวม VAT 7%. Stripe เก็บเงินผ่านบัตรเครดิต/PromptPay. ยกเลิกได้ตลอดเวลา ไม่มี lock-in.
+          <p
+            style={{
+              marginTop: "0.5rem",
+              fontSize: "0.75rem",
+              color: "#94a3b8",
+            }}
+          >
+            ราคารวม VAT 7%. ชำระผ่านบัตรเครดิต/เดบิต. ยกเลิกได้ตลอดเวลา ไม่มี
+            lock-in.
           </p>
         </div>
       </div>

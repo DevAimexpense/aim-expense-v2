@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import type { DbdCompany } from "@/server/services/dbd.service";
 import { trpc } from "@/lib/trpc/client";
 
 const PAYMENT_TERMS_DEFAULTS = ["NET 0", "NET 15", "NET 30", "NET 60", "NET 90"];
@@ -309,6 +310,20 @@ function CustomerModal({
           <div className="app-modal-body">
             {error && <div className="app-error-msg">{error}</div>}
 
+            <DbdLookup
+              onPick={(c) =>
+                setForm((f) => ({
+                  ...f,
+                  customerName: c.nameTh || f.customerName,
+                  taxId: c.taxId || f.taxId,
+                  branchType: c.branchType,
+                  branchNumber:
+                    c.branchType === "Branch" ? c.branchNumber : "",
+                  address: c.address || f.address,
+                }))
+              }
+            />
+
             <div className="app-form-group">
               <label className="app-label app-label-required">ชื่อลูกค้า</label>
               <input
@@ -572,6 +587,179 @@ function LoadingSkeleton() {
           <div key={i} className="app-skeleton" style={{ height: "50px" }} />
         ))}
       </div>
+    </div>
+  );
+}
+
+// ===== DBD lookup — auto-fill customer info from กรมพัฒนาธุรกิจการค้า =====
+
+function DbdLookup({ onPick }: { onPick: (c: DbdCompany) => void }) {
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const lookupMut = trpc.dbd.lookup.useMutation();
+
+  const handleSearch = async () => {
+    const q = query.trim();
+    if (!q) return;
+    // All-digits → treat as tax ID, otherwise a name search.
+    const isTaxId = /^\d{6,13}$/.test(q.replace(/\D/g, "")) && /^\d+$/.test(q);
+    await lookupMut.mutateAsync(
+      isTaxId ? { taxId: q } : { name: q },
+    );
+  };
+
+  const result = lookupMut.data;
+
+  if (!open) {
+    return (
+      <div className="app-form-group">
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="app-btn app-btn-secondary app-btn-sm"
+        >
+          🔎 ดึงข้อมูลจาก DBD (กรมพัฒนาธุรกิจการค้า)
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className="app-form-group"
+      style={{
+        background: "#f8fafc",
+        border: "1px solid #e2e8f0",
+        borderRadius: "0.5rem",
+        padding: "0.875rem",
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginBottom: "0.5rem",
+        }}
+      >
+        <span className="app-label" style={{ margin: 0 }}>
+          🔎 ค้นหาบริษัทจาก DBD
+        </span>
+        <button
+          type="button"
+          onClick={() => setOpen(false)}
+          className="app-btn app-btn-ghost app-btn-sm"
+        >
+          ✕
+        </button>
+      </div>
+      <div style={{ display: "flex", gap: "0.5rem" }}>
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              handleSearch();
+            }
+          }}
+          placeholder="เลขผู้เสียภาษี 13 หลัก หรือ ชื่อบริษัท"
+          className="app-input"
+        />
+        <button
+          type="button"
+          onClick={handleSearch}
+          disabled={lookupMut.isPending || !query.trim()}
+          className="app-btn app-btn-primary"
+        >
+          {lookupMut.isPending ? <span className="app-spinner" /> : "ค้นหา"}
+        </button>
+      </div>
+
+      {lookupMut.error && (
+        <div className="app-error-msg" style={{ marginTop: "0.5rem" }}>
+          {lookupMut.error.message}
+        </div>
+      )}
+
+      {result && !result.configured && !result.mock && (
+        <div
+          style={{
+            marginTop: "0.5rem",
+            fontSize: "0.8125rem",
+            color: "#854d0e",
+            background: "#fef9c3",
+            border: "1px solid #fde68a",
+            borderRadius: "0.375rem",
+            padding: "0.5rem 0.75rem",
+          }}
+        >
+          🔜 ระบบเชื่อมต่อ DBD กำลังจะเปิดให้บริการ (อยู่ระหว่างขออนุมัติ API
+          จากกรมพัฒนาธุรกิจการค้า) — ระหว่างนี้กรอกข้อมูลลูกค้าเองได้ตามปกติ
+        </div>
+      )}
+
+      {result && result.results.length === 0 && (result.configured || result.mock) && (
+        <div
+          style={{
+            marginTop: "0.5rem",
+            fontSize: "0.8125rem",
+            color: "#64748b",
+          }}
+        >
+          ไม่พบข้อมูลที่ตรงกับการค้นหา
+        </div>
+      )}
+
+      {result && result.results.length > 0 && (
+        <div style={{ marginTop: "0.5rem", display: "grid", gap: "0.375rem" }}>
+          {result.mock && (
+            <div style={{ fontSize: "0.6875rem", color: "#94a3b8" }}>
+              * ข้อมูลตัวอย่าง (โหมดทดสอบ) — ยังไม่ได้เชื่อม DBD จริง
+            </div>
+          )}
+          {result.results.map((c) => (
+            <button
+              key={`${c.taxId}-${c.branchNumber}`}
+              type="button"
+              onClick={() => {
+                onPick(c);
+                setOpen(false);
+              }}
+              style={{
+                textAlign: "left",
+                border: "1px solid #e2e8f0",
+                borderRadius: "0.5rem",
+                padding: "0.625rem 0.75rem",
+                background: "white",
+                cursor: "pointer",
+              }}
+            >
+              <div style={{ fontWeight: 600, fontSize: "0.875rem" }}>
+                {c.nameTh}
+              </div>
+              <div style={{ fontSize: "0.75rem", color: "#64748b" }}>
+                เลขผู้เสียภาษี {c.taxId} ·{" "}
+                {c.branchType === "HQ"
+                  ? "สำนักงานใหญ่"
+                  : `สาขา ${c.branchNumber}`}
+              </div>
+              {c.address && (
+                <div
+                  style={{
+                    fontSize: "0.75rem",
+                    color: "#94a3b8",
+                    marginTop: "0.125rem",
+                  }}
+                >
+                  {c.address}
+                </div>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
