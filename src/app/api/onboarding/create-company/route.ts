@@ -14,6 +14,7 @@ import { GoogleSheetsService } from "@/server/services/google-sheets.service";
 import { GoogleDriveService } from "@/server/services/google-drive.service";
 import { getDefaultPermissions } from "@/lib/permissions";
 import { LEGAL_VERSION } from "@/lib/legal/version";
+import { sendWelcome } from "@/lib/line/notifications";
 
 const CompanySchema = z
   .object({
@@ -246,6 +247,9 @@ export async function POST(req: NextRequest) {
       avatarUrl: user.avatarUrl,
       onboardingStep: "done",
     });
+
+    // Welcome the new org owner over LINE (best-effort — never blocks signup)
+    void sendWelcome(user.lineUserId, input.name);
 
     return NextResponse.json({
       success: true,

@@ -820,11 +820,12 @@ function SumBox({ label, value, unit }: { label: string; value: number; unit: st
 
 function CreditBadge({ subscription, showUsed }: { subscription: { plan: string; creditsUsed: number; totalCredits: number; remainingCredits: number; percentageRemaining: number } | null | undefined; showUsed: boolean }) {
   if (!subscription) return null;
-  const pct = subscription.percentageRemaining;
+  const unlimited = subscription.totalCredits === -1;
+  const pct = unlimited ? 100 : subscription.percentageRemaining;
   const color = pct <= 10 ? "#dc2626" : pct <= 30 ? "#d97706" : "#16a34a";
   const bg = pct <= 10 ? "#fef2f2" : pct <= 30 ? "#fffbeb" : "#f0fdf4";
   const border = pct <= 10 ? "#fecaca" : pct <= 30 ? "#fde68a" : "#bbf7d0";
-  return <div style={{ display: "inline-flex", alignItems: "center", padding: "0.375rem 0.75rem", background: bg, border: `1px solid ${border}`, borderRadius: "9999px", fontSize: "0.75rem", color, fontWeight: 500 }}>{showUsed && "✓ ใช้ 1 เครดิต • "}เหลือ <strong style={{ margin: "0 0.125rem" }}>{subscription.remainingCredits}</strong>/{subscription.totalCredits} ครั้ง</div>;
+  return <div style={{ display: "inline-flex", alignItems: "center", padding: "0.375rem 0.75rem", background: bg, border: `1px solid ${border}`, borderRadius: "9999px", fontSize: "0.75rem", color, fontWeight: 500 }}>{showUsed && "✓ ใช้ 1 เครดิต • "}{unlimited ? "OCR ไม่จำกัด" : <>OCR เดือนนี้เหลือ <strong style={{ margin: "0 0.125rem" }}>{subscription.remainingCredits}</strong>/{subscription.totalCredits} ครั้ง</>}</div>;
 }
 
 // ===== Helpers =====

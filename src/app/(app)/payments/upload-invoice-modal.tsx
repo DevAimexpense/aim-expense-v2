@@ -1258,7 +1258,8 @@ function CreditBadge({
   showUsed: boolean;
 }) {
   if (!subscription) return null;
-  const pct = subscription.percentageRemaining;
+  const unlimited = subscription.totalCredits === -1;
+  const pct = unlimited ? 100 : subscription.percentageRemaining;
   const color = pct <= 10 ? "#dc2626" : pct <= 30 ? "#d97706" : "#16a34a";
   const bg = pct <= 10 ? "#fef2f2" : pct <= 30 ? "#fffbeb" : "#f0fdf4";
   const border = pct <= 10 ? "#fecaca" : pct <= 30 ? "#fde68a" : "#bbf7d0";
@@ -1280,8 +1281,15 @@ function CreditBadge({
     >
       <span>
         {showUsed && "✓ ใช้ 1 เครดิต • "}
-        เหลือ <strong>{subscription.remainingCredits.toLocaleString()}</strong>/
-        {subscription.totalCredits.toLocaleString()} ครั้ง
+        {unlimited ? (
+          "OCR ไม่จำกัด"
+        ) : (
+          <>
+            OCR เดือนนี้เหลือ{" "}
+            <strong>{subscription.remainingCredits.toLocaleString()}</strong>/
+            {subscription.totalCredits.toLocaleString()} ครั้ง
+          </>
+        )}
       </span>
     </div>
   );
