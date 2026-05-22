@@ -461,6 +461,76 @@ export const orgRouter = router({
     }),
 
   /**
+   * Delete an organization (owner-only, irreversible).
+   * - Only the org owner may delete (not just any admin).
+   * - Caller must echo the exact org name to confirm.
+   * - All org-scoped rows cascade via schema (members, branches, permissions,
+   *   subscription, invitations, audit logs). Google Sheet/Drive are the user's
+   *   own files and are intentionally left untouched.
+   * - If the deleted org was the active one, the session is repointed to another
+   *   membership (or cleared) so the user lands somewhere valid.
+   */
+  delete: protectedProcedure
+    .input(
+      z.object({
+        orgId: z.string(),
+        confirmName: z.string(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const userId = ctx.session.userId;
+
+      const org = await prisma.organization.findUnique({
+        where: { id: input.orgId },
+        select: { id: true, name: true, ownerId: true },
+      });
+      if (!org) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "ไม่พบองค์กร" });
+      }
+      if (org.ownerId !== userId) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "เฉพาะเจ้าของบริษัทเท่านั้นที่ลบได้",
+        });
+      }
+      if (input.confirmName.trim() !== org.name) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "ชื่อยืนยันไม่ตรงกับชื่อบริษัท",
+        });
+      }
+
+      await prisma.organization.delete({ where: { id: org.id } });
+
+      // If we just deleted the active org, repoint the session to another
+      // membership (or clear it) so the next request doesn't 404 on a dead org.
+      let nextOrgId: string | null = ctx.session.activeOrgId ?? null;
+      if (ctx.session.activeOrgId === org.id) {
+        const fallback = await prisma.orgMember.findFirst({
+          where: { userId, status: "active" },
+          orderBy: { createdAt: "asc" },
+          select: { orgId: true },
+        });
+        nextOrgId = fallback?.orgId ?? null;
+
+        const { setSessionCookie } = await import("@/lib/auth/session");
+        const user = await prisma.user.findUnique({ where: { id: userId } });
+        if (user) {
+          await setSessionCookie({
+            userId: user.id,
+            lineUserId: user.lineUserId,
+            displayName: user.lineDisplayName,
+            avatarUrl: user.avatarUrl,
+            onboardingStep: user.onboardingStep,
+            activeOrgId: nextOrgId,
+          });
+        }
+      }
+
+      return { success: true, activeOrgId: nextOrgId };
+    }),
+
+  /**
    * List org members
    */
   members: orgProcedure.query(async ({ ctx }) => {

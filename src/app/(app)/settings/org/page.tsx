@@ -20,6 +20,7 @@ export default async function OrgSettingsPage() {
     select: {
       id: true,
       name: true,
+      ownerId: true,
       entityType: true,
       taxId: true,
       branchType: true,
@@ -36,11 +37,13 @@ export default async function OrgSettingsPage() {
   if (!org) redirect("/");
 
   const isAdmin = orgCtx.role === "admin";
+  const isOwner = org.ownerId === session.userId;
 
   return (
     <OrgSettingsForm
       org={org}
       isAdmin={isAdmin}
+      isOwner={isOwner}
       sheetUrl={
         org.googleSpreadsheetId
           ? `https://docs.google.com/spreadsheets/d/${org.googleSpreadsheetId}`

@@ -19,6 +19,7 @@ export interface TRPCContext {
     displayName: string;
     avatarUrl: string | null;
     onboardingStep: string;
+    activeOrgId: string | null;
   } | null;
 
   org: {
@@ -51,6 +52,7 @@ export async function createTRPCContext(): Promise<TRPCContext> {
       displayName: session.displayName,
       avatarUrl: session.avatarUrl,
       onboardingStep: session.onboardingStep,
+      activeOrgId: session.activeOrgId ?? null,
     },
     org: org
       ? {

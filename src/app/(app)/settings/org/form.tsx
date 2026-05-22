@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { trpc } from "@/lib/trpc/client";
 import { imageFileToDataUrl } from "@/lib/utils/image-to-dataurl";
 import { CompanyBanksSection } from "./company-banks-section";
@@ -11,6 +12,7 @@ interface Props {
   org: {
     id: string;
     name: string;
+    ownerId: string;
     entityType: string;
     taxId: string;
     branchType: string;
@@ -22,11 +24,12 @@ interface Props {
     signatoryName: string | null;
   };
   isAdmin: boolean;
+  isOwner: boolean;
   sheetUrl: string | null;
   driveUrl: string | null;
 }
 
-export function OrgSettingsForm({ org, isAdmin, sheetUrl, driveUrl }: Props) {
+export function OrgSettingsForm({ org, isAdmin, isOwner, sheetUrl, driveUrl }: Props) {
   const utils = trpc.useUtils();
   const updateMut = trpc.org.update.useMutation();
   const isPersonal = org.entityType === "personal";
@@ -441,8 +444,129 @@ export function OrgSettingsForm({ org, isAdmin, sheetUrl, driveUrl }: Props) {
               </a>
             </div>
           </div>
+
+          {isOwner && (
+            <div style={{ marginTop: "1rem" }}>
+              <DangerZone orgId={org.id} orgName={org.name} />
+            </div>
+          )}
         </div>
       </div>
+    </div>
+  );
+}
+
+// ===== Danger zone: delete organization (owner-only, irreversible) =====
+
+function DangerZone({ orgId, orgName }: { orgId: string; orgName: string }) {
+  const router = useRouter();
+  const deleteMut = trpc.org.delete.useMutation();
+  const [showModal, setShowModal] = useState(false);
+  const [confirmName, setConfirmName] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  const handleDelete = async () => {
+    setError(null);
+    try {
+      await deleteMut.mutateAsync({ orgId, confirmName: confirmName.trim() });
+      // Org is gone — session active-org was repointed server-side.
+      // Send the user to the picker (it redirects to onboarding if 0 orgs left).
+      router.push("/select-org");
+      router.refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "เกิดข้อผิดพลาด");
+    }
+  };
+
+  return (
+    <div className="app-card" style={{ borderColor: "#fecaca" }}>
+      <div className="app-card-header">
+        <div>
+          <h2 className="app-card-title" style={{ color: "#dc2626" }}>
+            ⚠️ พื้นที่อันตราย
+          </h2>
+          <p className="app-card-subtitle">
+            ลบบริษัทนี้ออกถาวร — ข้อมูลในระบบ (สมาชิก สิทธิ์ สาขา การตั้งค่า)
+            จะถูกลบทั้งหมด กู้คืนไม่ได้ · ไฟล์ใน Google Sheet/Drive ของคุณจะยังอยู่
+          </p>
+        </div>
+      </div>
+      <button
+        type="button"
+        onClick={() => {
+          setConfirmName("");
+          setError(null);
+          setShowModal(true);
+        }}
+        className="app-btn"
+        style={{ background: "#dc2626", color: "white" }}
+      >
+        🗑️ ลบบริษัทนี้
+      </button>
+
+      {showModal && (
+        <div
+          className="app-modal-backdrop"
+          onClick={(e) => e.target === e.currentTarget && setShowModal(false)}
+        >
+          <div className="app-modal modal-lg">
+            <div className="app-modal-header">
+              <h3 className="app-modal-title">ลบบริษัท “{orgName}”</h3>
+              <button
+                type="button"
+                onClick={() => setShowModal(false)}
+                className="app-btn app-btn-ghost app-btn-icon"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="app-modal-body">
+              {error && <div className="app-error-msg">{error}</div>}
+              <p style={{ fontSize: "0.875rem", color: "#475569", marginBottom: "0.75rem" }}>
+                การลบนี้ <strong>ถาวรและกู้คืนไม่ได้</strong>. พิมพ์ชื่อบริษัท{" "}
+                <strong>{orgName}</strong> เพื่อยืนยัน:
+              </p>
+              <input
+                type="text"
+                value={confirmName}
+                onChange={(e) => setConfirmName(e.target.value)}
+                placeholder={orgName}
+                className="app-input"
+                autoFocus
+              />
+            </div>
+            <div className="app-modal-footer">
+              <button
+                type="button"
+                onClick={() => setShowModal(false)}
+                disabled={deleteMut.isPending}
+                className="app-btn app-btn-secondary"
+              >
+                ยกเลิก
+              </button>
+              <button
+                type="button"
+                onClick={handleDelete}
+                disabled={deleteMut.isPending || confirmName.trim() !== orgName}
+                className="app-btn"
+                style={{
+                  background:
+                    confirmName.trim() === orgName ? "#dc2626" : "#fca5a5",
+                  color: "white",
+                }}
+              >
+                {deleteMut.isPending ? (
+                  <>
+                    <span className="app-spinner" /> กำลังลบ...
+                  </>
+                ) : (
+                  "ลบถาวร"
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
