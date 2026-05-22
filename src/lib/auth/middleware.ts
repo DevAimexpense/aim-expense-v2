@@ -48,6 +48,15 @@ export const getOrgContext = cache(async function getOrgContextImpl(
   userId: string,
   activeOrgId?: string | null
 ): Promise<OrgContext | null> {
+  // If the caller didn't specify an org (activeOrgId === undefined), fall back
+  // to the session's active org so multi-business switching is respected on
+  // EVERY server component — not just the ones that thread activeOrgId through.
+  // (Callers that explicitly pass null mean "first org"; we honour that.)
+  if (activeOrgId === undefined) {
+    const session = await getSession();
+    activeOrgId = session?.activeOrgId ?? null;
+  }
+
   // Find active membership
   // - ถ้ามี activeOrgId → ใช้ที่ user เลือก (multi-org support)
   // - ถ้าไม่มี → ใช้ org แรกที่ user join (backward compat)

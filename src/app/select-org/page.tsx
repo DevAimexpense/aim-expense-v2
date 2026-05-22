@@ -28,7 +28,11 @@ export default function SelectOrgPage() {
   const handleSelect = async (orgId: string) => {
     try {
       await setActiveMut.mutateAsync({ orgId });
+      // Invalidate the router cache so the new active org is reflected
+      // everywhere (sidebar + page content) — without this, Next serves the
+      // previously-cached /dashboard for the old org.
       router.push("/dashboard");
+      router.refresh();
     } catch (e) {
       alert(e instanceof Error ? e.message : "เกิดข้อผิดพลาด");
     }
