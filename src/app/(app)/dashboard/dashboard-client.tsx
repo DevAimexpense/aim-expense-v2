@@ -52,11 +52,27 @@ export function DashboardClient({
   const totalRemaining = totalBudget - totalSpent;
   const overBudgetCount = filteredEvents.filter((e) => e.isOverBudget).length;
 
-  // Mock data for revenue/VAT (Wave 2 features)
-  const totalQuotation = 0;
-  const totalInvoiced = 0;
-  const totalPaid = 0;
+  // Revenue / profit from real documents (Pro+ only — gated by features.pl).
+  // Quotation = pipeline (exclude rejected/void); Invoiced = issued bills
+  // (exclude draft/void); Profit = invoiced − spent.
+  const billingsQuery = trpc.billing.list.useQuery(undefined, {
+    enabled: features.pl,
+  });
+  const quotationsQuery = trpc.quotation.list.useQuery(undefined, {
+    enabled: features.pl,
+  });
+  const billings = billingsQuery.data || [];
+  const quotations = quotationsQuery.data || [];
+
+  const totalQuotation = quotations
+    .filter((q) => q.status !== "rejected" && q.status !== "void")
+    .reduce((s, q) => s + q.grandTotal, 0);
+  const totalInvoiced = billings
+    .filter((b) => b.status !== "void" && b.status !== "draft")
+    .reduce((s, b) => s + b.grandTotal, 0);
   const totalProfit = totalInvoiced - totalSpent;
+
+  // VAT card still pending real wiring (needs monthly ภ.พ.30 aggregation).
   const inputVat = 0;
   const outputVat = 0;
 
@@ -455,7 +471,7 @@ export function DashboardClient({
           textAlign: "center",
         }}
       >
-        💡 รายได้ + ภาษี + ใบเสนอราคา จะเปิดใช้งานเต็มรูปแบบใน Wave 2
+        💡 สรุปภาษีซื้อ-ขาย (ภ.พ.30) บนแดชบอร์ดจะเปิดใช้งานเต็มรูปแบบเร็ว ๆ นี้
       </p>
     </div>
   );
