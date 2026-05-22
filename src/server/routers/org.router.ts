@@ -77,7 +77,13 @@ export const orgRouter = router({
       },
       include: {
         org: {
-          select: { id: true, name: true, logoUrl: true, slug: true },
+          select: {
+            id: true,
+            name: true,
+            logoUrl: true,
+            slug: true,
+            entityType: true,
+          },
         },
       },
       orderBy: { createdAt: "asc" },
@@ -87,6 +93,7 @@ export const orgRouter = router({
       orgName: m.org.name,
       logoUrl: m.org.logoUrl,
       slug: m.org.slug,
+      entityType: m.org.entityType,
       role: m.role,
       joinedAt: m.joinedAt,
     }));
@@ -151,6 +158,7 @@ export const orgRouter = router({
       select: {
         id: true,
         name: true,
+        entityType: true,
         taxId: true,
         address: true,
         phone: true,
@@ -188,6 +196,7 @@ export const orgRouter = router({
     .input(
       z.object({
         name: z.string().trim().min(1, "กรุณากรอกชื่อองค์กร").max(200),
+        entityType: z.enum(["company", "personal"]).default("company"),
         taxId: z
           .string()
           .trim()
@@ -217,8 +226,11 @@ export const orgRouter = router({
         });
       }
 
+      // Individuals (บุคคลธรรมดา) are never juristic branches → always HQ/00000.
+      const isPersonal = input.entityType === "personal";
+      const branchType = isPersonal ? "HQ" : input.branchType;
       const branchNumber =
-        input.branchType === "HQ" ? "00000" : input.branchNumber;
+        branchType === "HQ" ? "00000" : input.branchNumber;
 
       // Generate a unique slug from the org name
       const baseSlug =
@@ -263,10 +275,11 @@ export const orgRouter = router({
             name: input.name,
             slug,
             ownerId: userId,
+            entityType: input.entityType,
             taxId: input.taxId,
             address: input.address,
             phone: input.phone || null,
-            branchType: input.branchType,
+            branchType,
             branchNumber,
             googleSpreadsheetId: spreadsheetId,
             googleDriveFolderId: driveFolderId,

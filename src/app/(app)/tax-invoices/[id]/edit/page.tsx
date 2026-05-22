@@ -3,7 +3,7 @@
 // ===========================================
 
 import { EditTaxInvoiceClient } from "./edit-tax-invoice-client";
-import { requireFeature } from "@/lib/auth/require-plan";
+import { requireFeature, requireCompanyOrg } from "@/lib/auth/require-plan";
 
 export const metadata = {
   title: "แก้ไขใบกำกับภาษี | Aim Expense",
@@ -15,6 +15,7 @@ export default async function EditTaxInvoicePage({
 }: {
   params: { id: string };
 }) {
+  await requireCompanyOrg();
   await requireFeature("revenueModule");
 
   return <EditTaxInvoiceClient taxInvoiceId={params.id} />;

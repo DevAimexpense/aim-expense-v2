@@ -4,7 +4,7 @@
 // ===========================================
 
 import { TaxInvoiceDetailClient } from "./tax-invoice-detail-client";
-import { requireFeature } from "@/lib/auth/require-plan";
+import { requireFeature, requireCompanyOrg } from "@/lib/auth/require-plan";
 
 export const metadata = {
   title: "ใบกำกับภาษี | Aim Expense",
@@ -16,6 +16,7 @@ export default async function TaxInvoiceDetailPage({
 }: {
   params: { id: string };
 }) {
+  await requireCompanyOrg();
   await requireFeature("revenueModule");
 
   return <TaxInvoiceDetailClient taxInvoiceId={params.id} />;

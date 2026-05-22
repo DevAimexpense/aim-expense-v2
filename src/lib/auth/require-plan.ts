@@ -65,6 +65,25 @@ export async function requireFeature(
 }
 
 /**
+ * Server-side guard for VAT / juristic-only features (ใบกำกับภาษี, ภพ.30).
+ * บุคคลธรรมดา (personal) ยังไม่จด VAT → redirect กลับ dashboard.
+ * Reads the ACTIVE org so multi-business switching is respected.
+ */
+export async function requireCompanyOrg(): Promise<void> {
+  const session = await getSession();
+  if (!session) redirect("/login");
+  if (!session.activeOrgId) return;
+
+  const org = await prisma.organization.findUnique({
+    where: { id: session.activeOrgId },
+    select: { entityType: true },
+  });
+  if (org?.entityType === "personal") {
+    redirect("/dashboard?restricted=company-only");
+  }
+}
+
+/**
  * Soft check — returns plan + flags without redirecting.
  * Use in components that want to show degraded UI rather than hard-redirect.
  */

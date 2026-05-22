@@ -57,9 +57,9 @@ export default function SelectOrgPage() {
         }}
       >
         <div style={{ textAlign: "center", marginBottom: "1.5rem" }}>
-          <h1 style={{ margin: "0 0 0.25rem 0", fontSize: "1.5rem" }}>เลือกบริษัท</h1>
+          <h1 style={{ margin: "0 0 0.25rem 0", fontSize: "1.5rem" }}>สลับพื้นที่ทำงาน</h1>
           <p style={{ margin: 0, color: "#64748b", fontSize: "0.875rem" }}>
-            เลือกบริษัทที่ต้องการใช้งานก่อนเข้าสู่ระบบ
+            เลือกพื้นที่ทำงานที่ต้องการใช้งานก่อนเข้าสู่ระบบ
           </p>
         </div>
 
@@ -132,6 +132,19 @@ export default function SelectOrgPage() {
                           style={{
                             display: "inline-block",
                             padding: "0.125rem 0.5rem",
+                            background: "#f1f5f9",
+                            color: "#475569",
+                            borderRadius: 4,
+                            fontWeight: 600,
+                            marginRight: "0.5rem",
+                          }}
+                        >
+                          {org.entityType === "personal" ? "👤 ส่วนตัว" : "🏢 บริษัท"}
+                        </span>
+                        <span
+                          style={{
+                            display: "inline-block",
+                            padding: "0.125rem 0.5rem",
                             background: role.color + "20",
                             color: role.color,
                             borderRadius: 4,
@@ -176,7 +189,7 @@ export default function SelectOrgPage() {
                   textDecoration: "none",
                 }}
               >
-                ➕ สร้างบริษัทใหม่
+                ➕ สร้างพื้นที่ทำงานใหม่
               </a>
               <a
                 href="/api/auth/logout"

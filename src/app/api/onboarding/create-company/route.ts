@@ -19,6 +19,7 @@ import { sendWelcome } from "@/lib/line/notifications";
 const CompanySchema = z
   .object({
     name: z.string().trim().min(1).max(200),
+    entityType: z.enum(["company", "personal"]).default("company"),
     taxId: z.string().trim().regex(/^\d{13}$/, "เลขผู้เสียภาษีต้องเป็นตัวเลข 13 หลัก"),
     branchType: z.enum(["HQ", "Branch"]).default("HQ"),
     branchNumber: z.string().trim().regex(/^\d{5}$/, "เลขสาขาต้องเป็นตัวเลข 5 หลัก").default("00000"),
@@ -28,10 +29,15 @@ const CompanySchema = z
       message: "โปรดยอมรับนโยบายความเป็นส่วนตัวและข้อกำหนดการใช้งาน",
     }),
   })
-  .transform((v) => ({
-    ...v,
-    branchNumber: v.branchType === "HQ" ? "00000" : v.branchNumber,
-  }));
+  // Individuals (บุคคลธรรมดา) are never juristic branches → force HQ/00000.
+  .transform((v) => {
+    const branchType = v.entityType === "personal" ? "HQ" : v.branchType;
+    return {
+      ...v,
+      branchType,
+      branchNumber: branchType === "HQ" ? "00000" : v.branchNumber,
+    };
+  });
 
 async function getValidAccessToken(userId: string): Promise<string> {
   const conn = await prisma.googleConnection.findUnique({
@@ -132,6 +138,7 @@ export async function POST(req: NextRequest) {
           name: input.name,
           slug,
           ownerId: session.userId,
+          entityType: input.entityType,
           taxId: input.taxId,
           branchType: input.branchType,
           branchNumber: input.branchNumber,

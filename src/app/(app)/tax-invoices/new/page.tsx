@@ -7,7 +7,7 @@
 // ===========================================
 
 import { NewTaxInvoiceClient } from "./new-tax-invoice-client";
-import { requireFeature } from "@/lib/auth/require-plan";
+import { requireFeature, requireCompanyOrg } from "@/lib/auth/require-plan";
 
 export const metadata = {
   title: "สร้างใบกำกับภาษี | Aim Expense",
@@ -19,6 +19,7 @@ interface PageProps {
 }
 
 export default async function NewTaxInvoicePage({ searchParams }: PageProps) {
+  await requireCompanyOrg();
   await requireFeature("revenueModule");
 
   // Convert flow is delegated to the client (uses tRPC mutation +

@@ -11,6 +11,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { trpc } from "@/lib/trpc/client";
 import { PLAN_LABELS } from "@/lib/plans";
+import { EntityTypePicker } from "@/components/forms/entity-type-picker";
 import type { BusinessQuotaResult } from "@/server/lib/business-quota";
 
 function Shell({ children }: { children: React.ReactNode }) {
@@ -46,6 +47,7 @@ export function NewBusinessForm({ quota }: { quota: BusinessQuotaResult }) {
 
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState({
+    entityType: "company" as "company" | "personal",
     name: "",
     taxId: "",
     branchType: "HQ" as "HQ" | "Branch",
@@ -53,6 +55,8 @@ export function NewBusinessForm({ quota }: { quota: BusinessQuotaResult }) {
     address: "",
     phone: "",
   });
+
+  const isPersonal = form.entityType === "personal";
 
   const update = (key: keyof typeof form, value: string) =>
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -83,12 +87,15 @@ export function NewBusinessForm({ quota }: { quota: BusinessQuotaResult }) {
   }
 
   const validate = (): string | null => {
-    if (!form.name.trim()) return "โปรดกรอกชื่อบริษัท";
+    if (!form.name.trim())
+      return isPersonal ? "โปรดกรอกชื่อ-นามสกุล" : "โปรดกรอกชื่อบริษัท";
     if (!/^\d{13}$/.test(form.taxId.trim()))
-      return "เลขประจำตัวผู้เสียภาษีต้องเป็นตัวเลข 13 หลัก";
-    if (form.branchType === "Branch" && !/^\d{5}$/.test(form.branchNumber))
+      return isPersonal
+        ? "เลขบัตรประชาชนต้องเป็นตัวเลข 13 หลัก"
+        : "เลขประจำตัวผู้เสียภาษีต้องเป็นตัวเลข 13 หลัก";
+    if (!isPersonal && form.branchType === "Branch" && !/^\d{5}$/.test(form.branchNumber))
       return "เลขสาขาต้องเป็นตัวเลข 5 หลัก";
-    if (!form.address.trim()) return "โปรดกรอกที่อยู่บริษัท";
+    if (!form.address.trim()) return "โปรดกรอกที่อยู่";
     return null;
   };
 
@@ -104,10 +111,11 @@ export function NewBusinessForm({ quota }: { quota: BusinessQuotaResult }) {
     try {
       const res = await createMut.mutateAsync({
         name: form.name.trim(),
+        entityType: form.entityType,
         taxId: form.taxId.trim(),
-        branchType: form.branchType,
+        branchType: isPersonal ? "HQ" : form.branchType,
         branchNumber:
-          form.branchType === "HQ" ? "00000" : form.branchNumber,
+          isPersonal || form.branchType === "HQ" ? "00000" : form.branchNumber,
         address: form.address.trim(),
         phone: form.phone.trim() || null,
       });
@@ -124,13 +132,17 @@ export function NewBusinessForm({ quota }: { quota: BusinessQuotaResult }) {
     <Shell>
       <form onSubmit={handleSubmit} className="onb-card">
         <div style={{ marginBottom: "1.5rem" }}>
-          <h1 className="onb-title">ตั้งค่าบริษัทใหม่</h1>
+          <h1 className="onb-title">
+            {isPersonal ? "ตั้งค่าพื้นที่ทำงานใหม่" : "ตั้งค่าบริษัทใหม่"}
+          </h1>
           <p className="onb-subtitle">
-            ข้อมูลนี้จะใช้ในเอกสาร ใบกำกับภาษี และรายงานของบริษัท
+            {isPersonal
+              ? "ข้อมูลนี้จะใช้ในเอกสารและรายงานของคุณ"
+              : "ข้อมูลนี้จะใช้ในเอกสาร ใบกำกับภาษี และรายงานของบริษัท"}
             {quota.limit !== -1 && (
               <>
                 {" "}
-                · สร้างได้อีก {quota.remaining} จาก {quota.limit} บริษัท
+                · สร้างได้อีก {quota.remaining} จาก {quota.limit} พื้นที่ทำงาน
               </>
             )}
           </p>
@@ -138,9 +150,15 @@ export function NewBusinessForm({ quota }: { quota: BusinessQuotaResult }) {
 
         {error && <div className="onb-error">{error}</div>}
 
+        <EntityTypePicker
+          value={form.entityType}
+          onChange={(v) => update("entityType", v)}
+        />
+
         <div className="onb-field">
           <label htmlFor="company-name" className="onb-label">
-            ชื่อบริษัท<span className="onb-label-required">*</span>
+            {isPersonal ? "ชื่อ-นามสกุล" : "ชื่อบริษัท"}
+            <span className="onb-label-required">*</span>
           </label>
           <p className="onb-hint">ชื่อที่จะแสดงในเอกสารและระบบ</p>
           <input
@@ -148,7 +166,7 @@ export function NewBusinessForm({ quota }: { quota: BusinessQuotaResult }) {
             type="text"
             value={form.name}
             onChange={(e) => update("name", e.target.value)}
-            placeholder="บริษัท ของคุณ จำกัด"
+            placeholder={isPersonal ? "เช่น นายสมชาย ใจดี" : "บริษัท ของคุณ จำกัด"}
             className="onb-input"
             required
             maxLength={200}
@@ -157,9 +175,12 @@ export function NewBusinessForm({ quota }: { quota: BusinessQuotaResult }) {
 
         <div className="onb-field">
           <label htmlFor="tax-id" className="onb-label">
-            เลขประจำตัวผู้เสียภาษี<span className="onb-label-required">*</span>
+            {isPersonal ? "เลขบัตรประชาชน" : "เลขประจำตัวผู้เสียภาษี"}
+            <span className="onb-label-required">*</span>
           </label>
-          <p className="onb-hint">ตัวเลข 13 หลักจากกรมสรรพากร</p>
+          <p className="onb-hint">
+            {isPersonal ? "เลขบัตรประชาชน 13 หลัก" : "ตัวเลข 13 หลักจากกรมสรรพากร"}
+          </p>
           <input
             id="tax-id"
             type="text"
@@ -175,62 +196,64 @@ export function NewBusinessForm({ quota }: { quota: BusinessQuotaResult }) {
           />
         </div>
 
-        <div className="onb-field">
-          <label className="onb-label">
-            ประเภทสำนักงาน<span className="onb-label-required">*</span>
-          </label>
-          <p className="onb-hint">ใช้ในเอกสารทางภาษี (ใบกำกับภาษี, ภพ.30)</p>
-          <div style={{ display: "flex", gap: "0.75rem", marginTop: "0.5rem" }}>
-            <label
-              style={{
-                flex: 1,
-                padding: "0.75rem 1rem",
-                border: `2px solid ${form.branchType === "HQ" ? "#2563eb" : "#e2e8f0"}`,
-                borderRadius: "0.5rem",
-                background: form.branchType === "HQ" ? "#eff6ff" : "white",
-                cursor: "pointer",
-                display: "flex",
-                alignItems: "center",
-                gap: "0.5rem",
-                fontSize: "0.875rem",
-              }}
-            >
-              <input
-                type="radio"
-                name="branchType"
-                value="HQ"
-                checked={form.branchType === "HQ"}
-                onChange={(e) => update("branchType", e.target.value)}
-              />
-              สำนักงานใหญ่
+        {!isPersonal && (
+          <div className="onb-field">
+            <label className="onb-label">
+              ประเภทสำนักงาน<span className="onb-label-required">*</span>
             </label>
-            <label
-              style={{
-                flex: 1,
-                padding: "0.75rem 1rem",
-                border: `2px solid ${form.branchType === "Branch" ? "#2563eb" : "#e2e8f0"}`,
-                borderRadius: "0.5rem",
-                background: form.branchType === "Branch" ? "#eff6ff" : "white",
-                cursor: "pointer",
-                display: "flex",
-                alignItems: "center",
-                gap: "0.5rem",
-                fontSize: "0.875rem",
-              }}
-            >
-              <input
-                type="radio"
-                name="branchType"
-                value="Branch"
-                checked={form.branchType === "Branch"}
-                onChange={(e) => update("branchType", e.target.value)}
-              />
-              สาขา
-            </label>
+            <p className="onb-hint">ใช้ในเอกสารทางภาษี (ใบกำกับภาษี, ภพ.30)</p>
+            <div style={{ display: "flex", gap: "0.75rem", marginTop: "0.5rem" }}>
+              <label
+                style={{
+                  flex: 1,
+                  padding: "0.75rem 1rem",
+                  border: `2px solid ${form.branchType === "HQ" ? "#2563eb" : "#e2e8f0"}`,
+                  borderRadius: "0.5rem",
+                  background: form.branchType === "HQ" ? "#eff6ff" : "white",
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "0.5rem",
+                  fontSize: "0.875rem",
+                }}
+              >
+                <input
+                  type="radio"
+                  name="branchType"
+                  value="HQ"
+                  checked={form.branchType === "HQ"}
+                  onChange={(e) => update("branchType", e.target.value)}
+                />
+                สำนักงานใหญ่
+              </label>
+              <label
+                style={{
+                  flex: 1,
+                  padding: "0.75rem 1rem",
+                  border: `2px solid ${form.branchType === "Branch" ? "#2563eb" : "#e2e8f0"}`,
+                  borderRadius: "0.5rem",
+                  background: form.branchType === "Branch" ? "#eff6ff" : "white",
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "0.5rem",
+                  fontSize: "0.875rem",
+                }}
+              >
+                <input
+                  type="radio"
+                  name="branchType"
+                  value="Branch"
+                  checked={form.branchType === "Branch"}
+                  onChange={(e) => update("branchType", e.target.value)}
+                />
+                สาขา
+              </label>
+            </div>
           </div>
-        </div>
+        )}
 
-        {form.branchType === "Branch" && (
+        {!isPersonal && form.branchType === "Branch" && (
           <div className="onb-field">
             <label htmlFor="branch-number" className="onb-label">
               เลขสาขา<span className="onb-label-required">*</span>
@@ -259,7 +282,8 @@ export function NewBusinessForm({ quota }: { quota: BusinessQuotaResult }) {
 
         <div className="onb-field">
           <label htmlFor="address" className="onb-label">
-            ที่อยู่บริษัท<span className="onb-label-required">*</span>
+            {isPersonal ? "ที่อยู่" : "ที่อยู่บริษัท"}
+            <span className="onb-label-required">*</span>
           </label>
           <textarea
             id="address"
@@ -275,7 +299,7 @@ export function NewBusinessForm({ quota }: { quota: BusinessQuotaResult }) {
 
         <div className="onb-field">
           <label htmlFor="phone" className="onb-label">
-            เบอร์โทรบริษัท
+            {isPersonal ? "เบอร์โทร" : "เบอร์โทรบริษัท"}
           </label>
           <p className="onb-hint">ไม่บังคับ</p>
           <input

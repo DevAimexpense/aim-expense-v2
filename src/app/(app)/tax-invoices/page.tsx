@@ -4,7 +4,7 @@
 // ===========================================
 
 import { TaxInvoicesClient } from "./tax-invoices-client";
-import { requireFeature } from "@/lib/auth/require-plan";
+import { requireFeature, requireCompanyOrg } from "@/lib/auth/require-plan";
 
 export const metadata = {
   title: "ใบกำกับภาษี | Aim Expense",
@@ -12,6 +12,7 @@ export const metadata = {
 
 
 export default async function TaxInvoicesPage() {
+  await requireCompanyOrg();
   await requireFeature("revenueModule");
 
   return <TaxInvoicesClient />;

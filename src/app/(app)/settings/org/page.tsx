@@ -12,7 +12,7 @@ export default async function OrgSettingsPage() {
   const session = await getSession();
   if (!session) redirect("/login");
 
-  const orgCtx = await getOrgContext(session.userId);
+  const orgCtx = await getOrgContext(session.userId, session.activeOrgId);
   if (!orgCtx) redirect("/");
 
   const org = await prisma.organization.findUnique({
@@ -20,6 +20,7 @@ export default async function OrgSettingsPage() {
     select: {
       id: true,
       name: true,
+      entityType: true,
       taxId: true,
       branchType: true,
       branchNumber: true,

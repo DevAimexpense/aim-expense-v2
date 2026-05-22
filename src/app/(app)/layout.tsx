@@ -24,8 +24,8 @@ export default async function AppLayout({
     redirect("/");
   }
 
-  // 3. Get org context
-  const org = await getOrgContext(session.userId);
+  // 3. Get org context (respect the active org so multi-business switching works)
+  const org = await getOrgContext(session.userId, session.activeOrgId);
   if (!org) {
     redirect("/");
   }
@@ -36,6 +36,7 @@ export default async function AppLayout({
         <Sidebar
           permissions={org.permissions}
           orgName={org.orgName}
+          entityType={org.entityType}
           userName={session.displayName}
           userAvatar={session.avatarUrl || undefined}
           isAdmin={org.role === "admin"}

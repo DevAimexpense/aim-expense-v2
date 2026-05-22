@@ -6,6 +6,7 @@
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth/session";
 import { getOrgContext } from "@/lib/auth/middleware";
+import { requireCompanyOrg } from "@/lib/auth/require-plan";
 import { getSheetsService, ensureTabsCached } from "@/server/lib/sheets-context";
 import { SHEET_TABS } from "@/server/services/google-sheets.service";
 import { prisma } from "@/lib/prisma";
@@ -23,7 +24,9 @@ export default async function TaxInvoiceDocumentPage({
   const session = await getSession();
   if (!session) redirect("/login");
 
-  const orgCtx = await getOrgContext(session.userId);
+  await requireCompanyOrg();
+
+  const orgCtx = await getOrgContext(session.userId, session.activeOrgId);
   if (!orgCtx) redirect("/");
 
   const id = params.id;

@@ -11,6 +11,7 @@ interface Props {
   org: {
     id: string;
     name: string;
+    entityType: string;
     taxId: string;
     branchType: string;
     branchNumber: string;
@@ -28,6 +29,7 @@ interface Props {
 export function OrgSettingsForm({ org, isAdmin, sheetUrl, driveUrl }: Props) {
   const utils = trpc.useUtils();
   const updateMut = trpc.org.update.useMutation();
+  const isPersonal = org.entityType === "personal";
 
   const [form, setForm] = useState({
     name: org.name,
@@ -50,14 +52,18 @@ export function OrgSettingsForm({ org, isAdmin, sheetUrl, driveUrl }: Props) {
     setError(null);
     setSuccess(false);
     if (!form.name.trim()) {
-      setError("กรุณากรอกชื่อบริษัท");
+      setError(isPersonal ? "กรุณากรอกชื่อ-นามสกุล" : "กรุณากรอกชื่อบริษัท");
       return;
     }
     if (!/^\d{13}$/.test(form.taxId)) {
-      setError("เลขผู้เสียภาษีต้องเป็นตัวเลข 13 หลัก");
+      setError(
+        isPersonal
+          ? "เลขบัตรประชาชนต้องเป็นตัวเลข 13 หลัก"
+          : "เลขผู้เสียภาษีต้องเป็นตัวเลข 13 หลัก",
+      );
       return;
     }
-    if (form.branchType === "Branch" && !/^\d{5}$/.test(form.branchNumber)) {
+    if (!isPersonal && form.branchType === "Branch" && !/^\d{5}$/.test(form.branchNumber)) {
       setError("เลขสาขาต้องเป็นตัวเลข 5 หลัก");
       return;
     }
@@ -65,9 +71,9 @@ export function OrgSettingsForm({ org, isAdmin, sheetUrl, driveUrl }: Props) {
       await updateMut.mutateAsync({
         name: form.name.trim(),
         taxId: form.taxId.trim(),
-        branchType: form.branchType,
+        branchType: isPersonal ? "HQ" : form.branchType,
         branchNumber:
-          form.branchType === "HQ" ? "00000" : form.branchNumber,
+          isPersonal || form.branchType === "HQ" ? "00000" : form.branchNumber,
         address: form.address.trim(),
         phone: form.phone.trim() || undefined,
         logoUrl,
@@ -126,7 +132,9 @@ export function OrgSettingsForm({ org, isAdmin, sheetUrl, driveUrl }: Props) {
             )}
 
             <div className="app-form-group">
-              <label className="app-label app-label-required">ชื่อบริษัท</label>
+              <label className="app-label app-label-required">
+                {isPersonal ? "ชื่อ-นามสกุล" : "ชื่อบริษัท"}
+              </label>
               <input
                 type="text"
                 value={form.name}
@@ -139,7 +147,7 @@ export function OrgSettingsForm({ org, isAdmin, sheetUrl, driveUrl }: Props) {
 
             <div className="app-form-group">
               <label className="app-label app-label-required">
-                เลขประจำตัวผู้เสียภาษี
+                {isPersonal ? "เลขบัตรประชาชน" : "เลขประจำตัวผู้เสียภาษี"}
               </label>
               <input
                 type="text"
@@ -157,6 +165,7 @@ export function OrgSettingsForm({ org, isAdmin, sheetUrl, driveUrl }: Props) {
               />
             </div>
 
+            {!isPersonal && (
             <div className="app-form-group">
               <label className="app-label app-label-required">
                 ประเภทสำนักงาน
@@ -218,8 +227,9 @@ export function OrgSettingsForm({ org, isAdmin, sheetUrl, driveUrl }: Props) {
                 </label>
               </div>
             </div>
+            )}
 
-            {form.branchType === "Branch" && (
+            {!isPersonal && form.branchType === "Branch" && (
               <div className="app-form-group">
                 <label className="app-label app-label-required">
                   เลขสาขา (5 หลัก)
@@ -395,9 +405,11 @@ export function OrgSettingsForm({ org, isAdmin, sheetUrl, driveUrl }: Props) {
             <CompanyBanksSection isAdmin={isAdmin} />
           </div>
 
-          <div style={{ marginTop: "1rem" }}>
-            <BranchesSection isAdmin={isAdmin} />
-          </div>
+          {!isPersonal && (
+            <div style={{ marginTop: "1rem" }}>
+              <BranchesSection isAdmin={isAdmin} />
+            </div>
+          )}
 
           <div style={{ marginTop: "1rem" }}>
             <DocPrefixSection isAdmin={isAdmin} />

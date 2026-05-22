@@ -13,6 +13,7 @@ import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth/session";
 import { getOrgContext } from "@/lib/auth/middleware";
+import { requireCompanyOrg } from "@/lib/auth/require-plan";
 import { VatClient } from "./vat-client";
 
 export const metadata = {
@@ -24,7 +25,9 @@ export default async function VatPage() {
   if (!session) redirect("/login");
   if (session.onboardingStep !== "done") redirect("/");
 
-  const org = await getOrgContext(session.userId);
+  await requireCompanyOrg();
+
+  const org = await getOrgContext(session.userId, session.activeOrgId);
   if (!org) redirect("/");
 
   return (

@@ -71,6 +71,7 @@ model Organization {
   name                   String
   slug                   String           @unique
   ownerId                String           @map("owner_id")
+  entityType             String           @default("company") @map("entity_type")
   taxId                  String           @map("tax_id")
   address                String
   phone                  String?

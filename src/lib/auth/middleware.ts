@@ -16,6 +16,7 @@ import { DEFAULT_PERMISSIONS } from "@/lib/permissions";
 export interface OrgContext {
   orgId: string;
   orgName: string;
+  entityType: string; // "company" | "personal"
   role: string;
   permissions: Permissions;
   googleSpreadsheetId: string | null;
@@ -116,6 +117,7 @@ export const getOrgContext = cache(async function getOrgContextImpl(
   return {
     orgId: membership.orgId,
     orgName: membership.org.name,
+    entityType: membership.org.entityType,
     role: membership.role,
     permissions,
     googleSpreadsheetId: membership.org.googleSpreadsheetId,

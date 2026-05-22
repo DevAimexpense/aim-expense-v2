@@ -12,6 +12,7 @@ interface NavItem {
   icon: string;
   permission?: PermissionKey | PermissionKey[];
   adminOnly?: boolean; // แสดงเฉพาะ role=admin (สำหรับเมนู settings/billing/google)
+  companyOnly?: boolean; // ซ่อนสำหรับบุคคลธรรมดา (ใบกำกับภาษี, ภพ.30 — VAT/นิติบุคคลเท่านั้น)
 }
 
 interface NavGroup {
@@ -100,6 +101,7 @@ const NAV_GROUPS: NavGroup[] = [
         href: "/tax-invoices",
         icon: "🧮",
         permission: "manageTaxInvoices",
+        companyOnly: true,
       },
     ],
   },
@@ -140,12 +142,14 @@ const NAV_GROUPS: NavGroup[] = [
         href: "/reports/vat30",
         icon: "📈",
         permission: "viewReports",
+        companyOnly: true,
       },
       {
         label: "รายงานภาษีซื้อ (ภ.พ.30)",
         href: "/reports/vat",
         icon: "🛒",
         permission: "viewReports",
+        companyOnly: true,
       },
       {
         label: "รายงาน ภงด.3",
@@ -195,7 +199,7 @@ const NAV_GROUPS: NavGroup[] = [
         adminOnly: true,
       },
       {
-        label: "เปลี่ยนบริษัท",
+        label: "สลับพื้นที่ทำงาน",
         href: "/select-org",
         icon: "🔄",
       },
@@ -206,6 +210,7 @@ const NAV_GROUPS: NavGroup[] = [
 interface SidebarProps {
   permissions: Permissions | null;
   orgName?: string;
+  entityType?: string;
   userName?: string;
   userAvatar?: string;
   isAdmin?: boolean;
@@ -214,14 +219,18 @@ interface SidebarProps {
 export function Sidebar({
   permissions,
   orgName = "Aim Expense",
+  entityType = "company",
   userName = "",
   userAvatar,
   isAdmin = false,
 }: SidebarProps) {
   const pathname = usePathname();
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const isPersonal = entityType === "personal";
 
   function isVisible(item: NavItem): boolean {
+    // companyOnly: ซ่อนเมนู VAT/นิติบุคคลสำหรับบุคคลธรรมดา (ยังไม่จด VAT)
+    if (item.companyOnly && isPersonal) return false;
     // adminOnly: ซ่อนเมนูถ้าไม่ใช่ admin (settings องค์กร, billing, google)
     if (item.adminOnly && !isAdmin) return false;
     if (!item.permission) return true;
