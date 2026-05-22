@@ -4,7 +4,7 @@
 // ===========================================
 
 import { BillingsClient } from "./billings-client";
-import { requireFeature } from "@/lib/auth/require-plan";
+import { requireFeature, getActiveEntityType } from "@/lib/auth/require-plan";
 
 export const metadata = {
   title: "ใบวางบิล | Aim Expense",
@@ -13,6 +13,7 @@ export const metadata = {
 
 export default async function BillingsPage() {
   await requireFeature("revenueModule");
+  const entityType = await getActiveEntityType();
 
-  return <BillingsClient />;
+  return <BillingsClient entityType={entityType} />;
 }

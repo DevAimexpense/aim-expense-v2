@@ -84,6 +84,20 @@ export async function requireCompanyOrg(): Promise<void> {
 }
 
 /**
+ * Soft read of the active org's entityType ("company" | "personal").
+ * Defaults to "company" when there's no active org. Use to drive per-type UI.
+ */
+export async function getActiveEntityType(): Promise<"company" | "personal"> {
+  const session = await getSession();
+  if (!session?.activeOrgId) return "company";
+  const org = await prisma.organization.findUnique({
+    where: { id: session.activeOrgId },
+    select: { entityType: true },
+  });
+  return org?.entityType === "personal" ? "personal" : "company";
+}
+
+/**
  * Soft check — returns plan + flags without redirecting.
  * Use in components that want to show degraded UI rather than hard-redirect.
  */

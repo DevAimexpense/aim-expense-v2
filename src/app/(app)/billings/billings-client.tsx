@@ -48,12 +48,14 @@ function isOverdue(dueDate: string, status: Status, balance: number): boolean {
   return dueDate < new Date().toISOString().slice(0, 10);
 }
 
-export function BillingsClient() {
+export function BillingsClient({ entityType = "company" }: { entityType?: string }) {
+  const isPersonal = entityType === "personal";
   const [statusFilter, setStatusFilter] = useState<Status | "all">("all");
   const [customerFilter, setCustomerFilter] = useState<string>("all");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [showQuickIncome, setShowQuickIncome] = useState(false);
 
   const queryInput = statusFilter === "all" ? {} : { status: statusFilter };
   const listQuery = trpc.billing.list.useQuery({
@@ -129,14 +131,27 @@ export function BillingsClient() {
     <div className="app-page">
       <div className="app-page-header">
         <div>
-          <h1 className="app-page-title">🧾 ใบวางบิล</h1>
+          <h1 className="app-page-title">
+            {isPersonal ? "💰 รายรับ" : "🧾 ใบวางบิล"}
+          </h1>
           <p className="app-page-subtitle">
-            ออกใบวางบิล / ใบแจ้งหนี้ + บันทึกรับเงิน
+            {isPersonal
+              ? "บันทึกรายรับ + ใบหัก ณ ที่จ่าย (50ทวิ)"
+              : "ออกใบวางบิล / ใบแจ้งหนี้ + บันทึกรับเงิน"}
           </p>
         </div>
-        <Link href="/billings/new" className="app-btn app-btn-primary">
-          + สร้างใบวางบิล
-        </Link>
+        {isPersonal ? (
+          <button
+            onClick={() => setShowQuickIncome(true)}
+            className="app-btn app-btn-primary"
+          >
+            + บันทึกรายรับ
+          </button>
+        ) : (
+          <Link href="/billings/new" className="app-btn app-btn-primary">
+            + สร้างใบวางบิล
+          </Link>
+        )}
       </div>
 
       <div
@@ -232,14 +247,27 @@ export function BillingsClient() {
       ) : rows.length === 0 ? (
         <div className="app-card">
           <div className="app-empty">
-            <div className="app-empty-icon">🧾</div>
-            <p className="app-empty-title">ยังไม่มีใบวางบิล</p>
-            <p className="app-empty-desc">
-              สร้างใบใหม่หรือแปลงจากใบเสนอราคาที่ accepted แล้ว
+            <div className="app-empty-icon">{isPersonal ? "💰" : "🧾"}</div>
+            <p className="app-empty-title">
+              {isPersonal ? "ยังไม่มีรายรับ" : "ยังไม่มีใบวางบิล"}
             </p>
-            <Link href="/billings/new" className="app-btn app-btn-primary">
-              + สร้างใบแรก
-            </Link>
+            <p className="app-empty-desc">
+              {isPersonal
+                ? "เริ่มบันทึกรายรับพร้อมแนบใบหัก ณ ที่จ่าย (50ทวิ)"
+                : "สร้างใบใหม่หรือแปลงจากใบเสนอราคาที่ accepted แล้ว"}
+            </p>
+            {isPersonal ? (
+              <button
+                onClick={() => setShowQuickIncome(true)}
+                className="app-btn app-btn-primary"
+              >
+                + บันทึกรายรับ
+              </button>
+            ) : (
+              <Link href="/billings/new" className="app-btn app-btn-primary">
+                + สร้างใบแรก
+              </Link>
+            )}
           </div>
         </div>
       ) : (
@@ -259,7 +287,7 @@ export function BillingsClient() {
                 </th>
                 <th>เลขเอกสาร</th>
                 <th>วันที่</th>
-                <th>ลูกค้า</th>
+                <th>{isPersonal ? "ผู้จ่าย" : "ลูกค้า"}</th>
                 <th>โครงการ</th>
                 <th className="text-center">สถานะ</th>
                 <th className="text-right">ยอดรวม</th>
@@ -343,6 +371,251 @@ export function BillingsClient() {
           </table>
         </div>
       )}
+
+      {showQuickIncome && (
+        <QuickIncomeModal
+          onClose={() => setShowQuickIncome(false)}
+          onSuccess={() => {
+            setShowQuickIncome(false);
+            listQuery.refetch();
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function QuickIncomeModal({
+  onClose,
+  onSuccess,
+}: {
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const quickMut = trpc.billing.quickIncome.useMutation();
+  const [form, setForm] = useState({
+    payerName: "",
+    payerTaxId: "",
+    docDate: new Date().toISOString().slice(0, 10),
+    amount: "",
+    whtPercent: "0",
+    notes: "",
+  });
+  const [file, setFile] = useState<File | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const amountNum = parseFloat(form.amount) || 0;
+  const whtNum = parseFloat(form.whtPercent) || 0;
+  const whtAmount = Math.round(((amountNum * whtNum) / 100) * 100) / 100;
+  const net = Math.round((amountNum - whtAmount) * 100) / 100;
+
+  const fmt = (n: number) =>
+    n.toLocaleString("th-TH", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    if (!form.payerName.trim()) {
+      setError("กรุณากรอกชื่อผู้จ่าย");
+      return;
+    }
+    if (amountNum <= 0) {
+      setError("จำนวนเงินต้องมากกว่า 0");
+      return;
+    }
+    setBusy(true);
+    try {
+      const res = await quickMut.mutateAsync({
+        payerName: form.payerName.trim(),
+        payerTaxId: form.payerTaxId.trim() || undefined,
+        docDate: form.docDate,
+        amount: amountNum,
+        whtPercent: whtNum,
+        notes: form.notes.trim() || undefined,
+      });
+      // Attach the WHT cert (50ทวิ) if provided — best-effort, after the row exists.
+      if (file && res.billingId) {
+        const fd = new FormData();
+        fd.append("file", file);
+        fd.append("billingId", res.billingId);
+        const up = await fetch("/api/billings/upload", {
+          method: "POST",
+          body: fd,
+        });
+        if (!up.ok) {
+          const data = await up.json().catch(() => ({}));
+          setError(
+            `บันทึกรายรับแล้ว แต่แนบไฟล์ไม่สำเร็จ: ${data.error || "ลองใหม่ที่หน้ารายละเอียด"}`,
+          );
+          setBusy(false);
+          return;
+        }
+      }
+      onSuccess();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "เกิดข้อผิดพลาด");
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div
+      className="app-modal-backdrop"
+      onClick={(e) => e.target === e.currentTarget && !busy && onClose()}
+    >
+      <div className="app-modal modal-lg">
+        <form onSubmit={handleSubmit}>
+          <div className="app-modal-header">
+            <h3 className="app-modal-title">💰 บันทึกรายรับ</h3>
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={busy}
+              className="app-btn app-btn-ghost app-btn-icon"
+            >
+              ✕
+            </button>
+          </div>
+
+          <div className="app-modal-body">
+            {error && <div className="app-error-msg">{error}</div>}
+
+            <div className="app-form-grid cols-2">
+              <div className="app-form-group">
+                <label className="app-label app-label-required">ผู้จ่าย</label>
+                <input
+                  type="text"
+                  value={form.payerName}
+                  onChange={(e) => setForm({ ...form, payerName: e.target.value })}
+                  placeholder="ชื่อผู้จ่ายเงิน / บริษัทผู้ว่าจ้าง"
+                  className="app-input"
+                  maxLength={200}
+                />
+              </div>
+              <div className="app-form-group">
+                <label className="app-label">เลขผู้เสียภาษีผู้จ่าย</label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={form.payerTaxId}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      payerTaxId: e.target.value.replace(/\D/g, "").slice(0, 13),
+                    })
+                  }
+                  placeholder="(ไม่บังคับ)"
+                  className="app-input mono"
+                  maxLength={13}
+                />
+              </div>
+            </div>
+
+            <div className="app-form-grid cols-2">
+              <div className="app-form-group">
+                <label className="app-label app-label-required">วันที่รับเงิน</label>
+                <input
+                  type="date"
+                  value={form.docDate}
+                  onChange={(e) => setForm({ ...form, docDate: e.target.value })}
+                  className="app-input"
+                />
+              </div>
+              <div className="app-form-group">
+                <label className="app-label app-label-required">
+                  จำนวนเงิน (ก่อนหัก)
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={form.amount}
+                  onChange={(e) => setForm({ ...form, amount: e.target.value })}
+                  placeholder="0.00"
+                  className="app-input num"
+                />
+              </div>
+            </div>
+
+            <div className="app-form-group">
+              <label className="app-label">หัก ณ ที่จ่าย (%)</label>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                max="15"
+                value={form.whtPercent}
+                onChange={(e) => setForm({ ...form, whtPercent: e.target.value })}
+                className="app-input num"
+                style={{ maxWidth: "160px" }}
+              />
+            </div>
+
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                gap: "1rem",
+                padding: "0.75rem 1rem",
+                background: "#f8fafc",
+                borderRadius: "0.5rem",
+                fontSize: "0.875rem",
+                marginBottom: "0.75rem",
+              }}
+            >
+              <span>หัก ณ ที่จ่าย: ฿{fmt(whtAmount)}</span>
+              <span style={{ fontWeight: 700 }}>รับสุทธิ: ฿{fmt(net)}</span>
+            </div>
+
+            <div className="app-form-group">
+              <label className="app-label">รายละเอียด</label>
+              <input
+                type="text"
+                value={form.notes}
+                onChange={(e) => setForm({ ...form, notes: e.target.value })}
+                placeholder="เช่น ค่าออกแบบเว็บไซต์ เดือน พ.ค."
+                className="app-input"
+                maxLength={500}
+              />
+            </div>
+
+            <div className="app-form-group">
+              <label className="app-label">ใบหัก ณ ที่จ่าย (50ทวิ)</label>
+              <p className="app-hint">แนบไฟล์ภาพหรือ PDF ที่ผู้จ่ายออกให้ (ไม่บังคับ)</p>
+              <input
+                type="file"
+                accept="image/*,application/pdf"
+                onChange={(e) => setFile(e.target.files?.[0] || null)}
+                className="app-input"
+              />
+            </div>
+          </div>
+
+          <div className="app-modal-footer">
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={busy}
+              className="app-btn app-btn-secondary"
+            >
+              ยกเลิก
+            </button>
+            <button type="submit" disabled={busy} className="app-btn app-btn-primary">
+              {busy ? (
+                <>
+                  <span className="app-spinner" /> กำลังบันทึก...
+                </>
+              ) : (
+                "บันทึกรายรับ"
+              )}
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }

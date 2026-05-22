@@ -162,6 +162,7 @@ function shapeHeader(r: Record<string, string>) {
     createdAt: r.CreatedAt || "",
     updatedAt: r.UpdatedAt || "",
     pdfUrl: r.PdfUrl || "",
+    whtCertUrl: r.WHTCertUrl || "",
   };
 }
 
@@ -352,6 +353,132 @@ export const billingRouter = router({
           entityType: "billing",
           entityRef: billingId,
           summary: `สร้างใบวางบิล ${docNumber}`,
+        },
+      });
+
+      return { success: true, billingId, docNumber };
+    }),
+
+  /**
+   * Quick income entry (บันทึกรายรับ) — lightweight path for individuals
+   * (บุคคลธรรมดา) who just want to log money received + the WHT cert (50ทวิ)
+   * the payer issued, without building a full invoice. Reuses the Billings tab:
+   * - no formal Customer record (free-text payer name snapshot)
+   * - single synthetic line, no VAT (individuals aren't VAT-registered)
+   * - recorded as already-paid (income received), net of WHT
+   * WHTCertUrl is attached afterwards via /api/billings/upload.
+   */
+  quickIncome: permissionProcedure("manageBillings")
+    .input(
+      z.object({
+        payerName: z.string().trim().min(1, "กรุณากรอกชื่อผู้จ่าย").max(200),
+        payerTaxId: z.string().trim().max(20).optional(),
+        docDate: z.string().min(1),
+        amount: z.number().min(0.01, "จำนวนเงินต้องมากกว่า 0"),
+        whtPercent: z.number().min(0).max(15).default(0),
+        notes: z.string().max(500).optional(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const sheets = await getSheetsService(ctx.org.orgId);
+      await ensureTabsCached(sheets, ctx.org.orgId);
+
+      const billingId = GoogleSheetsService.generateId("BIL");
+      const year =
+        new Date(input.docDate).getFullYear() || new Date().getFullYear();
+      const docNumber = await computeNextDocNumber(
+        sheets,
+        "BIL",
+        year,
+        SHEET_TABS.BILLINGS
+      );
+
+      const lines = [
+        {
+          description: input.notes?.trim() || "รายรับ",
+          quantity: 1,
+          unitPrice: input.amount,
+          discountPercent: 0,
+        },
+      ];
+      const totals = computeBillingTotals(lines, false, 0, input.whtPercent);
+      const issuer = await resolveIssuerBranch(ctx.org.orgId, undefined);
+      const now = new Date().toISOString();
+
+      try {
+        await sheets.appendRowByHeaders(SHEET_TABS.BILLINGS, {
+          BillingID: billingId,
+          DocNumber: docNumber,
+          DocDate: input.docDate,
+          DueDate: input.docDate,
+          CustomerID: "",
+          CustomerNameSnapshot: input.payerName,
+          CustomerTaxIdSnapshot: input.payerTaxId || "",
+          CustomerAddressSnapshot: "",
+          IssuerBranchSnapshot: issuer.branchLabel,
+          IssuerAddressSnapshot: issuer.address,
+          SourceQuotationID: "",
+          EventID: "",
+          ProjectName: "",
+          Status: "paid",
+          Subtotal: totals.subtotal,
+          DiscountAmount: 0,
+          VATAmount: totals.vatAmount,
+          VATIncluded: "FALSE",
+          WHTPercent: input.whtPercent,
+          WHTAmount: totals.whtAmount,
+          GrandTotal: totals.grandTotal,
+          AmountReceivable: totals.amountReceivable,
+          PaidAmount: totals.amountReceivable,
+          PaidDate: input.docDate,
+          PaymentMethod: "",
+          BankAccountID: "",
+          Notes: input.notes || "",
+          Terms: "",
+          PreparedBy: ctx.session.displayName || "",
+          PreparedByUserId: ctx.session.userId,
+          CreatedAt: now,
+          UpdatedAt: now,
+          PdfUrl: "",
+          WHTCertUrl: "",
+        });
+
+        await sheets.appendRowByHeaders(SHEET_TABS.BILLING_LINES, {
+          LineID: GoogleSheetsService.generateId("BILL"),
+          BillingID: billingId,
+          LineNumber: 1,
+          Description: lines[0].description,
+          Quantity: 1,
+          UnitPrice: input.amount,
+          DiscountPercent: 0,
+          LineTotal: totals.lineTotals[0],
+          Notes: "",
+        });
+      } catch (e) {
+        try {
+          await sheets.deleteById(SHEET_TABS.BILLINGS, "BillingID", billingId);
+          const orphanLines = await sheets.getBillingLines(billingId);
+          for (const ol of orphanLines) {
+            await sheets.deleteById(
+              SHEET_TABS.BILLING_LINES,
+              "LineID",
+              ol.LineID
+            );
+          }
+        } catch {
+          /* ignore */
+        }
+        throw e;
+      }
+
+      await prisma.auditLog.create({
+        data: {
+          orgId: ctx.org.orgId,
+          userId: ctx.session.userId,
+          action: "create",
+          entityType: "billing",
+          entityRef: billingId,
+          summary: `บันทึกรายรับ ${docNumber} จาก ${input.payerName}`,
         },
       });
 

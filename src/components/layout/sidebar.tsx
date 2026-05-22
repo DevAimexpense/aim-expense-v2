@@ -13,11 +13,13 @@ interface NavItem {
   permission?: PermissionKey | PermissionKey[];
   adminOnly?: boolean; // แสดงเฉพาะ role=admin (สำหรับเมนู settings/billing/google)
   companyOnly?: boolean; // ซ่อนสำหรับบุคคลธรรมดา (ใบกำกับภาษี, ภพ.30 — VAT/นิติบุคคลเท่านั้น)
+  personalLabel?: string; // ชื่อเมนูทางเลือกเมื่อ org เป็นบุคคลธรรมดา
 }
 
 interface NavGroup {
   label: string;
   items: NavItem[];
+  personalLabel?: string; // ชื่อกลุ่มทางเลือกเมื่อ org เป็นบุคคลธรรมดา
 }
 
 const NAV_GROUPS: NavGroup[] = [
@@ -83,6 +85,7 @@ const NAV_GROUPS: NavGroup[] = [
   },
   {
     label: "รายได้",
+    personalLabel: "รายรับ",
     items: [
       {
         label: "ใบเสนอราคา",
@@ -95,6 +98,7 @@ const NAV_GROUPS: NavGroup[] = [
         href: "/billings",
         icon: "🧾",
         permission: "manageBillings",
+        personalLabel: "รายรับ",
       },
       {
         label: "ใบกำกับภาษี",
@@ -272,18 +276,24 @@ export function Sidebar({
       <nav className="sidebar-nav">
         {NAV_GROUPS.filter(isGroupVisible).map((group) => (
           <div key={group.label} className="sidebar-group">
-            {!isCollapsed && <p className="sidebar-group-label">{group.label}</p>}
+            {!isCollapsed && (
+              <p className="sidebar-group-label">
+                {isPersonal && group.personalLabel ? group.personalLabel : group.label}
+              </p>
+            )}
             {group.items.filter(isVisible).map((item) => {
               const isActive = pathname === item.href || pathname.startsWith(item.href + "/");
+              const label =
+                isPersonal && item.personalLabel ? item.personalLabel : item.label;
               return (
                 <Link
                   key={item.href + item.label}
                   href={item.href}
                   className={isActive ? "sidebar-link sidebar-link-active" : "sidebar-link"}
-                  title={isCollapsed ? item.label : undefined}
+                  title={isCollapsed ? label : undefined}
                 >
                   <span className="sidebar-link-icon">{item.icon}</span>
-                  {!isCollapsed && <span className="sidebar-link-label">{item.label}</span>}
+                  {!isCollapsed && <span className="sidebar-link-label">{label}</span>}
                 </Link>
               );
             })}

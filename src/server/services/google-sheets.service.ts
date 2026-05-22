@@ -233,6 +233,7 @@ export const SHEET_HEADERS: Record<string, string[]> = {
     "CreatedAt",
     "UpdatedAt",
     "PdfUrl",
+    "WHTCertUrl", // ใบหัก ณ ที่จ่าย (50ทวิ) ที่ผู้จ่ายออกให้ — ใช้ใน flow รายรับบุคคลธรรมดา
   ],
   [SHEET_TABS.BILLING_LINES]: [
     "LineID",
