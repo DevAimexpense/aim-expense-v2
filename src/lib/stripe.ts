@@ -9,15 +9,33 @@
 import Stripe from "stripe";
 import type { PlanTier } from "@/lib/plans";
 
-const secret = process.env.STRIPE_SECRET_KEY;
-if (!secret && process.env.NODE_ENV === "production") {
-  // Fail loud in prod; in dev/test we let it lazy-fail at first call
-  throw new Error("STRIPE_SECRET_KEY not set");
+// Lazy singleton — the Stripe client is created on FIRST USE, not at import.
+// This keeps `next build` (which imports every route module to collect page
+// data) from failing when STRIPE_SECRET_KEY isn't set (e.g. demo deploys
+// before Stripe go-live). The key is only required when checkout/webhook/
+// portal are actually called at runtime.
+let _stripe: Stripe | null = null;
+function getStripe(): Stripe {
+  if (_stripe) return _stripe;
+  const secret = process.env.STRIPE_SECRET_KEY;
+  if (!secret) {
+    throw new Error("STRIPE_SECRET_KEY not set");
+  }
+  _stripe = new Stripe(secret, {
+    apiVersion: "2026-03-25.dahlia",
+    appInfo: { name: "Aim Expense", version: "1.0.0" },
+  });
+  return _stripe;
 }
 
-export const stripe = new Stripe(secret || "sk_test_dummy", {
-  apiVersion: "2026-03-25.dahlia",
-  appInfo: { name: "Aim Expense", version: "1.0.0" },
+// Proxy so existing call sites (`stripe.checkout.sessions.create(...)`) work
+// unchanged while deferring instantiation to first property access.
+export const stripe = new Proxy({} as Stripe, {
+  get(_target, prop, receiver) {
+    const client = getStripe();
+    const value = Reflect.get(client as object, prop, receiver);
+    return typeof value === "function" ? value.bind(client) : value;
+  },
 });
 
 export type BillingInterval = "monthly" | "yearly";
