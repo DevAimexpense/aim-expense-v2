@@ -326,23 +326,30 @@ export default async function AccountBillingPage() {
         </div>
       </div>
 
-      {/* Beta notice */}
+      {/* Upgrade CTA — non-paid, non-enterprise */}
       {!isOnPaidPlan && plan !== "enterprise" && (
         <div
           className="app-card"
           style={{
             marginBottom: "1rem",
-            background: "var(--color-accent-50)",
-            border: "1px solid var(--color-accent-200)",
+            background: "linear-gradient(135deg, var(--color-brand-50), white)",
+            border: "1px solid var(--color-brand-200)",
           }}
         >
-          <div style={{ display: "flex", gap: "0.875rem", alignItems: "flex-start" }}>
+          <div
+            style={{
+              display: "flex",
+              gap: "0.875rem",
+              alignItems: "flex-start",
+              flexWrap: "wrap",
+            }}
+          >
             <div
               style={{
                 flexShrink: 0,
                 width: "44px",
                 height: "44px",
-                background: "var(--color-accent-100)",
+                background: "var(--color-brand-100)",
                 borderRadius: "0.625rem",
                 display: "flex",
                 alignItems: "center",
@@ -350,44 +357,38 @@ export default async function AccountBillingPage() {
                 fontSize: "1.25rem",
               }}
             >
-              🚧
+              🚀
             </div>
             <div style={{ minWidth: 0, flex: 1 }}>
               <h3
                 style={{
                   fontSize: "0.9375rem",
                   fontWeight: 700,
-                  color: "var(--color-accent-900)",
+                  color: "var(--color-brand-900)",
                   margin: 0,
                 }}
               >
-                ระบบเก็บเงินกำลังเปิดเร็ว ๆ นี้
+                {inTrial ? "ใช้ Pro ต่อเนื่องหลังหมด trial" : "อัปเกรดเป็น Pro"}
               </h3>
               <p
                 style={{
                   fontSize: "0.8125rem",
-                  color: "var(--color-accent-800)",
+                  color: "var(--color-brand-800)",
                   marginTop: "0.375rem",
                   lineHeight: 1.6,
                 }}
               >
-                ตอนนี้อยู่ระหว่าง <strong>Closed Beta</strong> —
-                ผู้ใช้ทุกคนได้ Pro features ฟรีระหว่าง trial 30 วัน
-                เมื่อระบบเก็บเงินพร้อมจะส่ง email แจ้ง + แสดงปุ่มอัปเกรดที่นี่
+                {inTrial
+                  ? "อัปเกรดตอนนี้เพื่อใช้ OCR, ใบเสนอราคา/ใบกำกับภาษี และฟีเจอร์ Pro ได้ต่อเนื่องไม่สะดุดเมื่อ trial หมด"
+                  : "ปลดล็อก OCR เพิ่ม เอกสารขาย รายงานภาษี และฟีเจอร์ Pro ทั้งหมด"}
               </p>
-              <a
-                href="mailto:support@aimexpense.com"
-                style={{
-                  display: "inline-block",
-                  marginTop: "0.5rem",
-                  fontSize: "0.8125rem",
-                  fontWeight: 600,
-                  color: "var(--color-accent-900)",
-                  textDecoration: "underline",
-                }}
+              <Link
+                href="/pricing"
+                className="app-btn app-btn-primary"
+                style={{ marginTop: "0.625rem" }}
               >
-                ติดต่อ support@aimexpense.com →
-              </a>
+                ดูแพ็คเกจ &amp; อัปเกรด
+              </Link>
             </div>
           </div>
         </div>
