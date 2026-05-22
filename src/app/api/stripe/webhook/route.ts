@@ -160,7 +160,7 @@ async function updateSubscriptionRow(orgId: string, s: Stripe.Subscription) {
       trialEndsAt: null,
       // Cache quotas for fast read
       maxMembers: limits.users === -1 ? 9999 : limits.users,
-      maxEvents: limits.businesses === -1 ? 9999 : limits.businesses,
+      maxEvents: limits.events === -1 ? 9999 : limits.events,
       scanCredits: limits.ocrPerMonth === -1 ? 999999 : limits.ocrPerMonth,
     },
   });
@@ -194,7 +194,7 @@ async function handleSubscriptionDeleted(s: Stripe.Subscription) {
       currentPeriodEnd: null,
       cancelAtPeriodEnd: false,
       maxMembers: freeLimits.users,
-      maxEvents: freeLimits.businesses,
+      maxEvents: freeLimits.events,
       scanCredits: freeLimits.ocrPerMonth,
     },
   });

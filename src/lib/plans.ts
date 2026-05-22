@@ -64,6 +64,8 @@ export interface PlanLimits {
   users: number;
   /** Max orgs/businesses per account. */
   businesses: number;
+  /** Max active projects/events (cached to Subscription.maxEvents). -1 = unlimited. */
+  events: number;
   /** OCR scans per calendar month. */
   ocrPerMonth: number;
   /** LINE group bots that can be wired. */
@@ -71,12 +73,12 @@ export interface PlanLimits {
 }
 
 export const PLAN_LIMITS: Record<PlanTier, PlanLimits> = {
-  free: { users: 1, businesses: 1, ocrPerMonth: 5, lineGroups: 0 },
-  basic: { users: 2, businesses: 1, ocrPerMonth: 100, lineGroups: 1 },
-  pro: { users: 5, businesses: 2, ocrPerMonth: 300, lineGroups: 2 },
-  business: { users: 10, businesses: 3, ocrPerMonth: 600, lineGroups: 3 },
-  max: { users: 20, businesses: 5, ocrPerMonth: 1500, lineGroups: 5 },
-  enterprise: { users: -1, businesses: -1, ocrPerMonth: -1, lineGroups: -1 },
+  free: { users: 1, businesses: 1, events: 3, ocrPerMonth: 5, lineGroups: 0 },
+  basic: { users: 2, businesses: 1, events: 10, ocrPerMonth: 100, lineGroups: 1 },
+  pro: { users: 5, businesses: 2, events: 50, ocrPerMonth: 300, lineGroups: 2 },
+  business: { users: 10, businesses: 3, events: 200, ocrPerMonth: 600, lineGroups: 3 },
+  max: { users: 20, businesses: 5, events: -1, ocrPerMonth: 1500, lineGroups: 5 },
+  enterprise: { users: -1, businesses: -1, events: -1, ocrPerMonth: -1, lineGroups: -1 },
 };
 
 /** Trial gets the same limits as `pro` for the 30-day window. */
