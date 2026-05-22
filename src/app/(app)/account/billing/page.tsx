@@ -17,6 +17,7 @@ import {
   type SubscriptionState,
 } from "@/lib/plans";
 import { getUsage } from "@/server/lib/usage";
+import { BILLING_ENABLED } from "@/lib/billing-flag";
 import { COMPANY_NAME } from "@/lib/legal/version";
 import { CustomerPortalButton } from "./portal-button";
 
@@ -326,8 +327,62 @@ export default async function AccountBillingPage() {
         </div>
       </div>
 
-      {/* Upgrade CTA — non-paid, non-enterprise */}
-      {!isOnPaidPlan && plan !== "enterprise" && (
+      {/* Demo / trial-only notice — billing not live yet */}
+      {!isOnPaidPlan && plan !== "enterprise" && !BILLING_ENABLED && (
+        <div
+          className="app-card"
+          style={{
+            marginBottom: "1rem",
+            background: "var(--color-accent-50)",
+            border: "1px solid var(--color-accent-200)",
+          }}
+        >
+          <div style={{ display: "flex", gap: "0.875rem", alignItems: "flex-start" }}>
+            <div
+              style={{
+                flexShrink: 0,
+                width: "44px",
+                height: "44px",
+                background: "var(--color-accent-100)",
+                borderRadius: "0.625rem",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: "1.25rem",
+              }}
+            >
+              🎁
+            </div>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <h3
+                style={{
+                  fontSize: "0.9375rem",
+                  fontWeight: 700,
+                  color: "var(--color-accent-900)",
+                  margin: 0,
+                }}
+              >
+                ช่วงเปิดตัว — ทดลองใช้ Pro ฟรี
+              </h3>
+              <p
+                style={{
+                  fontSize: "0.8125rem",
+                  color: "var(--color-accent-800)",
+                  marginTop: "0.375rem",
+                  lineHeight: 1.6,
+                }}
+              >
+                ตอนนี้ทุกบัญชีได้ใช้ Pro features ฟรีระหว่าง trial 30 วัน —
+                ระบบเก็บเงินจะเปิดให้บริการเร็ว ๆ นี้ เราจะแจ้งเตือนผ่าน LINE
+                ก่อน trial หมด
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Upgrade CTA — non-paid, non-enterprise (live billing only) */}
+      {!isOnPaidPlan && plan !== "enterprise" && BILLING_ENABLED && (
         <div
           className="app-card"
           style={{

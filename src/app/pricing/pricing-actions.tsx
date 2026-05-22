@@ -8,6 +8,7 @@
 
 import { useEffect, useState } from "react";
 import type { PlanTier } from "@/lib/plans";
+import { BILLING_ENABLED } from "@/lib/billing-flag";
 
 type Interval = "monthly" | "yearly";
 
@@ -196,6 +197,22 @@ export function StartFreeButton() {
 }
 
 /**
+ * Demo-mode CTA for paid tiers (when billing isn't live) — everyone gets a
+ * free Pro trial, so paid tiers just start the trial via /login.
+ */
+export function TrialCtaButton({ highlight }: { highlight?: boolean }) {
+  return (
+    <a
+      href="/login"
+      className={`app-btn ${highlight ? "app-btn-primary" : "app-btn-secondary"}`}
+      style={{ width: "100%", fontWeight: 700 }}
+    >
+      เริ่มทดลองฟรี 30 วัน
+    </a>
+  );
+}
+
+/**
  * Show & let user toggle interval. Renders prices that update in sync.
  */
 export function PricingCardsClient({ prices }: { prices: PriceMap }) {
@@ -245,6 +262,25 @@ export function PricingCardsClient({ prices }: { prices: PriceMap }) {
       >
         <IntervalToggle interval={interval} setInterval={setIntervalState} />
       </div>
+
+      {!BILLING_ENABLED && (
+        <div
+          style={{
+            margin: "0 auto 1.5rem auto",
+            maxWidth: "640px",
+            background: "var(--color-accent-50)",
+            border: "1px solid var(--color-accent-200)",
+            borderRadius: "0.75rem",
+            padding: "0.75rem 1rem",
+            fontSize: "0.875rem",
+            color: "var(--color-accent-900)",
+            textAlign: "center",
+          }}
+        >
+          🎁 ช่วงเปิดตัว — ทดลองใช้ <strong>Pro ฟรี 30 วัน</strong> ทุกแพ็คเกจ
+          ไม่ต้องใช้บัตร · ระบบเก็บเงินเปิดให้บริการเร็ว ๆ นี้
+        </div>
+      )}
 
       {refCode && (
         <div
@@ -403,7 +439,7 @@ export function PricingCardsClient({ prices }: { prices: PriceMap }) {
                   <StartFreeButton />
                 ) : t.tier === "enterprise" ? (
                   <ContactSalesButton />
-                ) : (
+                ) : BILLING_ENABLED ? (
                   <TierUpgradeButton
                     tier={t.tier}
                     interval={interval}
@@ -412,6 +448,8 @@ export function PricingCardsClient({ prices }: { prices: PriceMap }) {
                       t.highlight ? `เลือก ${t.label} ⭐` : `เลือก ${t.label}`
                     }
                   />
+                ) : (
+                  <TrialCtaButton highlight={t.highlight} />
                 )}
               </div>
             </div>
