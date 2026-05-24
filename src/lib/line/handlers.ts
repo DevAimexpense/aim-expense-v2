@@ -15,7 +15,11 @@ import {
 } from "@/lib/line/messaging";
 import { parseReceipt, type OcrParsedReceipt } from "@/lib/ocr";
 import { findBestMatch, similarity } from "@/lib/ocr/text-similarity";
-import { resolveLineContext, resolveGroupContext } from "@/lib/line/user-org";
+import {
+  resolveLineContext,
+  resolveGroupContext,
+  getUserActiveOrgs,
+} from "@/lib/line/user-org";
 import { ensureLineDefaults } from "@/lib/line/defaults";
 import {
   buildOcrConfirmFlex,
@@ -355,6 +359,124 @@ async function applyBuyerAutoCorrect(
   );
 }
 
+type LineUserLike = {
+  id: string;
+  email?: string | null;
+  lineUserId?: string | null;
+  lineDisplayName?: string | null;
+};
+
+/** Build the human-readable summary shown before the picker (OCR or text entry). */
+function buildSummaryFromOcr(ocr: OcrParsedReceipt): string {
+  const total = ocr.totalAmount ?? ocr.subtotal ?? 0;
+  const fmtTotal = total.toLocaleString("th-TH", { minimumFractionDigits: 2 });
+  const docDate = ocr.documentDate || "";
+  if (ocr.provider === "manual") {
+    return [`บันทึกรายการ`, ``, ocr.rawText || "", `฿${fmtTotal}`, docDate ? `วันที่: ${docDate}` : ""]
+      .filter(Boolean)
+      .join("\n");
+  }
+  const vendor = ocr.vendorName || "ไม่ระบุ";
+  const docNo = ocr.invoiceNumber || "";
+  const docTypeLabel =
+    ocr.documentType === "tax_invoice" ? "ใบกำกับภาษี"
+    : ocr.documentType === "receipt" ? "ใบเสร็จรับเงิน"
+    : ocr.documentType === "invoice" ? "ใบแจ้งหนี้"
+    : ocr.documentType === "quotation" ? "ใบเสนอราคา"
+    : "เอกสาร";
+  return [
+    `อ่านเสร็จแล้ว`,
+    ``,
+    vendor,
+    `฿${fmtTotal}`,
+    docNo ? `${docTypeLabel}: ${docNo}` : docTypeLabel,
+    docDate ? `วันที่: ${docDate}` : "",
+    ocr.vendorTaxId ? `Tax ID: ${ocr.vendorTaxId}` : "",
+    ocr.buyerName ? `ผู้ซื้อ: ${ocr.buyerName}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+/** Quick-reply message asking which company to book the expense into (multi-org users). */
+function buildOrgPickerMessage(
+  draftId: string,
+  orgs: { orgId: string; orgName: string }[],
+  summaryText: string,
+): LineMessage {
+  return {
+    type: "text",
+    text: summaryText + "\n\nบันทึกเข้าบริษัทไหน?",
+    quickReply: {
+      items: orgs.slice(0, 13).map((o) => ({
+        type: "action",
+        action: {
+          type: "postback",
+          label: o.orgName.slice(0, 20),
+          data: `action=select_org&id=${draftId}&orgId=${o.orgId}`,
+          displayText: `บันทึกเข้า ${o.orgName}`,
+        },
+      })),
+    },
+  };
+}
+
+/**
+ * Push the project picker (or auto-default + confirm card if the user has no
+ * assigned active projects) for a given org. Shared by media/text entry + the
+ * post-company-selection step.
+ */
+async function pushProjectPicker(
+  pushTarget: string,
+  draftId: string,
+  org: { orgId: string; orgName: string },
+  user: LineUserLike,
+  ocr: OcrParsedReceipt,
+  summaryText: string,
+): Promise<void> {
+  const sheets = await getSheetsService(org.orgId);
+  const [events, assignedEventIds] = await Promise.all([
+    sheets.getEvents(),
+    sheets.getEventIdsAssignedToUser(user),
+  ]);
+  const assignedSet = new Set(assignedEventIds.map((id) => id.trim()));
+  const activeAssignedEvents = events
+    .filter(
+      (e) =>
+        (e.Status || "").trim().toLowerCase() === "active" &&
+        assignedSet.has((e.EventID || "").trim()),
+    )
+    .slice(0, 12);
+
+  if (activeAssignedEvents.length === 0) {
+    const defaults = await ensureLineDefaults(sheets);
+    await prisma.lineDraft.update({
+      where: { id: draftId },
+      data: { eventId: defaults.eventId, eventName: "LINE (ไม่ระบุโปรเจกต์)" } as Record<string, unknown>,
+    });
+    await pushMessage(pushTarget, [
+      { type: "text", text: summaryText },
+      buildOcrConfirmFlex({ id: draftId }, ocr, {
+        orgName: org.orgName,
+        projectName: "LINE (ไม่ระบุโปรเจกต์)",
+        appBaseUrl: APP_BASE_URL,
+      }),
+    ]);
+    return;
+  }
+
+  await pushMessage(pushTarget, [
+    { type: "text", text: summaryText + "\n\nกรุณาเลือกโปรเจกต์:" },
+    buildProjectPickerCarousel(
+      draftId,
+      activeAssignedEvents.map((ev) => ({
+        eventId: ev.EventID,
+        eventName: ev.EventName || "ไม่ระบุ",
+      })),
+    ),
+  ]);
+}
+
 async function processMediaAsync(
   lineUserId: string,
   messageId: string,
@@ -419,85 +541,22 @@ async function processMediaAsync(
     return;
   }
 
-  // Fetch projects + filter to ones the user is assigned to.
-  // Carousel shows max 12 bubbles per LINE spec.
-  // Pass full user object so getEventIdsAssignedToUser can match against any
-  // identifier the org might have entered in the sheet (id/email/lineUserId/displayName).
-  const [events, assignedEventIds] = await Promise.all([
-    sheets.getEvents(),
-    sheets.getEventIdsAssignedToUser(ctx.user),
-  ]);
-  // Trim both sides of the EventID match — sheet entries often have trailing
-  // whitespace from copy-paste that breaks Set membership.
-  const assignedSet = new Set(assignedEventIds.map((id) => id.trim()));
-
-  const activeAssignedEvents = events
-    .filter(
-      (e) =>
-        (e.Status || "").trim().toLowerCase() === "active" &&
-        assignedSet.has((e.EventID || "").trim()),
-    )
-    .slice(0, 12);
-
-  console.log(
-    `[LINE] Project picker: ${activeAssignedEvents.length} assigned-active` +
-      ` (of ${events.length} events, ${assignedEventIds.length} assignments)` +
-      ` — statuses: ${[...new Set(events.map((e) => JSON.stringify(e.Status || "")))].join(", ")}`,
-  );
-
-  // Build summary text (sent BEFORE the carousel so the user sees what was read)
-  const vendor = ocr.vendorName || "ไม่ระบุ";
-  const total = ocr.totalAmount ?? ocr.subtotal ?? 0;
-  const fmtTotal = total.toLocaleString("th-TH", { minimumFractionDigits: 2 });
-  const docNo = ocr.invoiceNumber || "";
-  const docDate = ocr.documentDate || "";
-  const docTypeLabel = ocr.documentType === "tax_invoice" ? "ใบกำกับภาษี"
-    : ocr.documentType === "receipt" ? "ใบเสร็จรับเงิน"
-    : ocr.documentType === "invoice" ? "ใบแจ้งหนี้"
-    : ocr.documentType === "quotation" ? "ใบเสนอราคา"
-    : "เอกสาร";
-
-  const summaryLines = [
-    `อ่านเสร็จแล้ว`,
-    ``,
-    `${vendor}`,
-    `฿${fmtTotal}`,
-    docNo ? `${docTypeLabel}: ${docNo}` : docTypeLabel,
-    docDate ? `วันที่: ${docDate}` : "",
-    ocr.vendorTaxId ? `Tax ID: ${ocr.vendorTaxId}` : "",
-    ocr.buyerName ? `ผู้ซื้อ: ${ocr.buyerName}` : "",
-  ].filter(Boolean).join("\n");
-
-  // No assigned-active projects → fallback to default + confirm flex
-  if (activeAssignedEvents.length === 0) {
-    const defaults = await ensureLineDefaults(sheets);
-    await prisma.lineDraft.update({
-      where: { id: draft.id },
-      data: { eventId: defaults.eventId, eventName: "LINE (ไม่ระบุโปรเจกต์)" } as Record<string, unknown>,
-    });
-    await pushMessage(lineUserId, [
-      { type: "text", text: summaryLines },
-      buildOcrConfirmFlex(draft, ocr, {
-        orgName: ctx.orgName,
-        projectName: "LINE (ไม่ระบุโปรเจกต์)",
-        appBaseUrl: APP_BASE_URL,
-      }),
-    ]);
+  // Multi-org: ask which company to book into first (choice remembered as the
+  // default). Single org → straight to the project picker (unchanged behaviour).
+  const summaryText = buildSummaryFromOcr(ocr);
+  const orgs = await getUserActiveOrgs(ctx.user.id);
+  if (orgs.length > 1) {
+    await pushMessage(lineUserId, [buildOrgPickerMessage(draft.id, orgs, summaryText)]);
     return;
   }
-
-  // Show summary text first, then the carousel — NO Quick Reply (removes the
-  // shortcut bar that confused users).
-  await pushMessage(lineUserId, [
-    { type: "text", text: summaryLines + "\n\nกรุณาเลือกโปรเจกต์:" },
-    buildProjectPickerCarousel(
-      draft.id,
-      activeAssignedEvents.map((ev) => ({
-        eventId: ev.EventID,
-        eventName: ev.EventName || "ไม่ระบุ",
-      })),
-    ),
-  ]);
+  await pushProjectPicker(
+    lineUserId,
+    draft.id,
+    { orgId: ctx.orgId, orgName: ctx.orgName },
+    ctx.user,
+    ocr,
+    summaryText,
+  );
 }
 
 // =====================================================
@@ -582,62 +641,21 @@ async function processTextExpenseAsync(
     return;
   }
 
-  // Same picker logic as processMediaAsync.
-  const sheets = await getSheetsService(ctx.orgId);
-  const [events, assignedEventIds] = await Promise.all([
-    sheets.getEvents(),
-    sheets.getEventIdsAssignedToUser(ctx.user),
-  ]);
-  const assignedSet = new Set(assignedEventIds.map((id) => id.trim()));
-  const activeAssignedEvents = events
-    .filter(
-      (e) =>
-        (e.Status || "").trim().toLowerCase() === "active" &&
-        assignedSet.has((e.EventID || "").trim()),
-    )
-    .slice(0, 12);
-
-  console.log(
-    `[LINE] (text) Project picker: ${activeAssignedEvents.length} assigned-active` +
-      ` (of ${events.length} events, ${assignedEventIds.length} assignments)`,
-  );
-
-  const fmtTotal = parsed.amount.toLocaleString("th-TH", { minimumFractionDigits: 2 });
-  const summaryLines = [
-    `บันทึกรายการ`,
-    ``,
-    `${parsed.description}`,
-    `฿${fmtTotal}`,
-    `วันที่: ${today}`,
-  ].join("\n");
-
-  if (activeAssignedEvents.length === 0) {
-    const defaults = await ensureLineDefaults(sheets);
-    await prisma.lineDraft.update({
-      where: { id: draft.id },
-      data: { eventId: defaults.eventId, eventName: "LINE (ไม่ระบุโปรเจกต์)" } as Record<string, unknown>,
-    });
-    await pushMessage(lineUserId, [
-      { type: "text", text: summaryLines },
-      buildOcrConfirmFlex(draft, ocr, {
-        orgName: ctx.orgName,
-        projectName: "LINE (ไม่ระบุโปรเจกต์)",
-        appBaseUrl: APP_BASE_URL,
-      }),
-    ]);
+  // Multi-org: ask which company first; single org → project picker.
+  const summaryText = buildSummaryFromOcr(ocr);
+  const orgs = await getUserActiveOrgs(ctx.user.id);
+  if (orgs.length > 1) {
+    await pushMessage(lineUserId, [buildOrgPickerMessage(draft.id, orgs, summaryText)]);
     return;
   }
-
-  await pushMessage(lineUserId, [
-    { type: "text", text: summaryLines + "\n\nกรุณาเลือกโปรเจกต์:" },
-    buildProjectPickerCarousel(
-      draft.id,
-      activeAssignedEvents.map((ev) => ({
-        eventId: ev.EventID,
-        eventName: ev.EventName || "ไม่ระบุ",
-      })),
-    ),
-  ]);
+  await pushProjectPicker(
+    lineUserId,
+    draft.id,
+    { orgId: ctx.orgId, orgName: ctx.orgName },
+    ctx.user,
+    ocr,
+    summaryText,
+  );
 }
 
 // =====================================================
@@ -665,6 +683,46 @@ export async function handlePostback(event: LineWebhookEvent): Promise<void> {
   if (draft.expiresAt < new Date()) {
     await prisma.lineDraft.update({ where: { id: draftId }, data: { status: "expired" } });
     await replyMessage(event.replyToken, [text("รายการหมดอายุแล้ว กรุณาส่งรูปใหม่")]);
+    return;
+  }
+
+  // --- SELECT COMPANY (multi-org users) → then show project picker ---
+  if (action === "select_org") {
+    const orgId = params.get("orgId") || "";
+    const member = await prisma.orgMember.findFirst({
+      where: { userId: draft.userId, orgId, status: "active" },
+      include: { org: { select: { name: true } } },
+    });
+    if (!member) {
+      await replyMessage(event.replyToken, [
+        text("ไม่พบบริษัท หรือคุณไม่ได้เป็นสมาชิก"),
+      ]);
+      return;
+    }
+    // Point the draft at the chosen org + remember it as the user's default.
+    await prisma.lineDraft.update({ where: { id: draftId }, data: { orgId } });
+    await prisma.user.update({
+      where: { id: draft.userId },
+      data: { activeOrgId: orgId },
+    });
+
+    const user = await prisma.user.findUnique({
+      where: { id: draft.userId },
+      select: { id: true, email: true, lineUserId: true, lineDisplayName: true },
+    });
+    const ocrSel = draft.ocrJson as unknown as OcrParsedReceipt;
+    const summaryText = buildSummaryFromOcr(ocrSel);
+    await replyMessage(event.replyToken, [text(`บันทึกเข้า: ${member.org.name}`)]);
+    if (user) {
+      await pushProjectPicker(
+        event.source.userId!,
+        draftId,
+        { orgId, orgName: member.org.name },
+        user,
+        ocrSel,
+        summaryText,
+      );
+    }
     return;
   }
 

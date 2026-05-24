@@ -64,6 +64,21 @@ export async function resolveLineContext(
 }
 
 /**
+ * All active orgs a user belongs to (for the LINE company picker when the user
+ * has more than one). Ordered oldest-first for stable display.
+ */
+export async function getUserActiveOrgs(
+  userId: string
+): Promise<{ orgId: string; orgName: string }[]> {
+  const members = await prisma.orgMember.findMany({
+    where: { userId, status: "active" },
+    orderBy: { createdAt: "asc" },
+    include: { org: { select: { id: true, name: true } } },
+  });
+  return members.map((m) => ({ orgId: m.org.id, orgName: m.org.name }));
+}
+
+/**
  * Resolve a LINE group → its bound Organization + the admin who bound it.
  * Group submissions are attributed to that admin (`boundBy`) since group
  * members may not have their own Aim Expense account.
