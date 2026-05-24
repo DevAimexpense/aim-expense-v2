@@ -202,13 +202,14 @@ export async function POST(req: NextRequest) {
         },
       });
 
-      // Mark user's onboarding as done + record consent
+      // Mark user's onboarding as done + record consent + set active org
       await tx.user.update({
         where: { id: session.userId },
         data: {
           onboardingStep: "done",
           acceptedTermsAt: new Date(),
           acceptedTermsVersion: LEGAL_VERSION,
+          activeOrgId: newOrg.id,
         },
       });
 

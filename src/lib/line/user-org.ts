@@ -32,17 +32,28 @@ export async function resolveLineContext(
       lineUserId: true,
       lineDisplayName: true,
       onboardingStep: true,
+      activeOrgId: true,
     },
   });
   if (!user) return null;
 
-  // Pick latest joined OrgMember as "active org"
-  // (matches initial onboarding behavior — JWT activeOrgId only set on web login)
-  const member = await prisma.orgMember.findFirst({
-    where: { userId: user.id },
-    orderBy: { createdAt: "desc" },
-    include: { org: { select: { id: true, name: true } } },
-  });
+  // Prefer the org the user last activated on web (persisted to DB so the LINE
+  // webhook can follow the web's active company). Only if they're still an
+  // active member of it — otherwise fall back to their latest joined org.
+  let member = user.activeOrgId
+    ? await prisma.orgMember.findFirst({
+        where: { userId: user.id, orgId: user.activeOrgId, status: "active" },
+        include: { org: { select: { id: true, name: true } } },
+      })
+    : null;
+
+  if (!member) {
+    member = await prisma.orgMember.findFirst({
+      where: { userId: user.id, status: "active" },
+      orderBy: { createdAt: "desc" },
+      include: { org: { select: { id: true, name: true } } },
+    });
+  }
   if (!member) return null;
 
   return {

@@ -131,6 +131,13 @@ export const orgRouter = router({
         activeOrgId: input.orgId,
       });
 
+      // Persist to DB too so the LINE webhook (no session cookie) saves to the
+      // same active company the user picked on web.
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { activeOrgId: input.orgId },
+      });
+
       return { success: true, orgId: input.orgId };
     }),
 
@@ -325,6 +332,12 @@ export const orgRouter = router({
             maxEvents: 20,
             scanCredits: 300,
           },
+        });
+
+        // Make the new org the user's active org (web + LINE).
+        await tx.user.update({
+          where: { id: userId },
+          data: { activeOrgId: newOrg.id },
         });
 
         // Audit log
@@ -523,6 +536,10 @@ export const orgRouter = router({
             avatarUrl: user.avatarUrl,
             onboardingStep: user.onboardingStep,
             activeOrgId: nextOrgId,
+          });
+          await prisma.user.update({
+            where: { id: user.id },
+            data: { activeOrgId: nextOrgId },
           });
         }
       }

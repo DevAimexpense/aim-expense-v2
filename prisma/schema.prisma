@@ -18,6 +18,9 @@ model User {
   fullName             String?           @map("full_name")
   avatarUrl            String?           @map("avatar_url")
   onboardingStep       String            @default("line_login") @map("onboarding_step")
+  // The org the user last activated on web — mirrors the JWT activeOrgId so the
+  // LINE webhook (which has no session cookie) can save to the right company.
+  activeOrgId          String?           @map("active_org_id")
   createdAt            DateTime          @default(now()) @map("created_at")
   updatedAt            DateTime          @updatedAt @map("updated_at")
   acceptedTermsAt      DateTime?         @map("accepted_terms_at")
