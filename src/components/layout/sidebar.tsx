@@ -203,6 +203,12 @@ const NAV_GROUPS: NavGroup[] = [
         adminOnly: true,
       },
       {
+        label: "LINE กลุ่ม",
+        href: "/line-groups",
+        icon: "💬",
+        adminOnly: true,
+      },
+      {
         label: "สลับพื้นที่ทำงาน",
         href: "/select-org",
         icon: "🔄",

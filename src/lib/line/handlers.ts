@@ -15,7 +15,7 @@ import {
 } from "@/lib/line/messaging";
 import { parseReceipt, type OcrParsedReceipt } from "@/lib/ocr";
 import { findBestMatch, similarity } from "@/lib/ocr/text-similarity";
-import { resolveLineContext } from "@/lib/line/user-org";
+import { resolveLineContext, resolveGroupContext } from "@/lib/line/user-org";
 import { ensureLineDefaults } from "@/lib/line/defaults";
 import {
   buildOcrConfirmFlex,
@@ -41,7 +41,7 @@ const DRAFT_TTL_HOURS = 24;
 export interface LineWebhookEvent {
   type: string;
   replyToken?: string;
-  source: { userId?: string; type: string };
+  source: { userId?: string; type: string; groupId?: string; roomId?: string };
   message?: {
     id: string;
     type: string;
@@ -89,12 +89,82 @@ export async function handleFollow(event: LineWebhookEvent): Promise<void> {
 }
 
 // =====================================================
+// JOIN — OA ถูกเชิญเข้ากลุ่ม → ส่งลิงก์ผูกกลุ่มกับองค์กร
+// =====================================================
+export async function handleJoin(event: LineWebhookEvent): Promise<void> {
+  if (!event.replyToken) return;
+  const groupId = event.source.groupId || event.source.roomId;
+  if (!groupId) return;
+
+  // Already bound? — greet accordingly.
+  const existing = await prisma.lineGroup.findUnique({
+    where: { groupId },
+    select: { orgId: true, org: { select: { name: true } } },
+  });
+  if (existing) {
+    await replyMessage(event.replyToken, [
+      text(
+        `กลุ่มนี้เชื่อมกับ "${existing.org.name}" แล้วค่ะ\n` +
+          `ส่งรูปใบเสร็จ/พิมพ์รายการในกลุ่มได้เลย ระบบจะบันทึกเข้าบริษัทนี้`,
+      ),
+    ]);
+    return;
+  }
+
+  const bindUrl = `${APP_BASE_URL}/line-groups/bind?g=${encodeURIComponent(groupId)}`;
+  await replyMessage(event.replyToken, [
+    text(
+      "สวัสดีค่ะ 👋 ขอบคุณที่เชิญ Aim Expense เข้ากลุ่ม\n\n" +
+        "ผู้ดูแล (Admin) กรุณาเปิดลิงก์เพื่อเลือกบริษัทที่จะเชื่อมกับกลุ่มนี้:\n" +
+        bindUrl +
+        "\n\nหลังเชื่อมแล้ว สมาชิกในกลุ่มส่งรูปใบเสร็จ/พิมพ์รายการได้เลย ระบบจะบันทึกเข้าบริษัทที่เลือก",
+    ),
+  ]);
+}
+
+// =====================================================
+// LEAVE — OA ถูกนำออกจากกลุ่ม → ยกเลิกการผูก
+// =====================================================
+export async function handleLeave(event: LineWebhookEvent): Promise<void> {
+  const groupId = event.source.groupId || event.source.roomId;
+  if (!groupId) return;
+  await prisma.lineGroup.deleteMany({ where: { groupId } });
+}
+
+// =====================================================
 // TEXT
 // =====================================================
 export async function handleText(event: LineWebhookEvent): Promise<void> {
-  if (!event.replyToken || !event.source.userId) return;
+  if (!event.replyToken) return;
+  const isGroup = event.source.type === "group" || event.source.type === "room";
+  const groupId = event.source.groupId || event.source.roomId;
+  if (!isGroup && !event.source.userId) return;
   const rawText = (event.message?.text || "").trim();
   const lower = rawText.toLowerCase();
+
+  // GROUP: only react to expense-like text (with a number) — stay silent on
+  // ordinary group chatter so the bot doesn't spam the conversation.
+  if (isGroup) {
+    const parsedGroup = parseTextExpense(rawText);
+    if (!parsedGroup) return;
+    const gctx = groupId ? await resolveGroupContext(groupId) : null;
+    if (!gctx) {
+      const bindUrl = `${APP_BASE_URL}/line-groups/bind?g=${encodeURIComponent(groupId || "")}`;
+      await replyMessage(event.replyToken, [
+        text("กลุ่มนี้ยังไม่ได้เชื่อมกับบริษัท\nผู้ดูแล (Admin) เปิดลิงก์เพื่อเชื่อม:\n" + bindUrl),
+      ]);
+      return;
+    }
+    await processTextExpenseAsync(groupId!, parsedGroup, gctx, {
+      autoSave: true,
+    }).catch((err) => {
+      console.error("[LINE webhook] group text failed:", err);
+      void pushMessage(groupId!, [
+        text("ไม่สามารถบันทึกรายการได้\n" + (err instanceof Error ? err.message : "เกิดข้อผิดพลาด")),
+      ]).catch(() => {});
+    });
+    return;
+  }
 
   // Help command — explicit, must NOT trigger expense parsing.
   if (lower === "help" || lower === "ช่วย" || lower === "?") {
@@ -117,6 +187,7 @@ export async function handleText(event: LineWebhookEvent): Promise<void> {
   const parsed = parseTextExpense(rawText);
   if (parsed) {
     const lineUserId = event.source.userId;
+    if (!lineUserId) return;
 
     // Resolve user + org (same gating as media handler).
     const ctx = await resolveLineContext(lineUserId);
@@ -162,9 +233,12 @@ export async function handleText(event: LineWebhookEvent): Promise<void> {
 // MEDIA — Image/PDF → OCR → Quick Reply เลือกโปรเจกต์
 // =====================================================
 export async function handleMedia(event: LineWebhookEvent): Promise<void> {
-  if (!event.replyToken || !event.source.userId || !event.message?.id) return;
+  if (!event.replyToken || !event.message?.id) return;
 
+  const isGroup = event.source.type === "group" || event.source.type === "room";
+  const groupId = event.source.groupId || event.source.roomId;
   const lineUserId = event.source.userId;
+  if (!isGroup && !lineUserId) return;
   const messageId = event.message.id;
   const msgType = event.message.type;
 
@@ -189,8 +263,29 @@ export async function handleMedia(event: LineWebhookEvent): Promise<void> {
     return;
   }
 
-  // Resolve user + org
-  const ctx = await resolveLineContext(lineUserId);
+  // ----- GROUP: resolve bound org → auto-save (no picker) -----
+  if (isGroup) {
+    const gctx = groupId ? await resolveGroupContext(groupId) : null;
+    if (!gctx) {
+      const bindUrl = `${APP_BASE_URL}/line-groups/bind?g=${encodeURIComponent(groupId || "")}`;
+      await replyMessage(event.replyToken, [
+        text("กลุ่มนี้ยังไม่ได้เชื่อมกับบริษัท\nผู้ดูแล (Admin) เปิดลิงก์เพื่อเชื่อม:\n" + bindUrl),
+      ]);
+      return;
+    }
+    await processMediaAsync(groupId!, messageId, mimeType, gctx, {
+      autoSave: true,
+    }).catch((err) => {
+      console.error("[LINE webhook] group media failed:", err);
+      void pushMessage(groupId!, [
+        text("ไม่สามารถอ่าน" + displayKind + "ได้\n" + (err instanceof Error ? err.message : "เกิดข้อผิดพลาด")),
+      ]).catch(() => {});
+    });
+    return;
+  }
+
+  // ----- 1-1: resolve user + org -----
+  const ctx = await resolveLineContext(lineUserId!);
   if (!ctx) {
     await replyMessage(event.replyToken, [
       text(`กรุณาสมัครและสร้างองค์กรในเว็บก่อนใช้งานค่ะ\n${APP_BASE_URL}/login`),
@@ -207,12 +302,12 @@ export async function handleMedia(event: LineWebhookEvent): Promise<void> {
   // Acknowledge with the typing-dots loading animation (replaces the old
   // text "received, reading..." reply so it feels like a person is typing).
   // Animation auto-dismisses when our first push message arrives.
-  await showLoadingAnimation(lineUserId, 60);
+  await showLoadingAnimation(lineUserId!, 60);
 
   // Process OCR → then ask to select project
-  await processMediaAsync(lineUserId, messageId, mimeType, ctx).catch((err) => {
+  await processMediaAsync(lineUserId!, messageId, mimeType, ctx).catch((err) => {
     console.error("[LINE webhook] media processing failed:", err);
-    void pushMessage(lineUserId, [
+    void pushMessage(lineUserId!, [
       text("ไม่สามารถอ่าน" + displayKind + "ได้\n" + (err instanceof Error ? err.message : "เกิดข้อผิดพลาด")),
     ]).catch(() => {});
   });
@@ -274,6 +369,7 @@ async function processMediaAsync(
     orgId: string;
     orgName: string;
   },
+  opts?: { autoSave?: boolean },
 ): Promise<void> {
   // Download + OCR
   const buffer = await getMessageContent(messageId);
@@ -302,6 +398,26 @@ async function processMediaAsync(
       expiresAt,
     },
   });
+
+  // Group flow: no interactive picker (groups are noisy + multi-user). Auto-save
+  // straight into the default LINE project, then push the saved card to the group.
+  if (opts?.autoSave) {
+    const defaults = await ensureLineDefaults(sheets);
+    await prisma.lineDraft.update({
+      where: { id: draft.id },
+      data: { eventId: defaults.eventId, eventName: "LINE (กลุ่ม)" } as Record<string, unknown>,
+    });
+    await confirmDraftAsync({
+      id: draft.id,
+      lineUserId,
+      userId: ctx.user.id,
+      orgId: ctx.orgId,
+      imageMessageId: messageId,
+      mimeType,
+      ocrJson: ocr,
+    });
+    return;
+  }
 
   // Fetch projects + filter to ones the user is assigned to.
   // Carousel shows max 12 bubbles per LINE spec.
@@ -400,6 +516,7 @@ async function processTextExpenseAsync(
     orgId: string;
     orgName: string;
   },
+  opts?: { autoSave?: boolean },
 ): Promise<void> {
   // Build a minimal OcrParsedReceipt from the user's typed text. Vendor info
   // is intentionally left blank — user edits in web app if needed.
@@ -444,6 +561,26 @@ async function processTextExpenseAsync(
       expiresAt,
     },
   });
+
+  // Group flow: auto-save into the default LINE project (no picker), push to group.
+  if (opts?.autoSave) {
+    const sheetsForDefault = await getSheetsService(ctx.orgId);
+    const defaults = await ensureLineDefaults(sheetsForDefault);
+    await prisma.lineDraft.update({
+      where: { id: draft.id },
+      data: { eventId: defaults.eventId, eventName: "LINE (กลุ่ม)" } as Record<string, unknown>,
+    });
+    await confirmDraftAsync({
+      id: draft.id,
+      lineUserId,
+      userId: ctx.user.id,
+      orgId: ctx.orgId,
+      imageMessageId: draft.imageMessageId,
+      mimeType: "text/plain",
+      ocrJson: ocr,
+    });
+    return;
+  }
 
   // Same picker logic as processMediaAsync.
   const sheets = await getSheetsService(ctx.orgId);

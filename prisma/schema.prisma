@@ -30,6 +30,7 @@ model User {
   ownedOrgs            Organization[]    @relation("OrgOwner")
   permissions          UserPermission[]
   affiliatePartner     AffiliatePartner?
+  lineGroupsBound      LineGroup[]       @relation("LineGroupBoundBy")
 
   @@map("users")
 }
@@ -95,6 +96,7 @@ model Organization {
   owner                  User             @relation("OrgOwner", fields: [ownerId], references: [id])
   subscription           Subscription?
   permissions            UserPermission[]
+  lineGroups             LineGroup[]
 
   @@map("organizations")
 }
@@ -310,6 +312,24 @@ model AuditLog {
   @@index([orgId, createdAt(sort: Desc)])
   @@index([orgId, entityType, entityRef])
   @@map("audit_logs")
+}
+
+/// A LINE group chat bound to an Organization. When the Aim Expense OA is in
+/// the group, receipts/expenses posted there are saved to `orgId`. Submissions
+/// are attributed to `boundByUserId` (the admin who linked the group) since
+/// group members may not have their own Aim Expense account.
+model LineGroup {
+  id             String       @id @default(uuid())
+  groupId        String       @unique @map("group_id") // LINE group ID (Cxxxx…)
+  orgId          String       @map("org_id")
+  boundByUserId  String       @map("bound_by_user_id")
+  groupName      String?      @map("group_name")
+  createdAt      DateTime     @default(now()) @map("created_at")
+  org            Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  boundBy        User         @relation("LineGroupBoundBy", fields: [boundByUserId], references: [id])
+
+  @@index([orgId])
+  @@map("line_groups")
 }
 
 model LineDraft {

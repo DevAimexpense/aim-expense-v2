@@ -51,3 +51,36 @@ export async function resolveLineContext(
     orgName: member.org.name,
   };
 }
+
+/**
+ * Resolve a LINE group → its bound Organization + the admin who bound it.
+ * Group submissions are attributed to that admin (`boundBy`) since group
+ * members may not have their own Aim Expense account.
+ * Returns null if the group isn't bound to any org.
+ */
+export async function resolveGroupContext(
+  groupId: string
+): Promise<LineUserContext | null> {
+  const group = await prisma.lineGroup.findUnique({
+    where: { groupId },
+    include: {
+      org: { select: { id: true, name: true } },
+      boundBy: {
+        select: {
+          id: true,
+          email: true,
+          lineUserId: true,
+          lineDisplayName: true,
+          onboardingStep: true,
+        },
+      },
+    },
+  });
+  if (!group) return null;
+
+  return {
+    user: group.boundBy,
+    orgId: group.org.id,
+    orgName: group.org.name,
+  };
+}

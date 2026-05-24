@@ -19,6 +19,7 @@ import { dbdRouter } from "./dbd.router";
 import { quotationRouter } from "./quotation.router";
 import { billingRouter } from "./billing.router";
 import { taxInvoiceRouter } from "./taxInvoice.router";
+import { lineGroupRouter } from "./line-group.router";
 
 export const appRouter = router({
   event: eventRouter,
@@ -37,6 +38,7 @@ export const appRouter = router({
   quotation: quotationRouter,
   billing: billingRouter,
   taxInvoice: taxInvoiceRouter,
+  lineGroup: lineGroupRouter,
 });
 
 export type AppRouter = typeof appRouter;

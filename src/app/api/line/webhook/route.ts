@@ -7,6 +7,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { verifyWebhookSignature } from "@/lib/line/messaging";
 import {
   handleFollow,
+  handleJoin,
+  handleLeave,
   handleMedia,
   handlePostback,
   handleText,
@@ -66,6 +68,12 @@ async function dispatchEvent(event: LineWebhookEvent): Promise<void> {
     switch (event.type) {
       case "follow":
         await handleFollow(event);
+        return;
+      case "join":
+        await handleJoin(event);
+        return;
+      case "leave":
+        await handleLeave(event);
         return;
       case "message": {
         const msgType = event.message?.type;
