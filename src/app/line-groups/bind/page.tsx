@@ -12,10 +12,21 @@ function BindInner() {
   const bindMut = trpc.lineGroup.bind.useMutation();
 
   const [selected, setSelected] = useState<string>("");
+  const [selectedEvent, setSelectedEvent] = useState<{ id: string; name: string }>({
+    id: "",
+    name: "",
+  });
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const orgs = (orgsQuery.data || []).filter((o) => o.role === "admin");
+
+  // Projects of the chosen org — for the project picker step.
+  const projectsQuery = trpc.lineGroup.projects.useQuery(
+    { orgId: selected },
+    { enabled: !!selected, retry: false },
+  );
+  const projects = projectsQuery.data || [];
 
   const handleBind = async () => {
     setError(null);
@@ -24,7 +35,12 @@ function BindInner() {
       return;
     }
     try {
-      await bindMut.mutateAsync({ groupId, orgId: selected });
+      await bindMut.mutateAsync({
+        groupId,
+        orgId: selected,
+        eventId: selectedEvent.id || undefined,
+        eventName: selectedEvent.name || undefined,
+      });
       setDone(true);
     } catch (e) {
       setError(e instanceof Error ? e.message : "เกิดข้อผิดพลาด");
@@ -150,7 +166,10 @@ function BindInner() {
                     name="org"
                     value={o.orgId}
                     checked={selected === o.orgId}
-                    onChange={() => setSelected(o.orgId)}
+                    onChange={() => {
+                      setSelected(o.orgId);
+                      setSelectedEvent({ id: "", name: "" });
+                    }}
                   />
                   <span style={{ fontWeight: 600 }}>{o.orgName}</span>
                   <span style={{ fontSize: "0.75rem", color: "#64748b" }}>
@@ -159,6 +178,51 @@ function BindInner() {
                 </label>
               ))}
             </div>
+
+            {/* Step 2: pick the project this group books into */}
+            {selected && (
+              <div style={{ marginBottom: "1.25rem" }}>
+                <p style={{ fontSize: "0.8125rem", fontWeight: 600, color: "#334155", margin: "0 0 0.5rem" }}>
+                  บันทึกเข้าโปรเจกต์:
+                </p>
+                {projectsQuery.isLoading ? (
+                  <p style={{ color: "#64748b", fontSize: "0.8125rem" }}>กำลังโหลดโปรเจกต์...</p>
+                ) : (
+                  <div style={{ display: "grid", gap: "0.375rem", maxHeight: 220, overflowY: "auto" }}>
+                    {[{ eventId: "", eventName: "ไม่ระบุ (โปรเจกต์เริ่มต้น)" }, ...projects].map((ev) => {
+                      const active = selectedEvent.id === ev.eventId;
+                      return (
+                        <label
+                          key={ev.eventId || "__default__"}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "0.625rem",
+                            padding: "0.625rem 0.875rem",
+                            border: `2px solid ${active ? "#06c755" : "#e2e8f0"}`,
+                            borderRadius: 8,
+                            background: active ? "#f0fdf4" : "white",
+                            cursor: "pointer",
+                            fontSize: "0.875rem",
+                          }}
+                        >
+                          <input
+                            type="radio"
+                            name="project"
+                            checked={active}
+                            onChange={() =>
+                              setSelectedEvent({ id: ev.eventId, name: ev.eventName })
+                            }
+                          />
+                          {ev.eventName}
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
             <button
               onClick={handleBind}
               disabled={bindMut.isPending || !selected}

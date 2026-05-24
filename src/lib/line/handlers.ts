@@ -161,6 +161,8 @@ export async function handleText(event: LineWebhookEvent): Promise<void> {
     }
     await processTextExpenseAsync(groupId!, parsedGroup, gctx, {
       autoSave: true,
+      eventId: gctx.groupEventId,
+      eventName: gctx.groupEventName,
     }).catch((err) => {
       console.error("[LINE webhook] group text failed:", err);
       void pushMessage(groupId!, [
@@ -279,6 +281,8 @@ export async function handleMedia(event: LineWebhookEvent): Promise<void> {
     }
     await processMediaAsync(groupId!, messageId, mimeType, gctx, {
       autoSave: true,
+      eventId: gctx.groupEventId,
+      eventName: gctx.groupEventName,
     }).catch((err) => {
       console.error("[LINE webhook] group media failed:", err);
       void pushMessage(groupId!, [
@@ -491,7 +495,7 @@ async function processMediaAsync(
     orgId: string;
     orgName: string;
   },
-  opts?: { autoSave?: boolean },
+  opts?: { autoSave?: boolean; eventId?: string | null; eventName?: string | null },
 ): Promise<void> {
   // Download + OCR
   const buffer = await getMessageContent(messageId);
@@ -522,12 +526,19 @@ async function processMediaAsync(
   });
 
   // Group flow: no interactive picker (groups are noisy + multi-user). Auto-save
-  // straight into the default LINE project, then push the saved card to the group.
+  // into the group's bound project (or the default LINE project if none set),
+  // then push the saved card to the group.
   if (opts?.autoSave) {
-    const defaults = await ensureLineDefaults(sheets);
+    let eventId = opts.eventId || "";
+    let eventName = opts.eventName || "LINE (กลุ่ม)";
+    if (!eventId) {
+      const defaults = await ensureLineDefaults(sheets);
+      eventId = defaults.eventId;
+      eventName = "LINE (กลุ่ม)";
+    }
     await prisma.lineDraft.update({
       where: { id: draft.id },
-      data: { eventId: defaults.eventId, eventName: "LINE (กลุ่ม)" } as Record<string, unknown>,
+      data: { eventId, eventName } as Record<string, unknown>,
     });
     await confirmDraftAsync({
       id: draft.id,
@@ -575,7 +586,7 @@ async function processTextExpenseAsync(
     orgId: string;
     orgName: string;
   },
-  opts?: { autoSave?: boolean },
+  opts?: { autoSave?: boolean; eventId?: string | null; eventName?: string | null },
 ): Promise<void> {
   // Build a minimal OcrParsedReceipt from the user's typed text. Vendor info
   // is intentionally left blank — user edits in web app if needed.
@@ -621,13 +632,19 @@ async function processTextExpenseAsync(
     },
   });
 
-  // Group flow: auto-save into the default LINE project (no picker), push to group.
+  // Group flow: auto-save into the group's bound project (or default), push to group.
   if (opts?.autoSave) {
-    const sheetsForDefault = await getSheetsService(ctx.orgId);
-    const defaults = await ensureLineDefaults(sheetsForDefault);
+    let eventId = opts.eventId || "";
+    let eventName = opts.eventName || "LINE (กลุ่ม)";
+    if (!eventId) {
+      const sheetsForDefault = await getSheetsService(ctx.orgId);
+      const defaults = await ensureLineDefaults(sheetsForDefault);
+      eventId = defaults.eventId;
+      eventName = "LINE (กลุ่ม)";
+    }
     await prisma.lineDraft.update({
       where: { id: draft.id },
-      data: { eventId: defaults.eventId, eventName: "LINE (กลุ่ม)" } as Record<string, unknown>,
+      data: { eventId, eventName } as Record<string, unknown>,
     });
     await confirmDraftAsync({
       id: draft.id,

@@ -88,6 +88,9 @@ export default function LineGroupsPage() {
                   <div style={{ fontWeight: 600 }}>
                     {g.groupName || "กลุ่ม LINE"}
                   </div>
+                  <div style={{ fontSize: "0.75rem", color: "#0f766e", marginTop: 2 }}>
+                    📁 โปรเจกต์: {g.eventName || "ไม่ระบุ (เริ่มต้น)"}
+                  </div>
                   <div style={{ fontSize: "0.75rem", color: "#64748b", marginTop: 2 }}>
                     เชื่อมโดย {g.boundByName} ·{" "}
                     {new Date(g.createdAt).toLocaleDateString("th-TH")}

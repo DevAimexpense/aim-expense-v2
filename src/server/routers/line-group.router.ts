@@ -13,6 +13,7 @@ import {
   checkQuota,
   type SubscriptionState,
 } from "@/lib/plans";
+import { getSheetsService } from "../lib/sheets-context";
 
 /** Verify the user is an admin of the given org (only admins may bind groups). */
 async function assertOrgAdmin(userId: string, orgId: string): Promise<void> {
@@ -39,10 +40,30 @@ export const lineGroupRouter = router({
       id: g.id,
       groupId: g.groupId,
       groupName: g.groupName,
+      eventName: g.eventName,
       boundByName: g.boundBy.lineDisplayName,
       createdAt: g.createdAt,
     }));
   }),
+
+  /**
+   * Active projects (events) of a given org — for the bind page's project
+   * picker. Admin-only (the user must be admin of that org to bind a group).
+   */
+  projects: protectedProcedure
+    .input(z.object({ orgId: z.string().min(1) }))
+    .query(async ({ ctx, input }) => {
+      await assertOrgAdmin(ctx.session.userId, input.orgId);
+      const sheets = await getSheetsService(input.orgId);
+      const events = await sheets.getEvents();
+      return events
+        .filter((e) => (e.Status || "").trim().toLowerCase() === "active")
+        .map((e) => ({
+          eventId: (e.EventID || "").trim(),
+          eventName: e.EventName || "ไม่ระบุ",
+        }))
+        .filter((e) => e.eventId);
+    }),
 
   /**
    * Bind a LINE group to an org. Called from /line-groups/bind?g=<groupId>
@@ -54,6 +75,8 @@ export const lineGroupRouter = router({
         groupId: z.string().trim().min(1),
         orgId: z.string().min(1),
         groupName: z.string().trim().max(200).optional(),
+        eventId: z.string().trim().max(100).optional(),
+        eventName: z.string().trim().max(200).optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -66,6 +89,14 @@ export const lineGroupRouter = router({
       });
       if (existing) {
         if (existing.orgId === input.orgId) {
+          // Same org → allow updating the project binding.
+          await prisma.lineGroup.update({
+            where: { id: existing.id },
+            data: {
+              eventId: input.eventId || null,
+              eventName: input.eventName || null,
+            },
+          });
           return { success: true, alreadyBound: true };
         }
         throw new TRPCError({
@@ -100,6 +131,8 @@ export const lineGroupRouter = router({
           orgId: input.orgId,
           boundByUserId: userId,
           groupName: input.groupName || null,
+          eventId: input.eventId || null,
+          eventName: input.eventName || null,
         },
       });
 

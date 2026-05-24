@@ -327,6 +327,9 @@ model LineGroup {
   orgId          String       @map("org_id")
   boundByUserId  String       @map("bound_by_user_id")
   groupName      String?      @map("group_name")
+  // Project (event) this group books into. Empty/null = default LINE project.
+  eventId        String?      @map("event_id")
+  eventName      String?      @map("event_name")
   createdAt      DateTime     @default(now()) @map("created_at")
   org            Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
   boundBy        User         @relation("LineGroupBoundBy", fields: [boundByUserId], references: [id])

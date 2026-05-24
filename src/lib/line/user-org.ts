@@ -15,6 +15,9 @@ export interface LineUserContext {
   };
   orgId: string;
   orgName: string;
+  // For group contexts: the project (event) the group is bound to (optional).
+  groupEventId?: string | null;
+  groupEventName?: string | null;
 }
 
 /**
@@ -108,5 +111,7 @@ export async function resolveGroupContext(
     user: group.boundBy,
     orgId: group.org.id,
     orgName: group.org.name,
+    groupEventId: group.eventId,
+    groupEventName: group.eventName,
   };
 }
