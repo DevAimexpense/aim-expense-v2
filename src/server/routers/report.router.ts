@@ -26,6 +26,7 @@
 
 import { z } from "zod";
 import { router, orgProcedure } from "../trpc";
+import { scopedEventIds } from "@/lib/permissions";
 import { getSheetsService } from "../lib/sheets-context";
 import { SHEET_TABS } from "../services/google-sheets.service";
 
@@ -186,8 +187,12 @@ export const reportRouter = router({
       const eventMap = new Map(events.map((e) => [e.EventID, e.EventName]));
       const payeeMap = new Map(payees.map((p) => [p.PayeeID, p.PayeeName]));
 
+      // Project-scoped roles only see their assigned events.
+      const scope = scopedEventIds(ctx.org);
+
       // Filter
       const filtered = payments.filter((p) => {
+        if (scope !== null && !scope.includes((p.EventID || "").trim())) return false;
         // Status filter
         if (input.status) {
           if (p.Status !== input.status) return false;
@@ -265,13 +270,21 @@ export const reportRouter = router({
       // hits a report page before onboarding finishes, we'll just
       // get an empty list, which is the correct behaviour.
 
-      const [payments, events] = await Promise.all([
+      const [payments, allEvents] = await Promise.all([
         sheets.getPayments(),
         sheets.getEvents(),
       ]);
 
+      // Project-scoped roles only see their assigned events.
+      const scope = scopedEventIds(ctx.org);
+      const events =
+        scope === null
+          ? allEvents
+          : allEvents.filter((e) => scope.includes((e.EventID || "").trim()));
+
       // Filter payments by date + status + type
       const filteredPayments = payments.filter((p) => {
+        if (scope !== null && !scope.includes((p.EventID || "").trim())) return false;
         if (input.status) {
           if (p.Status !== input.status) return false;
         } else {
@@ -361,8 +374,12 @@ export const reportRouter = router({
         sheets.getPayees(),
       ]);
 
+      // Project-scoped roles only see their assigned events.
+      const scope = scopedEventIds(ctx.org);
+
       // Filter payments
       const filtered = payments.filter((p) => {
+        if (scope !== null && !scope.includes((p.EventID || "").trim())) return false;
         if (input.status) {
           if (p.Status !== input.status) return false;
         } else {
@@ -468,11 +485,23 @@ export const reportRouter = router({
       // get an empty list, which is the correct behaviour.
 
       // Pull master tables ONCE in parallel (3 calls for the whole page)
-      const [payments, events, payees] = await Promise.all([
+      const [allPayments, allEvents, payees] = await Promise.all([
         sheets.getPayments(),
         sheets.getEvents(),
         sheets.getPayees(),
       ]);
+
+      // Project-scoped roles only see their assigned events (applies to all 3
+      // sections: summary / byProject / byVendor).
+      const scope = scopedEventIds(ctx.org);
+      const payments =
+        scope === null
+          ? allPayments
+          : allPayments.filter((p) => scope.includes((p.EventID || "").trim()));
+      const events =
+        scope === null
+          ? allEvents
+          : allEvents.filter((e) => scope.includes((e.EventID || "").trim()));
 
       // Lookup maps
       const eventMap = new Map(events.map((e) => [e.EventID, e.EventName]));

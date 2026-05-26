@@ -27,6 +27,7 @@ export interface TRPCContext {
     orgName: string;
     role: string;
     permissions: Permissions;
+    eventScope: string[];
     googleSpreadsheetId: string | null;
     googleDriveFolderId: string | null;
   } | null;
@@ -60,6 +61,7 @@ export async function createTRPCContext(): Promise<TRPCContext> {
           orgName: org.orgName,
           role: org.role,
           permissions: org.permissions,
+          eventScope: org.eventScope,
           googleSpreadsheetId: org.googleSpreadsheetId,
           googleDriveFolderId: org.googleDriveFolderId,
         }

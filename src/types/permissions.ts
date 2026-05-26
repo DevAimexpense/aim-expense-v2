@@ -30,9 +30,14 @@ export interface Permissions {
 }
 
 /**
- * 4 Roles — ตรงตาม Core System
+ * 5 Roles — Core System (4) + project_manager (scoped to assigned projects)
  */
-export type OrgRole = "admin" | "manager" | "accountant" | "staff";
+export type OrgRole =
+  | "admin"
+  | "manager"
+  | "accountant"
+  | "staff"
+  | "project_manager";
 
 /**
  * Permission key type for type-safe access

@@ -126,6 +126,31 @@ export const DEFAULT_PERMISSIONS: Record<OrgRole, Permissions> = {
     manageBillings: false,
     manageTaxInvoices: false,
   },
+
+  // Project Manager — sees totals/reports/dashboard but ONLY for assigned
+  // projects (scoping enforced server-side via eventScope). Cannot manage
+  // projects or system settings. Phase 1 = view-only; scoped payment edit/
+  // approve/delete (assigned + team expenses) lands in Phase 2.
+  project_manager: {
+    manageEvents: false,
+    assignEvents: false,
+    managePayees: false,
+    manageBanks: false,
+    updatePayments: false,
+    deletePayments: false,
+    approvePayments: false,
+    editPaymentAfterApproval: false,
+    viewReports: true,
+    printReports: true,
+    dashboardEvent: true,
+    dashboardSummary: true,
+    manageUsers: false,
+    managePermissions: false,
+    manageCustomers: false,
+    manageQuotations: false,
+    manageBillings: false,
+    manageTaxInvoices: false,
+  },
 };
 
 /**
@@ -133,6 +158,19 @@ export const DEFAULT_PERMISSIONS: Record<OrgRole, Permissions> = {
  */
 export function getDefaultPermissions(role: OrgRole): Permissions {
   return { ...DEFAULT_PERMISSIONS[role] };
+}
+
+/**
+ * Event-scoping for project-scoped roles.
+ * Returns the list of EventIDs the user is restricted to, or `null` when the
+ * role sees everything (admin/manager/accountant/staff). An empty array means
+ * "assigned to nothing" → sees nothing.
+ */
+export function scopedEventIds(
+  org: { role: string; eventScope: string[] } | null | undefined,
+): string[] | null {
+  if (!org) return null;
+  return org.role === "project_manager" ? org.eventScope : null;
 }
 
 /**

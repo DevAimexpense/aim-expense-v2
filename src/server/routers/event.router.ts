@@ -8,6 +8,7 @@ import { router, orgProcedure, permissionProcedure } from "../trpc";
 import { getSheetsService } from "../lib/sheets-context";
 import { GoogleSheetsService, SHEET_TABS } from "../services/google-sheets.service";
 import { prisma } from "@/lib/prisma";
+import { scopedEventIds } from "@/lib/permissions";
 
 const EventInputSchema = z.object({
   eventName: z.string().min(1, "กรุณากรอกชื่อโปรเจกต์").max(200),
@@ -23,8 +24,15 @@ export const eventRouter = router({
    */
   list: orgProcedure.query(async ({ ctx }) => {
     const sheets = await getSheetsService(ctx.org.orgId);
-    const events = await sheets.getEvents();
+    const allEvents = await sheets.getEvents();
     const payments = await sheets.getPayments();
+
+    // Project-scoped roles (e.g. project_manager) only see assigned events.
+    const scope = scopedEventIds(ctx.org);
+    const events =
+      scope === null
+        ? allEvents
+        : allEvents.filter((e) => scope.includes((e.EventID || "").trim()));
 
     // Calculate spent per event
     return events.map((event) => {
@@ -64,6 +72,10 @@ export const eventRouter = router({
   getById: orgProcedure
     .input(z.object({ eventId: z.string() }))
     .query(async ({ ctx, input }) => {
+      // Project-scoped roles can't open events they aren't assigned to.
+      const scope = scopedEventIds(ctx.org);
+      if (scope !== null && !scope.includes(input.eventId.trim())) return null;
+
       const sheets = await getSheetsService(ctx.org.orgId);
       const event = await sheets.getEventById(input.eventId);
       if (!event) return null;

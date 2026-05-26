@@ -24,12 +24,13 @@ import {
   type PermissionKey,
 } from "@/types/permissions";
 
-type Role = "admin" | "manager" | "accountant" | "staff";
+type Role = "admin" | "manager" | "accountant" | "staff" | "project_manager";
 
 const ROLE_LABEL: Record<Role, { label: string; color: string }> = {
   admin: { label: "Admin", color: "#dc2626" },
   manager: { label: "Manager", color: "#7c3aed" },
   accountant: { label: "Accountant", color: "#2563eb" },
+  project_manager: { label: "Project Manager", color: "#0d9488" },
   staff: { label: "Staff", color: "#64748b" },
 };
 

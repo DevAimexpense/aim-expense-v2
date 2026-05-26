@@ -10,6 +10,7 @@ import { GoogleSheetsService, SHEET_TABS } from "../services/google-sheets.servi
 import { prisma } from "@/lib/prisma";
 import { calculatePayment } from "@/lib/calculations";
 import { TRPCError } from "@trpc/server";
+import { scopedEventIds } from "@/lib/permissions";
 
 const PaymentInputSchema = z.object({
   eventId: z.string().min(1),
@@ -112,6 +113,11 @@ export const paymentRouter = router({
 
       let payments = await sheets.getPayments();
 
+      // Project-scoped roles only see payments in their assigned events.
+      const scope = scopedEventIds(ctx.org);
+      if (scope !== null)
+        payments = payments.filter((p) => scope.includes((p.EventID || "").trim()));
+
       if (input?.eventId) payments = payments.filter((p) => p.EventID === input.eventId);
       if (input?.payeeId) payments = payments.filter((p) => p.PayeeID === input.payeeId);
       if (input?.status) payments = payments.filter((p) => p.Status === input.status);
@@ -139,7 +145,11 @@ export const paymentRouter = router({
     .query(async ({ ctx, input }) => {
       const sheets = await getSheetsService(ctx.org.orgId);
       const p = await sheets.getById(SHEET_TABS.PAYMENTS, "PaymentID", input.paymentId);
-      return p ? toPaymentRow(p) : null;
+      if (!p) return null;
+      // Project-scoped roles can't open payments outside their assigned events.
+      const scope = scopedEventIds(ctx.org);
+      if (scope !== null && !scope.includes((p.EventID || "").trim())) return null;
+      return toPaymentRow(p);
     }),
 
   preview: orgProcedure

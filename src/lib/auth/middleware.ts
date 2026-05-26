@@ -19,6 +19,7 @@ export interface OrgContext {
   entityType: string; // "company" | "personal"
   role: string;
   permissions: Permissions;
+  eventScope: string[]; // EventIDs this member is assigned to (for scoped roles)
   googleSpreadsheetId: string | null;
   googleDriveFolderId: string | null;
 }
@@ -129,6 +130,7 @@ export const getOrgContext = cache(async function getOrgContextImpl(
     entityType: membership.org.entityType,
     role: membership.role,
     permissions,
+    eventScope: membership.eventScope ?? [],
     googleSpreadsheetId: membership.org.googleSpreadsheetId,
     googleDriveFolderId: membership.org.googleDriveFolderId,
   };

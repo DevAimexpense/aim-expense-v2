@@ -5,12 +5,13 @@ import { trpc } from "@/lib/trpc/client";
 import { PERMISSION_LABELS } from "@/types/permissions";
 import SearchableSelect, { type SearchableSelectOption } from "@/components/searchable-select";
 
-type Role = "admin" | "manager" | "accountant" | "staff";
+type Role = "admin" | "manager" | "accountant" | "staff" | "project_manager";
 
 const ROLE_LABEL: Record<Role, { label: string; color: string; desc: string }> = {
   admin: { label: "Admin", color: "#dc2626", desc: "ทุกอย่าง รวมจัดการผู้ใช้" },
   manager: { label: "Manager", color: "#7c3aed", desc: "จัดการ + อนุมัติ + รายงาน" },
   accountant: { label: "Accountant", color: "#2563eb", desc: "จ่ายเงิน + รายงาน" },
+  project_manager: { label: "Project Manager", color: "#0d9488", desc: "ดูยอด/รายงานเฉพาะโปรเจกต์ที่ได้รับมอบหมาย" },
   staff: { label: "Staff", color: "#64748b", desc: "ดูข้อมูลพื้นฐาน" },
 };
 

@@ -12,7 +12,7 @@ import { prisma } from "@/lib/prisma";
 import { DEFAULT_PERMISSIONS } from "@/lib/permissions";
 import type { OrgRole } from "@/types/permissions";
 
-const RoleEnum = z.enum(["admin", "manager", "accountant", "staff"]);
+const RoleEnum = z.enum(["admin", "manager", "accountant", "staff", "project_manager"]);
 
 function generateToken(): string {
   return randomBytes(16).toString("hex"); // 32 chars
