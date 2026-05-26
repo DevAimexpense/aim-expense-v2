@@ -115,7 +115,7 @@ export async function handleJoin(event: LineWebhookEvent): Promise<void> {
     return;
   }
 
-  const bindUrl = `${APP_BASE_URL}/line-groups/bind?g=${encodeURIComponent(groupId)}`;
+  const bindUrl = `${APP_BASE_URL}/line-groups/bind?g=${encodeURIComponent(groupId)}&openExternalBrowser=1`;
   await replyMessage(event.replyToken, [
     text(
       "สวัสดีค่ะ 👋 ขอบคุณที่เชิญ Aim Expense เข้ากลุ่ม\n\n" +
@@ -153,7 +153,7 @@ export async function handleText(event: LineWebhookEvent): Promise<void> {
     if (!parsedGroup) return;
     const gctx = groupId ? await resolveGroupContext(groupId) : null;
     if (!gctx) {
-      const bindUrl = `${APP_BASE_URL}/line-groups/bind?g=${encodeURIComponent(groupId || "")}`;
+      const bindUrl = `${APP_BASE_URL}/line-groups/bind?g=${encodeURIComponent(groupId || "")}&openExternalBrowser=1`;
       await replyMessage(event.replyToken, [
         text("กลุ่มนี้ยังไม่ได้เชื่อมกับบริษัท\nผู้ดูแล (Admin) เปิดลิงก์เพื่อเชื่อม:\n" + bindUrl),
       ]);
@@ -273,7 +273,7 @@ export async function handleMedia(event: LineWebhookEvent): Promise<void> {
   if (isGroup) {
     const gctx = groupId ? await resolveGroupContext(groupId) : null;
     if (!gctx) {
-      const bindUrl = `${APP_BASE_URL}/line-groups/bind?g=${encodeURIComponent(groupId || "")}`;
+      const bindUrl = `${APP_BASE_URL}/line-groups/bind?g=${encodeURIComponent(groupId || "")}&openExternalBrowser=1`;
       await replyMessage(event.replyToken, [
         text("กลุ่มนี้ยังไม่ได้เชื่อมกับบริษัท\nผู้ดูแล (Admin) เปิดลิงก์เพื่อเชื่อม:\n" + bindUrl),
       ]);
