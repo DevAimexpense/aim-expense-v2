@@ -1191,9 +1191,19 @@ export class GoogleSheetsService {
  * Prefix with apostrophe (') tells Sheets "store as text" — apostrophe consumed,
  * value still reads back as the original string.
  */
+/**
+ * Force digit-only STRING values to be stored as text in Google Sheets.
+ *
+ * เลขบัตรประชาชน / เลขผู้เสียภาษี (13 หลัก) และเลขสาขา (00000) เป็น "ข้อความ"
+ * ไม่ใช่ตัวเลข — ถ้าปล่อยให้ Sheets (USER_ENTERED) แปลงเป็น number จะ (ก) ตัด 0
+ * นำหน้าทิ้ง และ (ข) เปลี่ยนเป็น scientific notation/เสียความแม่นยำ.
+ *
+ * เติม leading apostrophe → Sheets เก็บเป็น text (apostrophe ไม่ติดมากับค่าที่อ่านกลับ).
+ * จำนวนเงิน/จำนวน ส่งมาเป็น `number` (typeof !== "string") → ผ่านไปตามเดิม ไม่กระทบ.
+ */
 function preserveLeadingZeros(value: string | number): string | number {
   if (typeof value !== "string") return value;
-  if (/^0\d+$/.test(value)) return `'${value}`;
+  if (/^\d+$/.test(value)) return `'${value}`;
   return value;
 }
 
