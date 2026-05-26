@@ -8,6 +8,7 @@ import { redirect } from "next/navigation";
 import type { Metadata } from "next";
 import { getSession } from "@/lib/auth/session";
 import { checkBusinessQuota } from "@/server/lib/business-quota";
+import { prisma } from "@/lib/prisma";
 import { COMPANY_NAME } from "@/lib/legal/version";
 import { NewBusinessForm } from "./new-business-form";
 
@@ -21,5 +22,15 @@ export default async function NewBusinessPage() {
 
   const quota = await checkBusinessQuota(session.userId);
 
-  return <NewBusinessForm quota={quota} />;
+  // Creating a workspace writes a master sheet to the user's OWN Google Drive,
+  // so they need their own Google connection. Invited staff skip Google during
+  // onboarding → may have none. Gate the form so they get a clear "connect
+  // Google" CTA instead of a cryptic token error on submit.
+  const googleConn = await prisma.googleConnection.findUnique({
+    where: { userId: session.userId },
+    select: { isActive: true },
+  });
+  const googleConnected = !!googleConn?.isActive;
+
+  return <NewBusinessForm quota={quota} googleConnected={googleConnected} />;
 }

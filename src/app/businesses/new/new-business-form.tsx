@@ -40,7 +40,13 @@ function Shell({ children }: { children: React.ReactNode }) {
   );
 }
 
-export function NewBusinessForm({ quota }: { quota: BusinessQuotaResult }) {
+export function NewBusinessForm({
+  quota,
+  googleConnected = true,
+}: {
+  quota: BusinessQuotaResult;
+  googleConnected?: boolean;
+}) {
   const router = useRouter();
   const createMut = trpc.org.create.useMutation();
   const setActiveMut = trpc.org.setActive.useMutation();
@@ -81,6 +87,29 @@ export function NewBusinessForm({ quota }: { quota: BusinessQuotaResult }) {
           >
             ดูแผนและอัปเกรด
           </Link>
+        </div>
+      </Shell>
+    );
+  }
+
+  // Needs a Google connection — the new workspace's master sheet is created in
+  // the user's own Drive. Invited staff may not have connected Google yet.
+  if (!googleConnected) {
+    return (
+      <Shell>
+        <div className="onb-card">
+          <h1 className="onb-title">เชื่อมต่อ Google ก่อน</h1>
+          <p className="onb-subtitle" style={{ marginBottom: "1.25rem" }}>
+            การสร้างพื้นที่ทำงานจะสร้าง Google Sheet ในไดรฟ์ของคุณ —
+            กรุณาเชื่อมต่อบัญชี Google ของคุณก่อน แล้วกลับมาสร้างได้เลย
+          </p>
+          <a
+            href="/api/auth/google"
+            className="onb-btn-primary"
+            style={{ textDecoration: "none" }}
+          >
+            🔗 เชื่อมต่อ Google
+          </a>
         </div>
       </Shell>
     );
@@ -148,7 +177,22 @@ export function NewBusinessForm({ quota }: { quota: BusinessQuotaResult }) {
           </p>
         </div>
 
-        {error && <div className="onb-error">{error}</div>}
+        {error && (
+          <div className="onb-error">
+            {error}
+            {/(google|token|โทเคน|เชื่อมต่อ)/i.test(error) && (
+              <>
+                {" "}
+                <a
+                  href="/api/auth/google"
+                  style={{ color: "#2563eb", textDecoration: "underline" }}
+                >
+                  เชื่อมต่อ Google ใหม่
+                </a>
+              </>
+            )}
+          </div>
+        )}
 
         <EntityTypePicker
           value={form.entityType}
