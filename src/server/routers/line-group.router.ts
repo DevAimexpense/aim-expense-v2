@@ -57,7 +57,12 @@ export const lineGroupRouter = router({
       const sheets = await getSheetsService(input.orgId);
       const events = await sheets.getEvents();
       return events
-        .filter((e) => (e.Status || "").trim().toLowerCase() === "active")
+        .filter((e) => {
+          // Treat blank status as active (matches dashboard / event list).
+          // Only exclude projects explicitly closed (completed / cancelled).
+          const s = (e.Status || "active").trim().toLowerCase();
+          return s !== "completed" && s !== "cancelled";
+        })
         .map((e) => ({
           eventId: (e.EventID || "").trim(),
           eventName: e.EventName || "ไม่ระบุ",
