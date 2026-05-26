@@ -70,11 +70,12 @@ export default async function GoogleSettingsPage({
   if (!session) redirect("/login");
   if (session.onboardingStep !== "done") redirect("/");
 
-  const orgCtx = await getOrgContext(session.userId);
+  const orgCtx = await getOrgContext(session.userId, session.activeOrgId);
   if (!orgCtx) redirect("/");
 
-  // adminOnly per sidebar config — manager/accountant/staff shouldn't reconnect
-  if (orgCtx.role !== "admin") redirect("/dashboard");
+  // NOTE: any member may manage THEIR OWN Google connection here (this page
+  // queries googleConnection by session.userId). Non-admins need this to
+  // reconnect — e.g. to create their own workspace (which writes to their Drive).
 
   // Pull the bits we need directly from Prisma (one round trip — page is small)
   const [connection, org] = await Promise.all([

@@ -200,7 +200,7 @@ const NAV_GROUPS: NavGroup[] = [
         label: "เชื่อมต่อ Google",
         href: "/settings/google",
         icon: "🔗",
-        adminOnly: true,
+        // ทุก member จัดการ Google connection ของตัวเองได้ (ไม่ใช่ org-level)
       },
       {
         label: "LINE กลุ่ม",
