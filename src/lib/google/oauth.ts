@@ -7,18 +7,19 @@ import { google } from "googleapis";
 
 /**
  * Google OAuth2 scopes ที่ต้องการ
- * - userinfo.email + userinfo.profile → ข้อมูล user
- * - spreadsheets → อ่าน/เขียน Google Sheets
- * - drive.file → สร้าง/อ่านเฉพาะไฟล์ที่ app สร้าง (ไม่ใช่ทั้ง Drive)
+ * - userinfo.email + userinfo.profile → ข้อมูล user (non-sensitive)
+ * - drive.file → สร้าง/อ่าน/เขียนเฉพาะไฟล์ที่ app สร้างเอง (non-sensitive)
+ *   ครอบคลุม Sheets API (create/get/values/batchUpdate) บน master sheet
+ *   ที่แอปสร้าง — ไม่ต้องใช้ full `spreadsheets` scope
+ *
+ * ❗️ ตั้งใจ "ไม่ใช้" sensitive scopes (auth/spreadsheets, drive เต็ม) เพื่อ
+ * เลี่ยง Google OAuth verification — แอปจึง publish ใช้สาธารณะได้โดยไม่ต้อง
+ * ผ่าน review. ถ้าเพิ่ม sensitive scope ภายหลัง → ต้องยื่น verification.
  */
 export const GOOGLE_SCOPES = [
   "https://www.googleapis.com/auth/userinfo.email",
   "https://www.googleapis.com/auth/userinfo.profile",
-  "https://www.googleapis.com/auth/spreadsheets",
   "https://www.googleapis.com/auth/drive.file",
-  // Note: gmail.readonly ถูกตัดออก เพราะยังไม่ได้ใช้ + เป็น sensitive scope
-  // ที่ต้องผ่าน Google verification (workspace.googleapis.com/gmail ต้อง review)
-  // ถ้าต้องการเพิ่มภายหลัง → ต้องยื่น Google OAuth verification
 ];
 
 /**
