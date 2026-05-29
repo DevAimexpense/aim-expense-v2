@@ -8,17 +8,22 @@ import { google } from "googleapis";
 /**
  * Google OAuth2 scopes ที่ต้องการ
  * - userinfo.email + userinfo.profile → ข้อมูล user (non-sensitive)
- * - drive.file → สร้าง/อ่าน/เขียนเฉพาะไฟล์ที่ app สร้างเอง (non-sensitive)
- *   ครอบคลุม Sheets API (create/get/values/batchUpdate) บน master sheet
- *   ที่แอปสร้าง — ไม่ต้องใช้ full `spreadsheets` scope
+ * - spreadsheets → อ่าน/เขียน Google Sheets (sensitive — ต้อง verification)
+ * - drive.file → ไฟล์ที่ app สร้างเอง (non-sensitive)
  *
- * ❗️ ตั้งใจ "ไม่ใช้" sensitive scopes (auth/spreadsheets, drive เต็ม) เพื่อ
- * เลี่ยง Google OAuth verification — แอปจึง publish ใช้สาธารณะได้โดยไม่ต้อง
- * ผ่าน review. ถ้าเพิ่ม sensitive scope ภายหลัง → ต้องยื่น verification.
+ * ⚠️ เคยลองลดเหลือ drive.file อย่างเดียวเพื่อเลี่ยง verification — แต่ใน
+ * production พบว่าไม่พอ: master sheet ที่ user สร้างไว้ก่อน reconnect ใหม่
+ * จะเข้าไม่ถึง ("The caller does not have permission"). เลยต้องคง spreadsheets
+ * ไว้เพื่อความเข้ากันได้กับข้อมูลเดิม + ความเสถียร.
+ *
+ * ผลคือ Google จะแสดงหน้า "unverified app" จนกว่าจะยื่น verification (sensitive
+ * tier — ไม่ต้องผ่าน security assessment เหมือน restricted แต่ต้อง justify scope).
+ * Cap 100 users ระหว่างรอ.
  */
 export const GOOGLE_SCOPES = [
   "https://www.googleapis.com/auth/userinfo.email",
   "https://www.googleapis.com/auth/userinfo.profile",
+  "https://www.googleapis.com/auth/spreadsheets",
   "https://www.googleapis.com/auth/drive.file",
 ];
 
