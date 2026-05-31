@@ -439,18 +439,37 @@ async function pushProjectPicker(
   summaryText: string,
 ): Promise<void> {
   const sheets = await getSheetsService(org.orgId);
-  const [events, assignedEventIds] = await Promise.all([
-    sheets.getEvents(),
-    sheets.getEventIdsAssignedToUser(user),
-  ]);
-  const assignedSet = new Set(assignedEventIds.map((id) => id.trim()));
-  const activeAssignedEvents = events
-    .filter(
-      (e) =>
-        (e.Status || "").trim().toLowerCase() === "active" &&
-        assignedSet.has((e.EventID || "").trim()),
-    )
-    .slice(0, 12);
+  const events = await sheets.getEvents();
+
+  // Only project-scoped roles (project_manager) are limited to events they're
+  // explicitly assigned to — admin/owner/manager/accountant/staff see every
+  // active project, matching the web app's scopedEventIds() behaviour. The
+  // picker used to filter by assignment for ALL roles, so a freshly-created
+  // project (which has no EventAssignments row yet) never showed up in 1-1
+  // chat — not even for the owner who created it.
+  const pickerUserId = typeof user === "string" ? null : user.id || null;
+  const membership = pickerUserId
+    ? await prisma.orgMember.findUnique({
+        where: { orgId_userId: { orgId: org.orgId, userId: pickerUserId } },
+        select: { role: true },
+      })
+    : null;
+  const isProjectScoped = membership?.role === "project_manager";
+
+  // "active" = anything not explicitly completed/cancelled (blank counts as
+  // active, same as the dashboard / bind page).
+  let pickable = events.filter((e) => {
+    const s = (e.Status || "active").trim().toLowerCase();
+    return s !== "completed" && s !== "cancelled";
+  });
+  if (isProjectScoped) {
+    const assignedEventIds = await sheets.getEventIdsAssignedToUser(user);
+    const assignedSet = new Set(assignedEventIds.map((id) => id.trim()));
+    pickable = pickable.filter((e) =>
+      assignedSet.has((e.EventID || "").trim()),
+    );
+  }
+  const activeAssignedEvents = pickable.slice(0, 12);
 
   if (activeAssignedEvents.length === 0) {
     const defaults = await ensureLineDefaults(sheets);
