@@ -109,23 +109,49 @@ export default function LineGroupsPage() {
                     {g.groupId}
                   </div>
                 </div>
-                <button
-                  onClick={() => handleUnbind(g.id, g.groupName)}
-                  disabled={unbindMut.isPending}
+                <div
                   style={{
                     flexShrink: 0,
-                    padding: "0.5rem 0.875rem",
-                    background: "white",
-                    border: "1px solid #fecaca",
-                    color: "#dc2626",
-                    borderRadius: 8,
-                    fontSize: "0.8125rem",
-                    fontWeight: 600,
-                    cursor: "pointer",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "0.5rem",
                   }}
                 >
-                  ยกเลิก
-                </button>
+                  <a
+                    href={`/line-groups/bind?g=${encodeURIComponent(g.groupId)}`}
+                    style={{
+                      padding: "0.5rem 0.875rem",
+                      background: "white",
+                      border: "1px solid #bbf7d0",
+                      color: "#0f766e",
+                      borderRadius: 8,
+                      fontSize: "0.8125rem",
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      textDecoration: "none",
+                      textAlign: "center",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    เปลี่ยนโปรเจกต์
+                  </a>
+                  <button
+                    onClick={() => handleUnbind(g.id, g.groupName)}
+                    disabled={unbindMut.isPending}
+                    style={{
+                      padding: "0.5rem 0.875rem",
+                      background: "white",
+                      border: "1px solid #fecaca",
+                      color: "#dc2626",
+                      borderRadius: 8,
+                      fontSize: "0.8125rem",
+                      fontWeight: 600,
+                      cursor: "pointer",
+                    }}
+                  >
+                    ยกเลิก
+                  </button>
+                </div>
               </div>
             ))}
           </div>
