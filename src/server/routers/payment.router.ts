@@ -93,21 +93,23 @@ function toPaymentRow(payment: Record<string, string>) {
 /**
  * Project-manager write scope.
  *
- * PM has updatePayments/deletePayments enabled (the capability gate), but may
- * only create/edit/delete payments that are BOTH:
- *   (a) inside one of their assigned events (ctx.org.eventScope), and
- *   (b) team expenses (ExpenseType === "team").
+ * PM has updatePayments/deletePayments enabled (the capability gate), but a PM
+ * may only write a payment that is inside one of their assigned events
+ * (ctx.org.eventScope) AND is either:
+ *   (a) a team expense (ExpenseType === "team") — e.g. submitted via LINE group, or
+ *   (b) a row the PM created themselves (their own ตั้งเบิก, any expense type).
  *
  * All other roles are unaffected — this is a no-op unless role is
- * project_manager. Throws FORBIDDEN when the target is out of scope.
+ * project_manager. Throws FORBIDDEN when out of scope.
  *
- * `expenseType` is optional: pass it when the value is known (an existing row
- * or an explicit input). Omit it to skip the team-only check (e.g. on create,
- * where PMs may still record account expenses for their own project).
+ * Pass `eventId` to enforce the assigned-scope check. Pass `expenseType`
+ * (+ optionally `createdByUserId`) to enforce the team-or-own check. Omit a
+ * field to skip its check — e.g. on create we only check scope, since a PM may
+ * record either expense type for their own project.
  */
 function assertPmWriteScope(
-  ctx: { org: { role: string; eventScope: string[] } },
-  opts: { eventId?: string; expenseType?: string },
+  ctx: { org: { role: string; eventScope: string[] }; session: { userId: string } },
+  opts: { eventId?: string; expenseType?: string; createdByUserId?: string },
 ): void {
   if (ctx.org.role !== "project_manager") return;
 
@@ -122,12 +124,17 @@ function assertPmWriteScope(
     }
   }
 
-  if (opts.expenseType !== undefined && opts.expenseType !== "team") {
-    throw new TRPCError({
-      code: "FORBIDDEN",
-      message:
-        "Project Manager จัดการได้เฉพาะรายการ Team Expense (เบิกเงินสด) เท่านั้น",
-    });
+  if (opts.expenseType !== undefined) {
+    const isTeam = opts.expenseType === "team";
+    const isOwner =
+      !!opts.createdByUserId && opts.createdByUserId === ctx.session.userId;
+    if (!isTeam && !isOwner) {
+      throw new TRPCError({
+        code: "FORBIDDEN",
+        message:
+          "Project Manager จัดการได้เฉพาะรายการ Team Expense หรือรายการที่ตัวเองสร้างเท่านั้น",
+      });
+    }
   }
 }
 
@@ -344,7 +351,10 @@ export const paymentRouter = router({
         if (input.eventId !== undefined)
           assertPmWriteScope(ctx, { eventId: input.eventId });
         if (input.expenseType !== undefined)
-          assertPmWriteScope(ctx, { expenseType: input.expenseType });
+          assertPmWriteScope(ctx, {
+            expenseType: input.expenseType,
+            createdByUserId: existing.CreatedByUserId,
+          });
       }
 
       // Permission gate (post-approval):
@@ -462,6 +472,7 @@ export const paymentRouter = router({
       assertPmWriteScope(ctx, {
         eventId: existing.EventID,
         expenseType: existing.ExpenseType,
+        createdByUserId: existing.CreatedByUserId,
       });
 
       const updates: Record<string, string | number> = {
@@ -724,6 +735,7 @@ export const paymentRouter = router({
       assertPmWriteScope(ctx, {
         eventId: existing.EventID,
         expenseType: existing.ExpenseType,
+        createdByUserId: existing.CreatedByUserId,
       });
 
       const ok = await sheets.deleteById(SHEET_TABS.PAYMENTS, "PaymentID", input.paymentId);

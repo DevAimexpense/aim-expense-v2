@@ -61,12 +61,16 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "ไม่พบรายการจ่าย" }, { status: 404 });
     }
 
-    // Project managers may only attach files to team expenses inside their
-    // assigned events (mirrors the payment.router PM write guards).
+    // Project managers may attach files to a payment inside their assigned
+    // events that is either a team expense OR a row they created themselves
+    // (mirrors the payment.router PM write guards).
     if (org.role === "project_manager") {
       const inScope = org.eventScope.includes((payment.EventID || "").trim());
       const isTeam = (payment.ExpenseType || "") === "team";
-      if (!inScope || !isTeam) {
+      const isOwner =
+        !!payment.CreatedByUserId &&
+        payment.CreatedByUserId === session.userId;
+      if (!inScope || (!isTeam && !isOwner)) {
         return NextResponse.json(
           { error: "ไม่มีสิทธิ์แนบไฟล์ให้รายการนี้" },
           { status: 403 }
