@@ -190,6 +190,7 @@ export const orgRouter = router({
       orgId: ctx.org.orgId,
       role: ctx.org.role,
       permissions: ctx.org.permissions,
+      eventScope: ctx.org.eventScope,
     };
   }),
 

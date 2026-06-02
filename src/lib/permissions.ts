@@ -127,17 +127,22 @@ export const DEFAULT_PERMISSIONS: Record<OrgRole, Permissions> = {
     manageTaxInvoices: false,
   },
 
-  // Project Manager — sees totals/reports/dashboard but ONLY for assigned
-  // projects (scoping enforced server-side via eventScope). Cannot manage
-  // projects or system settings. Phase 1 = view-only; scoped payment edit/
-  // approve/delete (assigned + team expenses) lands in Phase 2.
+  // Project Manager — sees totals/reports/dashboard for assigned projects only
+  // (scoping enforced server-side via eventScope). Cannot manage projects or
+  // system settings.
+  //
+  // Phase 2: PM can record (ตั้งเบิก) and edit/delete payments, but ONLY for
+  // team expenses inside their assigned events. updatePayments/deletePayments
+  // are enabled here as the *capability* gate; the per-row scope+expenseType
+  // restriction is enforced in payment.router (see assertPmWriteScope) so PM
+  // can never touch payments outside their projects or non-team expenses.
   project_manager: {
     manageEvents: false,
     assignEvents: false,
     managePayees: false,
     manageBanks: false,
-    updatePayments: false,
-    deletePayments: false,
+    updatePayments: true,
+    deletePayments: true,
     approvePayments: false,
     editPaymentAfterApproval: false,
     viewReports: true,

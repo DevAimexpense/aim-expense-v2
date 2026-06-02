@@ -1010,7 +1010,7 @@ async function confirmDraftAsync(draft: {
     PaymentID: paymentId,
     EventID: finalEventId,
     PayeeID: payeeId,
-    ExpenseType: "general",
+    ExpenseType: "team",
     CompanyBankID: "",
     InvoiceNumber: ocr.invoiceNumber || "",
     InvoiceFileURL: "",

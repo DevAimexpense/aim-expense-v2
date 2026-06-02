@@ -87,7 +87,17 @@ export function PaymentModal({
   // R6 ownership rule: ถ้าไม่ใช่ admin/manager และไม่ใช่เจ้าของ → readonly
   const isOwner =
     isEdit && !!payment.createdByUserId && payment.createdByUserId === myUserId;
-  const noOwnershipPermission = isEdit && !isAdminOrManager && !isOwner;
+  // Project managers may edit team expenses inside their assigned events even
+  // when they didn't create the row (e.g. expenses sent via the LINE group).
+  // Mirrors the payment.router PM write guard so the UI isn't read-only here.
+  const myEventScope = meQuery.data?.eventScope || [];
+  const isPmInScope =
+    isEdit &&
+    myRole === "project_manager" &&
+    myEventScope.includes((payment.eventId || "").trim()) &&
+    payment.expenseType === "team";
+  const noOwnershipPermission =
+    isEdit && !isAdminOrManager && !isOwner && !isPmInScope;
   // Read-only ถ้า:
   //  - รายการถูกอนุมัติแล้ว และ user ไม่มีสิทธิ์ editPaymentAfterApproval
   //  - หรือไม่ใช่เจ้าของรายการ และไม่ใช่ admin/manager

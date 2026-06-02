@@ -61,6 +61,19 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "ไม่พบรายการจ่าย" }, { status: 404 });
     }
 
+    // Project managers may only attach files to team expenses inside their
+    // assigned events (mirrors the payment.router PM write guards).
+    if (org.role === "project_manager") {
+      const inScope = org.eventScope.includes((payment.EventID || "").trim());
+      const isTeam = (payment.ExpenseType || "") === "team";
+      if (!inScope || !isTeam) {
+        return NextResponse.json(
+          { error: "ไม่มีสิทธิ์แนบไฟล์ให้รายการนี้" },
+          { status: 403 }
+        );
+      }
+    }
+
     const event = await sheets.getEventById(payment.EventID);
     const payee = await sheets.getPayeeById(payment.PayeeID);
 

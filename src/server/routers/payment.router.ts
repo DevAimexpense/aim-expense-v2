@@ -90,6 +90,47 @@ function toPaymentRow(payment: Record<string, string>) {
   };
 }
 
+/**
+ * Project-manager write scope.
+ *
+ * PM has updatePayments/deletePayments enabled (the capability gate), but may
+ * only create/edit/delete payments that are BOTH:
+ *   (a) inside one of their assigned events (ctx.org.eventScope), and
+ *   (b) team expenses (ExpenseType === "team").
+ *
+ * All other roles are unaffected — this is a no-op unless role is
+ * project_manager. Throws FORBIDDEN when the target is out of scope.
+ *
+ * `expenseType` is optional: pass it when the value is known (an existing row
+ * or an explicit input). Omit it to skip the team-only check (e.g. on create,
+ * where PMs may still record account expenses for their own project).
+ */
+function assertPmWriteScope(
+  ctx: { org: { role: string; eventScope: string[] } },
+  opts: { eventId?: string; expenseType?: string },
+): void {
+  if (ctx.org.role !== "project_manager") return;
+
+  if (opts.eventId !== undefined) {
+    const inScope = ctx.org.eventScope.includes((opts.eventId || "").trim());
+    if (!inScope) {
+      throw new TRPCError({
+        code: "FORBIDDEN",
+        message:
+          "Project Manager จัดการได้เฉพาะโปรเจกต์ที่ได้รับมอบหมายเท่านั้น",
+      });
+    }
+  }
+
+  if (opts.expenseType !== undefined && opts.expenseType !== "team") {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message:
+        "Project Manager จัดการได้เฉพาะรายการ Team Expense (เบิกเงินสด) เท่านั้น",
+    });
+  }
+}
+
 export const paymentRouter = router({
   list: orgProcedure
     .input(
@@ -171,6 +212,9 @@ export const paymentRouter = router({
           message: "Account Expense ต้องเลือกบัญชีต้นทาง",
         });
       }
+
+      // PM may only record into their assigned events.
+      assertPmWriteScope(ctx, { eventId: input.eventId });
 
       const sheets = await getSheetsService(ctx.org.orgId);
       await ensureTabsCached(sheets, ctx.org.orgId);
@@ -275,17 +319,32 @@ export const paymentRouter = router({
 
       // R6 Ownership Gate:
       // - admin / manager → แก้ของใครก็ได้
+      // - project_manager → แก้ team expense ในโปรเจกต์ที่ได้รับมอบหมายได้ทั้งหมด
+      //   (รวมรายการที่ส่งผ่าน LINE กลุ่ม ซึ่งสร้างโดยคนอื่น)
       // - role อื่น (มี updatePayments เช่น accountant) → แก้ได้เฉพาะของตัวเองเท่านั้น
       const role = ctx.org.role;
       const isAdminOrManager = role === "admin" || role === "manager";
       const isOwner =
         !!existing.CreatedByUserId && existing.CreatedByUserId === ctx.session.userId;
-      if (!isAdminOrManager && !isOwner) {
+      const isPmInScope =
+        role === "project_manager" &&
+        ctx.org.eventScope.includes((existing.EventID || "").trim()) &&
+        (existing.ExpenseType || "") === "team";
+      if (!isAdminOrManager && !isOwner && !isPmInScope) {
         throw new TRPCError({
           code: "FORBIDDEN",
           message:
             "คุณไม่มีสิทธิ์แก้ไขรายการที่สร้างโดยผู้อื่น — เฉพาะ Admin/Manager เท่านั้น",
         });
+      }
+
+      // A PM must not move a payment out of their assigned scope, nor change a
+      // team expense into a non-team one (which would remove it from their reach).
+      if (role === "project_manager") {
+        if (input.eventId !== undefined)
+          assertPmWriteScope(ctx, { eventId: input.eventId });
+        if (input.expenseType !== undefined)
+          assertPmWriteScope(ctx, { expenseType: input.expenseType });
       }
 
       // Permission gate (post-approval):
@@ -398,6 +457,12 @@ export const paymentRouter = router({
       if (existing.Status !== "approved" && existing.Status !== "paid" && existing.Status !== "cleared") {
         throw new Error("บันทึกใบเสร็จได้เฉพาะรายการที่อนุมัติหรือจ่ายแล้ว");
       }
+
+      // PM may only attach receipts to team expenses in their assigned events.
+      assertPmWriteScope(ctx, {
+        eventId: existing.EventID,
+        expenseType: existing.ExpenseType,
+      });
 
       const updates: Record<string, string | number> = {
         UpdatedAt: new Date().toISOString(),
@@ -606,11 +671,16 @@ export const paymentRouter = router({
         throw new Error("อัปเดตค่าใช้จ่ายจริงได้เฉพาะรายการที่จ่ายแล้ว");
       }
 
-      // R6 Ownership Gate: staff แก้ได้เฉพาะของตัวเอง, admin/manager แก้ได้ทั้งหมด
+      // R6 Ownership Gate: staff แก้ได้เฉพาะของตัวเอง, admin/manager แก้ได้ทั้งหมด,
+      // project_manager แก้ team expense ในโปรเจกต์ที่ได้รับมอบหมายได้ทั้งหมด
       const role = ctx.org.role;
       const isAdminOrManager = role === "admin" || role === "manager";
       const isOwner = !!existing.CreatedByUserId && existing.CreatedByUserId === ctx.session.userId;
-      if (!isAdminOrManager && !isOwner) {
+      const isPmInScope =
+        role === "project_manager" &&
+        ctx.org.eventScope.includes((existing.EventID || "").trim()) &&
+        (existing.ExpenseType || "") === "team";
+      if (!isAdminOrManager && !isOwner && !isPmInScope) {
         throw new TRPCError({
           code: "FORBIDDEN",
           message: "คุณไม่มีสิทธิ์แก้ไขรายการที่สร้างโดยผู้อื่น",
@@ -649,6 +719,12 @@ export const paymentRouter = router({
       if (existing.Status !== "pending" && existing.Status !== "rejected") {
         throw new Error("ลบได้เฉพาะรายการที่ยังไม่อนุมัติ");
       }
+
+      // PM may only delete team expenses inside their assigned events.
+      assertPmWriteScope(ctx, {
+        eventId: existing.EventID,
+        expenseType: existing.ExpenseType,
+      });
 
       const ok = await sheets.deleteById(SHEET_TABS.PAYMENTS, "PaymentID", input.paymentId);
       if (!ok) throw new Error("ลบไม่สำเร็จ");
