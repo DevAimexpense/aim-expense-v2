@@ -45,14 +45,15 @@ export const eventRouter = router({
         (sum, p) => sum + (parseFloat(p.GTTLAmount) || 0),
         0
       );
-      // Income received into this project (net of WHT = เงินในมือจริง).
-      // Excludes voided billings.
+      // Income booked into this project = gross amount (GrandTotal, the figure
+      // the user entered). WHT withheld is a tax credit tracked separately in
+      // 50ทวิ/ภงด — not deducted from the cashflow shown here. Excludes voided.
       const totalIncome = billings
         .filter(
           (b) =>
             (b.EventID || "").trim() === event.EventID && b.Status !== "void"
         )
-        .reduce((sum, b) => sum + (parseFloat(b.AmountReceivable) || 0), 0);
+        .reduce((sum, b) => sum + (parseFloat(b.GrandTotal) || 0), 0);
       const budget = parseFloat(event.Budget) || 0;
       const remaining = budget - totalSpent;
       const percentage = budget > 0 ? (totalSpent / budget) * 100 : 0;
