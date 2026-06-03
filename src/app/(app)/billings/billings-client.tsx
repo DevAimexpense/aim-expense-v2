@@ -374,6 +374,19 @@ export function BillingsClient({ entityType = "company" }: { entityType?: string
 
       {showQuickIncome && (
         <QuickIncomeModal
+          payers={Array.from(
+            new Map(
+              rows
+                .filter((r) => (r.customerNameSnapshot || "").trim())
+                .map((r) => [
+                  r.customerNameSnapshot.trim(),
+                  {
+                    name: r.customerNameSnapshot.trim(),
+                    taxId: (r.customerTaxIdSnapshot || "").trim(),
+                  },
+                ]),
+            ).values(),
+          )}
           onClose={() => setShowQuickIncome(false)}
           onSuccess={() => {
             setShowQuickIncome(false);
@@ -385,10 +398,21 @@ export function BillingsClient({ entityType = "company" }: { entityType?: string
   );
 }
 
+// WHT presets for individuals — the rates a freelancer/landlord meets most
+// often, with the income type they map to. Tapping a chip beats typing.
+const WHT_PRESETS: { pct: string; label: string }[] = [
+  { pct: "0", label: "ไม่หัก" },
+  { pct: "1", label: "1% ขนส่ง" },
+  { pct: "3", label: "3% รับจ้าง/บริการ" },
+  { pct: "5", label: "5% เช่า/วิชาชีพ" },
+];
+
 function QuickIncomeModal({
+  payers,
   onClose,
   onSuccess,
 }: {
+  payers: { name: string; taxId: string }[];
   onClose: () => void;
   onSuccess: () => void;
 }) {
@@ -398,9 +422,20 @@ function QuickIncomeModal({
     payerTaxId: "",
     docDate: new Date().toISOString().slice(0, 10),
     amount: "",
-    whtPercent: "0",
+    whtPercent: "3",
     notes: "",
   });
+
+  // Picking a known payer name auto-fills their tax ID (repeat clients →
+  // no re-typing the 13-digit number).
+  const onPayerNameChange = (name: string) => {
+    const match = payers.find((p) => p.name === name.trim());
+    setForm((f) => ({
+      ...f,
+      payerName: name,
+      payerTaxId: match && match.taxId ? match.taxId : f.payerTaxId,
+    }));
+  };
   const [file, setFile] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -490,11 +525,21 @@ function QuickIncomeModal({
                 <input
                   type="text"
                   value={form.payerName}
-                  onChange={(e) => setForm({ ...form, payerName: e.target.value })}
+                  onChange={(e) => onPayerNameChange(e.target.value)}
                   placeholder="ชื่อผู้จ่ายเงิน / บริษัทผู้ว่าจ้าง"
                   className="app-input"
                   maxLength={200}
+                  list="quick-income-payers"
+                  autoFocus
+                  autoComplete="off"
                 />
+                {payers.length > 0 && (
+                  <datalist id="quick-income-payers">
+                    {payers.map((p) => (
+                      <option key={p.name} value={p.name} />
+                    ))}
+                  </datalist>
+                )}
               </div>
               <div className="app-form-group">
                 <label className="app-label">เลขผู้เสียภาษีผู้จ่าย</label>
@@ -543,16 +588,40 @@ function QuickIncomeModal({
 
             <div className="app-form-group">
               <label className="app-label">หัก ณ ที่จ่าย (%)</label>
-              <input
-                type="number"
-                step="0.01"
-                min="0"
-                max="15"
-                value={form.whtPercent}
-                onChange={(e) => setForm({ ...form, whtPercent: e.target.value })}
-                className="app-input num"
-                style={{ maxWidth: "160px" }}
-              />
+              <div
+                style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  gap: "0.5rem",
+                  alignItems: "center",
+                }}
+              >
+                {WHT_PRESETS.map((p) => {
+                  const active = form.whtPercent === p.pct;
+                  return (
+                    <button
+                      key={p.pct}
+                      type="button"
+                      onClick={() => setForm({ ...form, whtPercent: p.pct })}
+                      className={`app-btn ${active ? "app-btn-primary" : "app-btn-secondary"}`}
+                      style={{ padding: "0.4rem 0.75rem", fontSize: "0.8125rem" }}
+                    >
+                      {p.label}
+                    </button>
+                  );
+                })}
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  max="15"
+                  value={form.whtPercent}
+                  onChange={(e) => setForm({ ...form, whtPercent: e.target.value })}
+                  className="app-input num"
+                  style={{ maxWidth: "90px" }}
+                  aria-label="หัก ณ ที่จ่าย กำหนดเอง (%)"
+                />
+              </div>
             </div>
 
             <div
