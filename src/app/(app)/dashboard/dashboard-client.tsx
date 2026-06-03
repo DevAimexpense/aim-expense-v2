@@ -27,12 +27,16 @@ export function DashboardClient({
   orgName,
   userName,
   plan,
+  entityType = "company",
 }: {
   orgName: string;
   userName: string;
   plan: string;
+  entityType?: string;
 }) {
   const features = PLAN_FEATURES[plan] || PLAN_FEATURES.free;
+  // Personal: โปรเจกต์ = ก้อนเงิน → รายรับ/เบิกใช้/คงเหลือ (ไม่ใช่ งบ/คงงบ)
+  const isPersonal = entityType === "personal";
   const [filterEvent, setFilterEvent] = useState<string>("all");
   const [filterMonth, setFilterMonth] = useState<string>(currentMonth());
 
@@ -51,6 +55,9 @@ export function DashboardClient({
   const totalSpent = filteredEvents.reduce((sum, e) => sum + e.totalSpent, 0);
   const totalRemaining = totalBudget - totalSpent;
   const overBudgetCount = filteredEvents.filter((e) => e.isOverBudget).length;
+  // Personal: รายรับเข้าก้อน (totalIncome) − เบิกใช้ = คงเหลือ
+  const totalIncome = filteredEvents.reduce((sum, e) => sum + (e.totalIncome || 0), 0);
+  const totalBalance = filteredEvents.reduce((sum, e) => sum + (e.balance || 0), 0);
 
   // Revenue / profit from real documents (Pro+ only — gated by features.pl).
   // Quotation = pipeline (exclude rejected/void); Invoiced = issued bills
@@ -139,24 +146,34 @@ export function DashboardClient({
         <StatCard
           color="amber"
           icon="💰"
-          label="งบประมาณรวม"
-          value={`฿${formatNumber(totalBudget)}`}
+          label={isPersonal ? "รายรับรวม" : "งบประมาณรวม"}
+          value={`฿${formatNumber(isPersonal ? totalIncome : totalBudget)}`}
           sub={filterEvent === "all" ? "ทุกโปรเจกต์" : "โปรเจกต์ที่เลือก"}
         />
         <StatCard
           color="rose"
           icon="📤"
-          label="ใช้ไปแล้ว"
+          label={isPersonal ? "เบิกใช้แล้ว" : "ใช้ไปแล้ว"}
           value={`฿${formatNumber(totalSpent)}`}
-          sub={overBudgetCount > 0 ? `⚠️ เกินงบ ${overBudgetCount} โปรเจกต์` : "อยู่ในงบ"}
+          sub={
+            isPersonal
+              ? "รวมทุกรายจ่าย"
+              : overBudgetCount > 0
+              ? `⚠️ เกินงบ ${overBudgetCount} โปรเจกต์`
+              : "อยู่ในงบ"
+          }
         />
         <StatCard
           color="green"
           icon="🪙"
-          label="งบคงเหลือ"
-          value={`฿${formatNumber(totalRemaining)}`}
+          label={isPersonal ? "คงเหลือ" : "งบคงเหลือ"}
+          value={`฿${formatNumber(isPersonal ? totalBalance : totalRemaining)}`}
           sub={
-            totalBudget > 0
+            isPersonal
+              ? totalIncome > 0
+                ? `${((totalBalance / totalIncome) * 100).toFixed(0)}% ของรายรับ`
+                : "ยังไม่มีรายรับ"
+              : totalBudget > 0
               ? `${((totalRemaining / totalBudget) * 100).toFixed(0)}% ของงบ`
               : "ยังไม่มีงบประมาณ"
           }
