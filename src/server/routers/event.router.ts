@@ -26,6 +26,8 @@ export const eventRouter = router({
     const sheets = await getSheetsService(ctx.org.orgId);
     const allEvents = await sheets.getEvents();
     const payments = await sheets.getPayments();
+    // Income booked into each project (personal: รายรับ → ก้อนเงินที่เบิกใช้).
+    const billings = await sheets.getBillings();
 
     // Project-scoped roles (e.g. project_manager) only see assigned events.
     const scope = scopedEventIds(ctx.org);
@@ -43,15 +45,27 @@ export const eventRouter = router({
         (sum, p) => sum + (parseFloat(p.GTTLAmount) || 0),
         0
       );
+      // Income received into this project (net of WHT = เงินในมือจริง).
+      // Excludes voided billings.
+      const totalIncome = billings
+        .filter(
+          (b) =>
+            (b.EventID || "").trim() === event.EventID && b.Status !== "void"
+        )
+        .reduce((sum, b) => sum + (parseFloat(b.AmountReceivable) || 0), 0);
       const budget = parseFloat(event.Budget) || 0;
       const remaining = budget - totalSpent;
       const percentage = budget > 0 ? (totalSpent / budget) * 100 : 0;
+      // Personal model: คงเหลือ = รายรับที่เข้ามา − เบิกใช้
+      const balance = totalIncome - totalSpent;
 
       return {
         eventId: event.EventID,
         eventName: event.EventName,
         budget,
         totalSpent,
+        totalIncome,
+        balance,
         remaining,
         percentage,
         isOverBudget: totalSpent > budget,

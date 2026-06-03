@@ -188,6 +188,7 @@ export const orgRouter = router({
       userId: ctx.session.userId,
       displayName: ctx.session.displayName,
       orgId: ctx.org.orgId,
+      entityType: ctx.org.entityType,
       role: ctx.org.role,
       permissions: ctx.org.permissions,
       eventScope: ctx.org.eventScope,

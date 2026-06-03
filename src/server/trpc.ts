@@ -25,6 +25,7 @@ export interface TRPCContext {
   org: {
     orgId: string;
     orgName: string;
+    entityType: string;
     role: string;
     permissions: Permissions;
     eventScope: string[];
@@ -59,6 +60,7 @@ export async function createTRPCContext(): Promise<TRPCContext> {
       ? {
           orgId: org.orgId,
           orgName: org.orgName,
+          entityType: org.entityType,
           role: org.role,
           permissions: org.permissions,
           eventScope: org.eventScope,

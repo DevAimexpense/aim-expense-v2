@@ -424,7 +424,13 @@ function QuickIncomeModal({
   onSuccess: () => void;
 }) {
   const quickMut = trpc.billing.quickIncome.useMutation();
+  // รายรับฝั่งบุคคลต้องผูกโปรเจกต์ (ก้อนเงิน) → ดึงรายการโปรเจกต์มาให้เลือก
+  const eventsQuery = trpc.event.list.useQuery();
+  const activeEvents = (eventsQuery.data || []).filter(
+    (e) => (e.status || "active") !== "completed" && (e.status || "active") !== "cancelled",
+  );
   const [form, setForm] = useState({
+    eventId: "",
     payerName: "",
     payerTaxId: "",
     docDate: new Date().toISOString().slice(0, 10),
@@ -474,6 +480,10 @@ function QuickIncomeModal({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    if (!form.eventId) {
+      setError("กรุณาเลือกโปรเจกต์ (ก้อนเงินที่จะเบิกใช้)");
+      return;
+    }
     if (!form.payerName.trim()) {
       setError("กรุณากรอกชื่อผู้จ่าย");
       return;
@@ -485,6 +495,10 @@ function QuickIncomeModal({
     setBusy(true);
     try {
       const res = await quickMut.mutateAsync({
+        eventId: form.eventId,
+        eventName:
+          activeEvents.find((e) => e.eventId === form.eventId)?.eventName ||
+          undefined,
         payerName: form.payerName.trim(),
         payerTaxId: form.payerTaxId.trim() || undefined,
         docDate: form.docDate,
@@ -540,6 +554,36 @@ function QuickIncomeModal({
 
           <div className="app-modal-body">
             {error && <div className="app-error-msg">{error}</div>}
+
+            {/* โปรเจกต์ = ก้อนเงินที่รายรับนี้เข้า แล้วจะเบิกใช้ทีหลัง */}
+            <div className="app-form-group">
+              <label className="app-label app-label-required">
+                เข้าโปรเจกต์ (ก้อนเงิน)
+              </label>
+              {eventsQuery.isLoading ? (
+                <p className="app-hint">กำลังโหลดโปรเจกต์...</p>
+              ) : activeEvents.length === 0 ? (
+                <div className="app-hint">
+                  ยังไม่มีโปรเจกต์ — สร้างก่อนเพื่อบันทึกรายรับ:{" "}
+                  <a href="/events" style={{ color: "#2563eb" }}>
+                    + สร้างโปรเจกต์
+                  </a>
+                </div>
+              ) : (
+                <select
+                  value={form.eventId}
+                  onChange={(e) => setForm({ ...form, eventId: e.target.value })}
+                  className="app-input"
+                >
+                  <option value="">— เลือกโปรเจกต์ —</option>
+                  {activeEvents.map((ev) => (
+                    <option key={ev.eventId} value={ev.eventId}>
+                      {ev.eventName}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
 
             <div className="app-form-grid cols-2">
               <div className="app-form-group">

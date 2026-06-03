@@ -373,6 +373,9 @@ export const billingRouter = router({
       z.object({
         payerName: z.string().trim().min(1, "กรุณากรอกชื่อผู้จ่าย").max(200),
         payerTaxId: z.string().trim().max(20).optional(),
+        // รายรับฝั่งบุคคลต้องผูกโปรเจกต์ (ก้อนเงินที่จะเบิกใช้ทีหลัง)
+        eventId: z.string().trim().min(1, "กรุณาเลือกโปรเจกต์"),
+        eventName: z.string().trim().max(200).optional(),
         docDate: z.string().min(1),
         amount: z.number().min(0.01, "จำนวนเงินต้องมากกว่า 0"),
         whtPercent: z.number().min(0).max(15).default(0),
@@ -427,8 +430,8 @@ export const billingRouter = router({
           IssuerBranchSnapshot: issuer.branchLabel,
           IssuerAddressSnapshot: issuer.address,
           SourceQuotationID: "",
-          EventID: "",
-          ProjectName: "",
+          EventID: input.eventId,
+          ProjectName: input.eventName || "",
           Status: "paid",
           Subtotal: subtotal,
           DiscountAmount: 0,

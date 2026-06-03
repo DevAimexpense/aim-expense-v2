@@ -14,6 +14,9 @@ export default function EventsPage() {
   const utils = trpc.useUtils();
   const eventsQuery = trpc.event.list.useQuery();
   const events = eventsQuery.data || [];
+  const meQuery = trpc.org.me.useQuery();
+  // ฝั่งบุคคล: โปรเจกต์ = ก้อนเงิน → แสดง รายรับ/เบิกใช้/คงเหลือ (ไม่ใช่ งบ/ใช้ไป)
+  const isPersonal = meQuery.data?.entityType === "personal";
 
   const [showModal, setShowModal] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -111,9 +114,9 @@ export default function EventsPage() {
               <tr>
                 <th>ชื่อโปรเจกต์</th>
                 <th>สถานะ</th>
-                <th className="text-right">งบประมาณ</th>
-                <th className="text-right">ใช้ไป</th>
-                <th>การใช้งบ</th>
+                <th className="text-right">{isPersonal ? "รายรับ" : "งบประมาณ"}</th>
+                <th className="text-right">{isPersonal ? "เบิกใช้" : "ใช้ไป"}</th>
+                <th className="text-right">{isPersonal ? "คงเหลือ" : "การใช้งบ"}</th>
                 <th>ระยะเวลา</th>
                 <th className="text-center">รายการ</th>
                 <th className="text-center"></th>
@@ -145,25 +148,37 @@ export default function EventsPage() {
                       </span>
                     </td>
                     <td className="text-right num">
-                      ฿{formatNumber(event.budget)}
+                      ฿{formatNumber(isPersonal ? event.totalIncome : event.budget)}
                     </td>
                     <td
                       className="text-right num"
-                      style={{ color: event.isOverBudget ? "#dc2626" : "#0f172a" }}
+                      style={{ color: !isPersonal && event.isOverBudget ? "#dc2626" : "#0f172a" }}
                     >
                       ฿{formatNumber(event.totalSpent)}
                     </td>
-                    <td style={{ minWidth: "140px" }}>
-                      <div className="budget-bar-wrap">
-                        <div
-                          className={`budget-bar-fill ${fillClass}`}
-                          style={{ width: `${Math.min(event.percentage, 100)}%` }}
-                        />
-                      </div>
-                      <div style={{ fontSize: "0.6875rem", color: "#64748b", marginTop: "0.25rem" }}>
-                        {event.percentage.toFixed(1)}%
-                      </div>
-                    </td>
+                    {isPersonal ? (
+                      <td
+                        className="text-right num"
+                        style={{
+                          fontWeight: 700,
+                          color: event.balance < 0 ? "#dc2626" : "#059669",
+                        }}
+                      >
+                        ฿{formatNumber(event.balance)}
+                      </td>
+                    ) : (
+                      <td style={{ minWidth: "140px" }}>
+                        <div className="budget-bar-wrap">
+                          <div
+                            className={`budget-bar-fill ${fillClass}`}
+                            style={{ width: `${Math.min(event.percentage, 100)}%` }}
+                          />
+                        </div>
+                        <div style={{ fontSize: "0.6875rem", color: "#64748b", marginTop: "0.25rem" }}>
+                          {event.percentage.toFixed(1)}%
+                        </div>
+                      </td>
+                    )}
                     <td style={{ fontSize: "0.75rem", color: "#64748b" }}>
                       {formatDate(event.startDate)}
                       <br />
@@ -204,6 +219,7 @@ export default function EventsPage() {
       {showModal && (
         <EventModal
           event={editingEvent}
+          isPersonal={isPersonal}
           onClose={() => {
             setShowModal(false);
             setEditingId(null);
@@ -228,6 +244,7 @@ export default function EventsPage() {
 
 function EventModal({
   event,
+  isPersonal = false,
   onClose,
   onSuccess,
 }: {
@@ -240,6 +257,7 @@ function EventModal({
     description: string;
     status: string;
   };
+  isPersonal?: boolean;
   onClose: () => void;
   onSuccess: () => void;
 }) {
@@ -348,17 +366,20 @@ function EventModal({
             </div>
 
             <div className="app-form-grid cols-2">
-              <div className="app-form-group">
-                <label className="app-label app-label-required">งบประมาณ (บาท)</label>
-                <input
-                  type="number"
-                  value={form.budget}
-                  onChange={(e) => setForm({ ...form, budget: parseFloat(e.target.value) || 0 })}
-                  min={0}
-                  step={1000}
-                  className="app-input num"
-                />
-              </div>
+              {/* ฝั่งบุคคลไม่ต้องตั้งงบ — คงเหลือมาจากรายรับจริงที่เข้าโปรเจกต์ */}
+              {!isPersonal && (
+                <div className="app-form-group">
+                  <label className="app-label app-label-required">งบประมาณ (บาท)</label>
+                  <input
+                    type="number"
+                    value={form.budget}
+                    onChange={(e) => setForm({ ...form, budget: parseFloat(e.target.value) || 0 })}
+                    min={0}
+                    step={1000}
+                    className="app-input num"
+                  />
+                </div>
+              )}
 
               {isEdit && (
                 <div className="app-form-group">
