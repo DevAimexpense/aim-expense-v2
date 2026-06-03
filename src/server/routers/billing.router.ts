@@ -376,6 +376,11 @@ export const billingRouter = router({
         docDate: z.string().min(1),
         amount: z.number().min(0.01, "จำนวนเงินต้องมากกว่า 0"),
         whtPercent: z.number().min(0).max(15).default(0),
+        // เงินเดือน (40(1)) หักแบบขั้นบันได → ผู้ใช้กรอกยอดภาษีหักเป็นบาทตรงๆ
+        // ได้ ถ้าส่งมาจะใช้ค่านี้แทนการคำนวณจาก whtPercent
+        whtAmount: z.number().min(0).optional(),
+        // ประเภทเงินได้: salary | service | rent | transport | other
+        incomeType: z.string().trim().max(40).optional(),
         notes: z.string().max(500).optional(),
       })
     )
@@ -393,15 +398,19 @@ export const billingRouter = router({
         SHEET_TABS.BILLINGS
       );
 
-      const lines = [
-        {
-          description: input.notes?.trim() || "รายรับ",
-          quantity: 1,
-          unitPrice: input.amount,
-          discountPercent: 0,
-        },
-      ];
-      const totals = computeBillingTotals(lines, false, 0, input.whtPercent);
+      // Personal income is not VAT-registered → no VAT. Compute totals locally
+      // instead of computeBillingTotals (which always adds 7% VAT). WHT can be
+      // given as a baht amount (salary, stepped withholding) or derived from %.
+      const lineDescription = input.notes?.trim() || "รายรับ";
+      const subtotal = round2(input.amount);
+      const lineTotal = subtotal;
+      const vatAmount = 0;
+      const grandTotal = subtotal;
+      const whtAmount =
+        input.whtAmount !== undefined
+          ? round2(input.whtAmount)
+          : round2((subtotal * input.whtPercent) / 100);
+      const amountReceivable = round2(grandTotal - whtAmount);
       const issuer = await resolveIssuerBranch(ctx.org.orgId, undefined);
       const now = new Date().toISOString();
 
@@ -421,15 +430,15 @@ export const billingRouter = router({
           EventID: "",
           ProjectName: "",
           Status: "paid",
-          Subtotal: totals.subtotal,
+          Subtotal: subtotal,
           DiscountAmount: 0,
-          VATAmount: totals.vatAmount,
+          VATAmount: vatAmount,
           VATIncluded: "FALSE",
           WHTPercent: input.whtPercent,
-          WHTAmount: totals.whtAmount,
-          GrandTotal: totals.grandTotal,
-          AmountReceivable: totals.amountReceivable,
-          PaidAmount: totals.amountReceivable,
+          WHTAmount: whtAmount,
+          GrandTotal: grandTotal,
+          AmountReceivable: amountReceivable,
+          PaidAmount: amountReceivable,
           PaidDate: input.docDate,
           PaymentMethod: "",
           BankAccountID: "",
@@ -441,17 +450,18 @@ export const billingRouter = router({
           UpdatedAt: now,
           PdfUrl: "",
           WHTCertUrl: "",
+          IncomeType: input.incomeType || "",
         });
 
         await sheets.appendRowByHeaders(SHEET_TABS.BILLING_LINES, {
           LineID: GoogleSheetsService.generateId("BILL"),
           BillingID: billingId,
           LineNumber: 1,
-          Description: lines[0].description,
+          Description: lineDescription,
           Quantity: 1,
           UnitPrice: input.amount,
           DiscountPercent: 0,
-          LineTotal: totals.lineTotals[0],
+          LineTotal: lineTotal,
           Notes: "",
         });
       } catch (e) {

@@ -234,6 +234,7 @@ export const SHEET_HEADERS: Record<string, string[]> = {
     "UpdatedAt",
     "PdfUrl",
     "WHTCertUrl", // ใบหัก ณ ที่จ่าย (50ทวิ) ที่ผู้จ่ายออกให้ — ใช้ใน flow รายรับบุคคลธรรมดา
+    "IncomeType", // ประเภทเงินได้ (บุคคล): salary | service | rent | transport | other — ใช้แยกประเภทใน ภงด./50ทวิ
   ],
   [SHEET_TABS.BILLING_LINES]: [
     "LineID",

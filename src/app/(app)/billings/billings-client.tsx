@@ -398,13 +398,20 @@ export function BillingsClient({ entityType = "company" }: { entityType?: string
   );
 }
 
-// WHT presets for individuals — the rates a freelancer/landlord meets most
-// often, with the income type they map to. Tapping a chip beats typing.
-const WHT_PRESETS: { pct: string; label: string }[] = [
-  { pct: "0", label: "ไม่หัก" },
-  { pct: "1", label: "1% ขนส่ง" },
-  { pct: "3", label: "3% รับจ้าง/บริการ" },
-  { pct: "5", label: "5% เช่า/วิชาชีพ" },
+// Income types for individuals (มาตรา 40) with the default WHT rate each one
+// usually carries. Salary (40(1)) is stepped, so it's entered as a baht amount
+// rather than a percent.
+const INCOME_TYPES: {
+  value: string;
+  label: string;
+  pct: string;
+  salary?: boolean;
+}[] = [
+  { value: "service", label: "🛠 รับจ้าง / บริการ / วิชาชีพ (ม.40(2)(6))", pct: "3" },
+  { value: "salary", label: "💼 เงินเดือน / ค่าจ้าง (ม.40(1))", pct: "0", salary: true },
+  { value: "rent", label: "🏠 ค่าเช่า (ม.40(5))", pct: "5" },
+  { value: "transport", label: "🚚 ค่าขนส่ง", pct: "1" },
+  { value: "other", label: "✏️ อื่นๆ", pct: "0" },
 ];
 
 function QuickIncomeModal({
@@ -422,9 +429,20 @@ function QuickIncomeModal({
     payerTaxId: "",
     docDate: new Date().toISOString().slice(0, 10),
     amount: "",
+    incomeType: "service",
     whtPercent: "3",
+    whtBaht: "", // ยอดภาษีหัก (บาท) — ใช้กับเงินเดือน (หักขั้นบันได)
     notes: "",
   });
+
+  const isSalary =
+    INCOME_TYPES.find((t) => t.value === form.incomeType)?.salary === true;
+
+  // Switching income type pre-fills the typical WHT rate for that category.
+  const onIncomeTypeChange = (value: string) => {
+    const t = INCOME_TYPES.find((x) => x.value === value);
+    setForm((f) => ({ ...f, incomeType: value, whtPercent: t?.pct ?? "0" }));
+  };
 
   // Picking a known payer name auto-fills their tax ID (repeat clients →
   // no re-typing the 13-digit number).
@@ -442,7 +460,9 @@ function QuickIncomeModal({
 
   const amountNum = parseFloat(form.amount) || 0;
   const whtNum = parseFloat(form.whtPercent) || 0;
-  const whtAmount = Math.round(((amountNum * whtNum) / 100) * 100) / 100;
+  const whtAmount = isSalary
+    ? Math.round((parseFloat(form.whtBaht) || 0) * 100) / 100
+    : Math.round(((amountNum * whtNum) / 100) * 100) / 100;
   const net = Math.round((amountNum - whtAmount) * 100) / 100;
 
   const fmt = (n: number) =>
@@ -469,7 +489,9 @@ function QuickIncomeModal({
         payerTaxId: form.payerTaxId.trim() || undefined,
         docDate: form.docDate,
         amount: amountNum,
-        whtPercent: whtNum,
+        whtPercent: isSalary ? 0 : whtNum,
+        whtAmount: isSalary ? whtAmount : undefined,
+        incomeType: form.incomeType,
         notes: form.notes.trim() || undefined,
       });
       // Attach the WHT cert (50ทวิ) if provided — best-effort, after the row exists.
@@ -586,41 +608,49 @@ function QuickIncomeModal({
               </div>
             </div>
 
-            <div className="app-form-group">
-              <label className="app-label">หัก ณ ที่จ่าย (%)</label>
-              <div
-                style={{
-                  display: "flex",
-                  flexWrap: "wrap",
-                  gap: "0.5rem",
-                  alignItems: "center",
-                }}
-              >
-                {WHT_PRESETS.map((p) => {
-                  const active = form.whtPercent === p.pct;
-                  return (
-                    <button
-                      key={p.pct}
-                      type="button"
-                      onClick={() => setForm({ ...form, whtPercent: p.pct })}
-                      className={`app-btn ${active ? "app-btn-primary" : "app-btn-secondary"}`}
-                      style={{ padding: "0.4rem 0.75rem", fontSize: "0.8125rem" }}
-                    >
-                      {p.label}
-                    </button>
-                  );
-                })}
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  max="15"
-                  value={form.whtPercent}
-                  onChange={(e) => setForm({ ...form, whtPercent: e.target.value })}
-                  className="app-input num"
-                  style={{ maxWidth: "90px" }}
-                  aria-label="หัก ณ ที่จ่าย กำหนดเอง (%)"
-                />
+            <div className="app-form-grid cols-2">
+              <div className="app-form-group">
+                <label className="app-label">ประเภทเงินได้</label>
+                <select
+                  value={form.incomeType}
+                  onChange={(e) => onIncomeTypeChange(e.target.value)}
+                  className="app-input"
+                >
+                  {INCOME_TYPES.map((t) => (
+                    <option key={t.value} value={t.value}>
+                      {t.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="app-form-group">
+                {isSalary ? (
+                  <>
+                    <label className="app-label">ภาษีหัก ณ ที่จ่าย (บาท)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={form.whtBaht}
+                      onChange={(e) => setForm({ ...form, whtBaht: e.target.value })}
+                      placeholder="กรอกจากสลิปเงินเดือน"
+                      className="app-input num"
+                    />
+                  </>
+                ) : (
+                  <>
+                    <label className="app-label">หัก ณ ที่จ่าย (%)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      max="15"
+                      value={form.whtPercent}
+                      onChange={(e) => setForm({ ...form, whtPercent: e.target.value })}
+                      className="app-input num"
+                    />
+                  </>
+                )}
               </div>
             </div>
 
