@@ -26,7 +26,7 @@ import {
   buildSavedFlex,
 } from "@/lib/line/flex/payment-confirm";
 import { buildProjectPickerCarousel } from "@/lib/line/flex/project-picker";
-import { parseTextExpense } from "@/lib/line/parse-text-expense";
+import { parseTextExpense, looksLikeIncome } from "@/lib/line/parse-text-expense";
 import {
   GoogleSheetsService,
   SHEET_TABS,
@@ -151,6 +151,18 @@ export async function handleText(event: LineWebhookEvent): Promise<void> {
   if (isGroup) {
     const parsedGroup = parseTextExpense(rawText);
     if (!parsedGroup) return;
+    // Income-looking text must not be booked as an expense.
+    if (looksLikeIncome(rawText)) {
+      await replyMessage(event.replyToken, [
+        text(
+          "ดูเหมือนเป็นรายรับนะคะ 💰\n" +
+            "การบันทึกรายรับทำผ่านเว็บ: " +
+            APP_BASE_URL +
+            "/billings\n(แชทกลุ่มบันทึกได้เฉพาะรายจ่าย)"
+        ),
+      ]);
+      return;
+    }
     const gctx = groupId ? await resolveGroupContext(groupId) : null;
     if (!gctx) {
       const bindUrl = `${APP_BASE_URL}/line-groups/bind?g=${encodeURIComponent(groupId || "")}&openExternalBrowser=1`;
@@ -184,6 +196,21 @@ export async function handleText(event: LineWebhookEvent): Promise<void> {
           "   → เลือกโปรเจกต์ → ยืนยัน → บันทึก (ไม่ต้องแนบไฟล์)\n\n" +
           "จัดการรายจ่ายเต็มรูปแบบ:\n" +
           `${APP_BASE_URL}/expenses`,
+      ),
+    ]);
+    return;
+  }
+
+  // Income-looking message must not be booked as an expense (chat records
+  // expenses only). Point the user at the income flow instead.
+  if (looksLikeIncome(rawText)) {
+    await replyMessage(event.replyToken, [
+      text(
+        'ดูเหมือนเป็น "รายรับ" นะคะ 💰\n' +
+          "บันทึกรายรับได้ที่เมนูด้านล่าง หรือผ่านเว็บ:\n" +
+          APP_BASE_URL +
+          "/billings\n\n" +
+          '(แชทบันทึกได้เฉพาะรายจ่าย เช่น "ค่ากาแฟ 100")'
       ),
     ]);
     return;
@@ -824,7 +851,7 @@ export async function handlePostback(event: LineWebhookEvent): Promise<void> {
                 action: {
                   type: "uri",
                   label: "แก้ไขในเว็บ",
-                  uri: `${APP_BASE_URL}/expenses`,
+                  uri: `${APP_BASE_URL}/expenses?openExternalBrowser=1`,
                 },
               },
             ],
@@ -1085,7 +1112,7 @@ async function confirmDraftAsync(draft: {
       vendor: savedLabel,
       amount: totalAmount,
       projectName: eventName || "ไม่ระบุ",
-      webUrl: `${APP_BASE_URL}/expenses`,
+      webUrl: `${APP_BASE_URL}/expenses?openExternalBrowser=1`,
     }),
   ]);
 }

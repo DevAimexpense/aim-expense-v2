@@ -151,7 +151,9 @@ export function buildOcrConfirmFlex(
             action: {
               type: "uri",
               label: "แก้ไขในเว็บ",
-              uri: `${meta.appBaseUrl}/expenses`,
+              // openExternalBrowser=1 → เปิดเบราว์เซอร์จริง (มี session/login)
+              // ไม่ใช่ in-app browser ของ LINE ที่ทำให้หน้าเว็บ 404/หลุด login
+              uri: `${meta.appBaseUrl}/expenses?openExternalBrowser=1`,
             },
           },
           {

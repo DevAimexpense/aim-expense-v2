@@ -18,6 +18,22 @@ export interface ParsedTextExpense {
 }
 
 /**
+ * Heuristic: does this message look like INCOME (รายรับ) rather than an
+ * expense? The LINE chat flow only records expenses, so an income-looking
+ * message must NOT be booked as an expense (that silently flips the sign of
+ * the entry). We keep this conservative — only fire on phrases that clearly
+ * mean income, never on the bare word "รับ" which appears in many expenses
+ * (ค่ารับรอง, รับเหมา, รับของ...).
+ */
+export function looksLikeIncome(rawText: string): boolean {
+  const t = (rawText || "").trim();
+  if (!t) return false;
+  return /เงินเดือน|รายรับ|ได้รับเงิน|ได้รับค่า|^รับเงิน|^รับค่า|^รับโอน|^รับงาน/.test(
+    t
+  );
+}
+
+/**
  * Try to interpret a chat message as a quick expense entry.
  * Returns null when the text contains no usable number — caller should fall
  * back to the help/echo response.
