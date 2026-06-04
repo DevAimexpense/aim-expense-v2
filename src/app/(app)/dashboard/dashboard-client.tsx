@@ -97,7 +97,7 @@ export function DashboardClient({
           <a href="/events" className="app-btn app-btn-secondary">
             📋 จัดการโปรเจกต์
           </a>
-          <a href="/payments/search" className="app-btn app-btn-primary">
+          <a href="/expenses" className="app-btn app-btn-primary">
             ➕ บันทึกค่าใช้จ่าย
           </a>
         </div>
@@ -238,7 +238,7 @@ export function DashboardClient({
             <p className="app-locked-desc">
               ติดตามรายได้ ค่าใช้จ่าย และกำไรต่อโปรเจกต์ — เริ่มต้นที่ Pro plan
             </p>
-            <a href="/settings/billing" className="app-btn app-btn-primary app-btn-sm">
+            <a href="/account/billing" className="app-btn app-btn-primary app-btn-sm">
               อัปเกรดแพ็คเกจ
             </a>
           </div>

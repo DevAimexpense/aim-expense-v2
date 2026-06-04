@@ -198,7 +198,7 @@ export const reportRouter = router({
           if (p.Status !== input.status) return false;
         } else {
           // Default: exclude rejected (matches event.router behavior)
-          if (p.Status === "rejected") return false;
+          if (p.Status === "rejected" || p.Status === "cancelled") return false;
         }
         if (input.expenseType && (p.ExpenseType || "account") !== input.expenseType) {
           return false;
@@ -288,7 +288,7 @@ export const reportRouter = router({
         if (input.status) {
           if (p.Status !== input.status) return false;
         } else {
-          if (p.Status === "rejected") return false;
+          if (p.Status === "rejected" || p.Status === "cancelled") return false;
         }
         if (input.expenseType && (p.ExpenseType || "account") !== input.expenseType) {
           return false;
@@ -383,7 +383,7 @@ export const reportRouter = router({
         if (input.status) {
           if (p.Status !== input.status) return false;
         } else {
-          if (p.Status === "rejected") return false;
+          if (p.Status === "rejected" || p.Status === "cancelled") return false;
         }
         if (input.expenseType && (p.ExpenseType || "account") !== input.expenseType) {
           return false;
@@ -525,7 +525,7 @@ export const reportRouter = router({
       }
       function passStatus(p: Record<string, string>): boolean {
         if (input.status) return p.Status === input.status;
-        return p.Status !== "rejected";
+        return p.Status !== "rejected" && p.Status !== "cancelled";
       }
       function passType(p: Record<string, string>): boolean {
         if (!input.expenseType) return true;

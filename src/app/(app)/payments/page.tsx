@@ -13,6 +13,7 @@ const STATUS_LABEL: Record<string, { label: string; class: string }> = {
   paid: { label: "จ่ายแล้ว", class: "app-badge-success" },
   rejected: { label: "ปฏิเสธ", class: "app-badge-error" },
   cleared: { label: "เคลียร์แล้ว", class: "app-badge-success" },
+  cancelled: { label: "ยกเลิกแล้ว", class: "app-badge-error" },
 };
 
 const TYPE_LABEL: Record<string, { label: string; class: string; icon: string }> = {
@@ -31,6 +32,14 @@ export default function PaymentsPage() {
   const myUserId = meQuery.data?.userId || "";
   const myRole = meQuery.data?.role || "";
   const isAdminOrManager = myRole === "admin" || myRole === "manager";
+  const canCancel = meQuery.data?.permissions?.approvePayments ?? false;
+
+  const cancelMutation = trpc.payment.cancel.useMutation({
+    onSuccess: () => {
+      utils.payment.list.invalidate();
+      utils.event.list.invalidate();
+    },
+  });
 
   const payments = paymentsQuery.data || [];
   const events = eventsQuery.data || [];
@@ -170,6 +179,7 @@ export default function PaymentsPage() {
             { value: "paid", label: "จ่ายแล้ว" },
             { value: "rejected", label: "ปฏิเสธ" },
             { value: "cleared", label: "เคลียร์แล้ว" },
+            { value: "cancelled", label: "ยกเลิกแล้ว" },
           ]}
           value={filterStatus}
           onChange={(val) => setFilterStatus(val)}
@@ -343,17 +353,44 @@ export default function PaymentsPage() {
                           const isOwner = !!p.createdByUserId && p.createdByUserId === myUserId;
                           const hasOwnershipPermission = isAdminOrManager || isOwner;
                           const canEdit = (isPending || canEditAfterApproval) && hasOwnershipPermission;
+                          const canCancelThis =
+                            canCancel &&
+                            (p.status === "approved" ||
+                              p.status === "paid" ||
+                              p.status === "cleared");
                           return (
-                            <button
-                              className="app-btn app-btn-ghost app-btn-sm"
-                              onClick={() => {
-                                setEditingId(p.paymentId);
-                                setShowModal(true);
-                              }}
-                              title={canEdit ? "แก้ไข" : "ดู"}
-                            >
-                              {canEdit ? "✏️" : "👁"}
-                            </button>
+                            <>
+                              <button
+                                className="app-btn app-btn-ghost app-btn-sm"
+                                onClick={() => {
+                                  setEditingId(p.paymentId);
+                                  setShowModal(true);
+                                }}
+                                title={canEdit ? "แก้ไข" : "ดู"}
+                              >
+                                {canEdit ? "✏️" : "👁"}
+                              </button>
+                              {canCancelThis && (
+                                <button
+                                  className="app-btn app-btn-ghost app-btn-sm"
+                                  style={{ color: "#dc2626" }}
+                                  disabled={cancelMutation.isPending}
+                                  onClick={() => {
+                                    const reason = window.prompt(
+                                      "ยืนยันยกเลิกรายการนี้?\nรายการที่ยกเลิกจะไม่ถูกนับเป็นค่าใช้จ่าย\n\n(ใส่เหตุผลได้ หรือเว้นว่าง)"
+                                    );
+                                    if (reason === null) return; // กด Cancel = ไม่ทำ
+                                    cancelMutation.mutate({
+                                      paymentIds: [p.paymentId],
+                                      reason: reason || undefined,
+                                    });
+                                  }}
+                                  title="ยกเลิกรายการ"
+                                >
+                                  🚫
+                                </button>
+                              )}
+                            </>
                           );
                         })()}
                       </div>

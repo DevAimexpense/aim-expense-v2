@@ -39,7 +39,10 @@ export const eventRouter = router({
     // Calculate spent per event
     return events.map((event) => {
       const eventPayments = payments.filter(
-        (p) => p.EventID === event.EventID && p.Status !== "rejected"
+        (p) =>
+          p.EventID === event.EventID &&
+          p.Status !== "rejected" &&
+          p.Status !== "cancelled"
       );
       const totalSpent = eventPayments.reduce(
         (sum, p) => sum + (parseFloat(p.GTTLAmount) || 0),
@@ -97,7 +100,7 @@ export const eventRouter = router({
 
       const payments = await sheets.getPaymentsByEvent(input.eventId);
       const totalSpent = payments
-        .filter((p) => p.Status !== "rejected")
+        .filter((p) => p.Status !== "rejected" && p.Status !== "cancelled")
         .reduce((sum, p) => sum + (parseFloat(p.GTTLAmount) || 0), 0);
       const budget = parseFloat(event.Budget) || 0;
 

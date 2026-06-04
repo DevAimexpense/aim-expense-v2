@@ -731,7 +731,7 @@ export function PaymentModal({
                       setForm({ ...form, costPerUnit: parseFloat(e.target.value) || 0 })
                     }
                     min={0}
-                    step={1}
+                    step="any"
                     className="app-input num"
                     disabled={isReadOnly}
                   />

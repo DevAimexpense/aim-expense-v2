@@ -59,7 +59,7 @@ function toPaymentRow(payment: Record<string, string>) {
     wthAmount: wth,
     vatAmount: vat,
     gttlAmount: gttl,
-    status: (payment.Status as "pending" | "approved" | "paid" | "rejected" | "cleared") || "pending",
+    status: (payment.Status as "pending" | "approved" | "paid" | "rejected" | "cleared" | "cancelled") || "pending",
     paymentDate: payment.PaymentDate || "",
     dueDate: payment.DueDate || "",
     approvedBy: payment.ApprovedBy || "",
@@ -579,6 +579,47 @@ export const paymentRouter = router({
       });
 
       return { success: true, rejected: success };
+    }),
+
+  // ยกเลิกรายการที่ "อนุมัติแล้ว/จ่ายแล้ว/เคลียร์แล้ว" — ลบไม่ได้ (delete จำกัด pending/rejected)
+  // จึงใช้ cancel เพื่อ soft-cancel: Status → "cancelled" และ "cancelled" จะไม่ถูกนับเป็นค่าใช้จ่าย
+  // (กรองออกทุกจุดคำนวณเช่นเดียวกับ "rejected")
+  cancel: permissionProcedure("approvePayments")
+    .input(z.object({
+      paymentIds: z.array(z.string()).min(1),
+      reason: z.string().max(500).optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const sheets = await getSheetsService(ctx.org.orgId);
+      const now = new Date().toISOString();
+      const CANCELLABLE = ["approved", "paid", "cleared"];
+      let success = 0;
+      for (const id of input.paymentIds) {
+        const existing = await sheets.getById(SHEET_TABS.PAYMENTS, "PaymentID", id);
+        if (!existing) continue;
+        if (!CANCELLABLE.includes(existing.Status)) continue;
+        const ok = await sheets.updateById(SHEET_TABS.PAYMENTS, "PaymentID", id, {
+          Status: "cancelled",
+          Notes: (existing.Notes || "") + (input.reason ? ` | ยกเลิก: ${input.reason}` : " | ยกเลิกรายการ"),
+          UpdatedAt: now,
+        });
+        if (ok) success++;
+      }
+
+      if (success > 0) {
+        await prisma.auditLog.create({
+          data: {
+            orgId: ctx.org.orgId,
+            userId: ctx.session.userId,
+            action: "cancel",
+            entityType: "payment",
+            entityRef: input.paymentIds.join(","),
+            summary: `ยกเลิก ${success} รายการ${input.reason ? " — " + input.reason : ""}`,
+          },
+        });
+      }
+
+      return { success: true, cancelled: success };
     }),
 
   markPaid: permissionProcedure("approvePayments")
