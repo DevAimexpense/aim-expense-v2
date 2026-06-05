@@ -42,6 +42,21 @@ const APP_BASE_URL =
 
 const DRAFT_TTL_HOURS = 24;
 
+// คำที่ถือเป็นคำสั่งเปิดเมนู (case-insensitive — รับ lower มาแล้ว)
+const MENU_WORDS = new Set(["เมนู", "เมนูหลัก", "menu", "/menu", "/เมนู", "mainmenu"]);
+
+/**
+ * ตรวจว่าข้อความ (lowercased, trimmed) เป็นคำสั่งเปิดเมนูไหม
+ * - ตรงเป๊ะ เช่น "menu", "เมนู"
+ * - หรือกลุ่มที่ @mention บอท เช่น "@aim expense menu" → ดูเป็น token (ข้อความสั้น <=3 คำ
+ *   ที่มีคำเมนูอยู่) เพื่อไม่ false-positive กับประโยคยาว เช่น "ค่า menu อาหาร 100"
+ */
+function isMenuTrigger(lower: string): boolean {
+  if (MENU_WORDS.has(lower)) return true;
+  const tokens = lower.split(/\s+/).filter(Boolean);
+  return tokens.length <= 3 && tokens.some((t) => MENU_WORDS.has(t));
+}
+
 // ---------- LINE Event Types ----------
 export interface LineWebhookEvent {
   type: string;
@@ -149,13 +164,9 @@ export async function handleText(event: LineWebhookEvent): Promise<void> {
 
   // Menu trigger — works in both group and 1-1: show the 3 rich-menu links.
   // ต้องเช็คก่อน group early-return เพื่อให้พิมพ์ในกลุ่มแล้วเมนูเด้ง
-  if (
-    lower === "เมนู" ||
-    lower === "menu" ||
-    lower === "/menu" ||
-    lower === "/เมนู" ||
-    lower === "เมนูหลัก"
-  ) {
+  // case-insensitive (lower) + รองรับ @mention บอทในกลุ่ม (เช่น "@Aim Expense menu")
+  // โดยดูเป็น token: ข้อความสั้น (<=3 คำ) ที่มีคำว่า menu/เมนู → ถือเป็น trigger
+  if (isMenuTrigger(lower)) {
     await replyMessage(event.replyToken, [buildMenuFlex(APP_BASE_URL)]);
     return;
   }
