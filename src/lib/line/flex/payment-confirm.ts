@@ -151,9 +151,10 @@ export function buildOcrConfirmFlex(
             action: {
               type: "uri",
               label: "แก้ไขในเว็บ",
-              // openExternalBrowser=1 → เปิดเบราว์เซอร์จริง (มี session/login)
-              // ไม่ใช่ in-app browser ของ LINE ที่ทำให้หน้าเว็บ 404/หลุด login
-              uri: `${meta.appBaseUrl}/expenses?openExternalBrowser=1`,
+              // หมายเหตุ: เคยใส่ ?openExternalBrowser=1 เพื่อเปิดเบราว์เซอร์จริง แต่พบว่า
+              // param นี้ทำให้ LINE ส่ง URL เพี้ยน → OAuth state หาย → "session หมดอายุ"
+              // เปิดใน in-app browser ของ LINE (ไม่ใส่ param) login ได้ปกติ
+              uri: `${meta.appBaseUrl}/expenses`,
             },
           },
           {

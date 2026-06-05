@@ -115,7 +115,7 @@ export async function handleJoin(event: LineWebhookEvent): Promise<void> {
     return;
   }
 
-  const bindUrl = `${APP_BASE_URL}/line-groups/bind?g=${encodeURIComponent(groupId)}&openExternalBrowser=1`;
+  const bindUrl = `${APP_BASE_URL}/line-groups/bind?g=${encodeURIComponent(groupId)}`;
   await replyMessage(event.replyToken, [
     text(
       "สวัสดีค่ะ 👋 ขอบคุณที่เชิญ Aim Expense เข้ากลุ่ม\n\n" +
@@ -165,7 +165,7 @@ export async function handleText(event: LineWebhookEvent): Promise<void> {
     }
     const gctx = groupId ? await resolveGroupContext(groupId) : null;
     if (!gctx) {
-      const bindUrl = `${APP_BASE_URL}/line-groups/bind?g=${encodeURIComponent(groupId || "")}&openExternalBrowser=1`;
+      const bindUrl = `${APP_BASE_URL}/line-groups/bind?g=${encodeURIComponent(groupId || "")}`;
       await replyMessage(event.replyToken, [
         text("กลุ่มนี้ยังไม่ได้เชื่อมกับบริษัท\nผู้ดูแล (Admin) เปิดลิงก์เพื่อเชื่อม:\n" + bindUrl),
       ]);
@@ -300,7 +300,7 @@ export async function handleMedia(event: LineWebhookEvent): Promise<void> {
   if (isGroup) {
     const gctx = groupId ? await resolveGroupContext(groupId) : null;
     if (!gctx) {
-      const bindUrl = `${APP_BASE_URL}/line-groups/bind?g=${encodeURIComponent(groupId || "")}&openExternalBrowser=1`;
+      const bindUrl = `${APP_BASE_URL}/line-groups/bind?g=${encodeURIComponent(groupId || "")}`;
       await replyMessage(event.replyToken, [
         text("กลุ่มนี้ยังไม่ได้เชื่อมกับบริษัท\nผู้ดูแล (Admin) เปิดลิงก์เพื่อเชื่อม:\n" + bindUrl),
       ]);
@@ -851,7 +851,7 @@ export async function handlePostback(event: LineWebhookEvent): Promise<void> {
                 action: {
                   type: "uri",
                   label: "แก้ไขในเว็บ",
-                  uri: `${APP_BASE_URL}/expenses?openExternalBrowser=1`,
+                  uri: `${APP_BASE_URL}/expenses`,
                 },
               },
             ],
@@ -1112,7 +1112,7 @@ async function confirmDraftAsync(draft: {
       vendor: savedLabel,
       amount: totalAmount,
       projectName: eventName || "ไม่ระบุ",
-      webUrl: `${APP_BASE_URL}/expenses?openExternalBrowser=1`,
+      webUrl: `${APP_BASE_URL}/expenses`,
     }),
   ]);
 }
