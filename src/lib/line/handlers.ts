@@ -26,6 +26,7 @@ import {
   buildSavedFlex,
 } from "@/lib/line/flex/payment-confirm";
 import { buildProjectPickerCarousel } from "@/lib/line/flex/project-picker";
+import { buildMenuFlex } from "@/lib/line/flex/menu";
 import { parseTextExpense, looksLikeIncome } from "@/lib/line/parse-text-expense";
 import {
   GoogleSheetsService,
@@ -145,6 +146,19 @@ export async function handleText(event: LineWebhookEvent): Promise<void> {
   if (!isGroup && !event.source.userId) return;
   const rawText = (event.message?.text || "").trim();
   const lower = rawText.toLowerCase();
+
+  // Menu trigger — works in both group and 1-1: show the 3 rich-menu links.
+  // ต้องเช็คก่อน group early-return เพื่อให้พิมพ์ในกลุ่มแล้วเมนูเด้ง
+  if (
+    lower === "เมนู" ||
+    lower === "menu" ||
+    lower === "/menu" ||
+    lower === "/เมนู" ||
+    lower === "เมนูหลัก"
+  ) {
+    await replyMessage(event.replyToken, [buildMenuFlex(APP_BASE_URL)]);
+    return;
+  }
 
   // GROUP: only react to expense-like text (with a number) — stay silent on
   // ordinary group chatter so the bot doesn't spam the conversation.

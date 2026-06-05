@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { trpc } from "@/lib/trpc/client";
 import SearchableSelect, { type SearchableSelectOption } from "@/components/searchable-select";
+import DateInput from "@/components/shared/date-input";
 
 const STATUS_LABEL: Record<string, { label: string; class: string }> = {
   active: { label: "ดำเนินการ", class: "app-badge-success" },
@@ -401,19 +402,17 @@ function EventModal({
             <div className="app-form-grid cols-2">
               <div className="app-form-group">
                 <label className="app-label app-label-required">วันเริ่ม</label>
-                <input
-                  type="date"
+                <DateInput
                   value={form.startDate}
-                  onChange={(e) => setForm({ ...form, startDate: e.target.value })}
+                  onChange={(iso) => setForm({ ...form, startDate: iso })}
                   className="app-input"
                 />
               </div>
               <div className="app-form-group">
                 <label className="app-label app-label-required">วันสิ้นสุด</label>
-                <input
-                  type="date"
+                <DateInput
                   value={form.endDate}
-                  onChange={(e) => setForm({ ...form, endDate: e.target.value })}
+                  onChange={(iso) => setForm({ ...form, endDate: iso })}
                   className="app-input"
                 />
               </div>
