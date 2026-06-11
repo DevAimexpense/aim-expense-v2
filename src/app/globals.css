@@ -67,10 +67,14 @@
   --border-focus: #3b82f6;
 }
 
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
+/* Base reset — kept in @layer base so Tailwind utilities (p-*, m-*, space-y-*)
+   can override it. Unlayered, this would beat all layered utilities. */
+@layer base {
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
 }
 
 html {
