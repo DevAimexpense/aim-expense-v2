@@ -8,22 +8,24 @@ import { google } from "googleapis";
 /**
  * Google OAuth2 scopes ที่ต้องการ
  * - userinfo.email + userinfo.profile → ข้อมูล user (non-sensitive)
- * - spreadsheets → อ่าน/เขียน Google Sheets (sensitive — ต้อง verification)
- * - drive.file → ไฟล์ที่ app สร้างเอง (non-sensitive)
+ * - drive.file → ไฟล์ที่ app สร้างเอง (non-sensitive) — ใช้ได้ทั้ง Sheets API
+ *   และ Drive API สำหรับ master sheet / folders / receipts ที่แอปสร้างเอง
  *
- * ⚠️ เคยลองลดเหลือ drive.file อย่างเดียวเพื่อเลี่ยง verification — แต่ใน
- * production พบว่าไม่พอ: master sheet ที่ user สร้างไว้ก่อน reconnect ใหม่
- * จะเข้าไม่ถึง ("The caller does not have permission"). เลยต้องคง spreadsheets
- * ไว้เพื่อความเข้ากันได้กับข้อมูลเดิม + ความเสถียร.
+ * 🔄 MIGRATION (2026-06, S31): ลด scope `spreadsheets` (sensitive) → `drive.file`
+ * ตามที่ Google verification บังคับ. drive.file เป็น non-sensitive → ไม่ต้องผ่าน
+ * verification (ไม่มี unverified-app warning / 100-user cap). เทสต์ครบใน test
+ * project แล้ว: spreadsheets.create + values.* + batchUpdate + Drive upload/list
+ * ใช้ได้ครบกับไฟล์ที่แอปสร้างเอง.
  *
- * ผลคือ Google จะแสดงหน้า "unverified app" จนกว่าจะยื่น verification (sensitive
- * tier — ไม่ต้องผ่าน security assessment เหมือน restricted แต่ต้อง justify scope).
- * Cap 100 users ระหว่างรอ.
+ * ⚠️ ข้อจำกัด: ชีตที่ "แอปไม่ได้สร้าง" (เช่นชีตเก่าก่อนมี drive.file grant) จะเข้า
+ * ไม่ได้ — Sheets API คืน 404 "Requested entity was not found" (drive.file ทำให้
+ * แอปมองไม่เห็นไฟล์). ตอน migrate prod ไม่มี data ลูกค้าจริง (มีแต่ demo) จึงไม่
+ * ต้องทำ Google Picker re-grant. ถ้าอนาคตต้องกู้ชีตเก่าที่มี data → ใช้ Picker
+ * (setFileIds) ให้ user ยืนยันชีตเดิมครั้งเดียว.
  */
 export const GOOGLE_SCOPES = [
   "https://www.googleapis.com/auth/userinfo.email",
   "https://www.googleapis.com/auth/userinfo.profile",
-  "https://www.googleapis.com/auth/spreadsheets",
   "https://www.googleapis.com/auth/drive.file",
 ];
 
