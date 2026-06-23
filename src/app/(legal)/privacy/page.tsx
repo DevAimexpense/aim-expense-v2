@@ -36,6 +36,35 @@ export default function PrivacyPage() {
           เพื่อสร้างและจัดการสเปรดชีตและโฟลเดอร์ของบริษัทท่าน</li>
       </ul>
 
+      <p className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm not-prose">
+        <strong>การใช้ข้อมูลจาก Google API แบบจำกัด (Limited Use):</strong>{" "}
+        การใช้และการถ่ายโอนข้อมูลที่ {COMPANY_NAME} ได้รับจาก Google APIs
+        จะเป็นไปตาม{" "}
+        <a
+          href="https://developers.google.com/terms/api-services-user-data-policy"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-blue-600 underline"
+        >
+          Google API Services User Data Policy
+        </a>{" "}
+        รวมถึงข้อกำหนด Limited Use
+        <br />
+        <span className="text-slate-500">
+          {COMPANY_NAME}&rsquo;s use and transfer of information received from Google
+          APIs to any other app will adhere to the{" "}
+          <a
+            href="https://developers.google.com/terms/api-services-user-data-policy"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-blue-600 underline"
+          >
+            Google API Services User Data Policy
+          </a>
+          , including the Limited Use requirements.
+        </span>
+      </p>
+
       <h3>1.3 ข้อมูลธุรกิจ</h3>
       <ul>
         <li>ชื่อบริษัท เลขประจำตัวผู้เสียภาษี ที่อยู่ เบอร์ติดต่อ โลโก้</li>
