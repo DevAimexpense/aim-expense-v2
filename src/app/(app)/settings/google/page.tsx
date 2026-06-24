@@ -17,8 +17,8 @@ export const metadata = {
   title: "เชื่อมต่อ Google | Aim Expense",
 };
 
-const GMAIL_SCOPE_PREFIX = "https://www.googleapis.com/auth/gmail";
-const SHEETS_SCOPE_PREFIX = "https://www.googleapis.com/auth/spreadsheets";
+// Post drive.file migration the app requests only drive.file + userinfo.
+// (drive.file covers both the Master Sheet and Drive files the app creates.)
 const DRIVE_SCOPE_PREFIX = "https://www.googleapis.com/auth/drive";
 const USERINFO_SCOPE_PREFIX = "https://www.googleapis.com/auth/userinfo";
 
@@ -64,7 +64,7 @@ function formatExpiryRelative(expiry: Date | null): {
 export default async function GoogleSettingsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ reconnected?: string }>;
+  searchParams: Promise<{ reconnected?: string; error?: string }>;
 }) {
   const session = await getSession();
   if (!session) redirect("/login");
@@ -104,6 +104,7 @@ export default async function GoogleSettingsPage({
 
   const params = await searchParams;
   const justReconnected = params.reconnected === "1";
+  const errorCode = params.error;
 
   const expiry = connection?.tokenExpiry
     ? formatExpiryRelative(connection.tokenExpiry)
@@ -111,9 +112,7 @@ export default async function GoogleSettingsPage({
 
   const scopes = connection?.scopes ?? [];
   const scopeFlags = {
-    sheets: hasScope(scopes, SHEETS_SCOPE_PREFIX),
     drive: hasScope(scopes, DRIVE_SCOPE_PREFIX),
-    gmail: hasScope(scopes, GMAIL_SCOPE_PREFIX),
     profile: hasScope(scopes, USERINFO_SCOPE_PREFIX),
   };
 
@@ -157,6 +156,25 @@ export default async function GoogleSettingsPage({
           }}
         >
           ✅ <strong>เชื่อมต่อใหม่สำเร็จ</strong> — token ถูกอัปเดตเรียบร้อยแล้ว
+        </div>
+      )}
+
+      {errorCode === "drive_not_granted" && (
+        <div
+          style={{
+            padding: "0.75rem 1rem",
+            background: "#fef2f2",
+            border: "1px solid #fecaca",
+            borderRadius: "0.5rem",
+            marginBottom: "1rem",
+            color: "#991b1b",
+            fontSize: "0.875rem",
+            lineHeight: 1.6,
+          }}
+        >
+          ⚠️ <strong>ยังไม่ได้อนุญาตการเข้าถึง Google Drive</strong> — โปรดกด
+          &ldquo;เชื่อมต่อใหม่&rdquo; แล้ว<strong>ติ๊กช่องสิทธิ์ Google Drive</strong>{" "}
+          ให้ครบ (ระบบใช้เก็บ Master Sheet และไฟล์ของคุณ) — การเชื่อมต่อเดิมยังไม่ถูกแก้ไข
         </div>
       )}
 
@@ -258,9 +276,7 @@ export default async function GoogleSettingsPage({
                   fontSize: "0.8125rem",
                 }}
               >
-                <ScopeChip on={scopeFlags.sheets} label="Google Sheets" />
-                <ScopeChip on={scopeFlags.drive} label="Google Drive" />
-                <ScopeChip on={scopeFlags.gmail} label="Gmail (อ่านอย่างเดียว)" />
+                <ScopeChip on={scopeFlags.drive} label="Google Sheets & Drive (ไฟล์ของแอป)" />
                 <ScopeChip on={scopeFlags.profile} label="ข้อมูลโปรไฟล์" />
               </ul>
             </div>

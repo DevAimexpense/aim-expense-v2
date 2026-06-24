@@ -44,6 +44,29 @@ export async function GET(request: NextRequest) {
       throw new Error("No access token received");
     }
 
+    // 1b. Guard: drive.file must be granted.
+    //     Under Google granular consent, drive.file shows as an OPTIONAL
+    //     checkbox. If the user continues without ticking it, the token is
+    //     valid but lacks drive.file → every Sheets/Drive operation (create
+    //     master sheet, upload receipts) would later fail. Worse, on a
+    //     reconnect we'd overwrite a previously-good connection with a
+    //     scope-deficient one. Reject BEFORE persisting and ask them to
+    //     reconnect and grant Drive access.
+    const DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file";
+    const grantedScopes = tokens.scope?.split(" ") ?? [];
+    if (!grantedScopes.includes(DRIVE_FILE_SCOPE)) {
+      const inOnboarding =
+        session.onboardingStep === "line_login" ||
+        session.onboardingStep === "line_oa" ||
+        session.onboardingStep === "google";
+      return NextResponse.redirect(
+        new URL(
+          `${inOnboarding ? "/onboarding/google" : "/settings/google"}?error=drive_not_granted`,
+          request.url,
+        ),
+      );
+    }
+
     // 2. Get user info from Google
     const userInfo = await getGoogleUserInfo(tokens.access_token);
 

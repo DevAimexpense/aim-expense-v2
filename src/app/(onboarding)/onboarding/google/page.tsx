@@ -40,6 +40,8 @@ export default async function GooglePage({
           <div className="onb-error">
             {error === "access_denied"
               ? "คุณปฏิเสธการให้สิทธิ์ — โปรดอนุญาตเพื่อใช้งานต่อ"
+              : error === "drive_not_granted"
+              ? "ต้องอนุญาตการเข้าถึง Google Drive ด้วย — โปรดเชื่อมต่อใหม่แล้ว✅ ติ๊กช่องสิทธิ์ Google Drive (ระบบใช้เก็บ Sheet และไฟล์ของคุณ)"
               : error === "no_code"
               ? "ไม่ได้รับรหัสยืนยันจาก Google"
               : "เกิดข้อผิดพลาด โปรดลองอีกครั้ง"}
@@ -72,18 +74,6 @@ export default async function GooglePage({
             <div style={{ minWidth: 0, flex: 1 }}>
               <p className="onb-scope-title">Google Drive</p>
               <p className="onb-scope-desc">สร้างโฟลเดอร์และเก็บใบเสร็จ ใบกำกับภาษี</p>
-            </div>
-          </div>
-
-          <div className="onb-scope-item">
-            <div className="onb-scope-icon red">
-              <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l9 6 9-6M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-              </svg>
-            </div>
-            <div style={{ minWidth: 0, flex: 1 }}>
-              <p className="onb-scope-title">Gmail</p>
-              <p className="onb-scope-desc">อ่านใบเสร็จที่ส่งเข้า email อัตโนมัติ</p>
             </div>
           </div>
         </div>
