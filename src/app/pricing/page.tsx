@@ -15,6 +15,7 @@ import {
   type PlanTier,
 } from "@/lib/plans";
 import { COMPANY_NAME } from "@/lib/legal/version";
+import { getSession } from "@/lib/auth/session";
 import { PricingCardsClient } from "./pricing-actions";
 
 export const metadata: Metadata = {
@@ -73,7 +74,12 @@ const FEATURE_TOGGLES: { label: string; enabledOn: PlanTier[] }[] = [
   { label: "SSO + SLA 99.9%", enabledOn: ["enterprise"] },
 ];
 
-export default function PricingPage() {
+export default async function PricingPage() {
+  // Session-aware header: if the user is already logged in, the top-right
+  // button must go to the app (not /login), otherwise clicking it just bounces
+  // through login → select-org and lands back here still looking "logged out".
+  const session = await getSession();
+
   // Bundle prices for client component (avoids re-importing PLAN_PRICING_THB there)
   const prices = {
     basic: PLAN_PRICING_THB.basic!,
@@ -131,8 +137,11 @@ export default function PricingPage() {
               {COMPANY_NAME}
             </span>
           </Link>
-          <Link href="/login" className="app-btn app-btn-primary">
-            เข้าสู่ระบบ
+          <Link
+            href={session ? "/dashboard" : "/login"}
+            className="app-btn app-btn-primary"
+          >
+            {session ? "ไปที่แดชบอร์ด" : "เข้าสู่ระบบ"}
           </Link>
         </div>
       </header>

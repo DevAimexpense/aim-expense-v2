@@ -81,6 +81,18 @@ export async function POST(req: NextRequest) {
 
   // Get/create Stripe Customer
   let stripeCustomerId = sub?.stripeCustomerId || undefined;
+  // Verify a stored customer still exists on the CURRENT Stripe account/mode.
+  // A stale ID — e.g. created under test/sandbox before switching to live keys,
+  // or a customer that was deleted — makes checkout fail with "No such
+  // customer". If it no longer resolves, drop it and recreate below.
+  if (stripeCustomerId) {
+    try {
+      const existing = await stripe.customers.retrieve(stripeCustomerId);
+      if ("deleted" in existing && existing.deleted) stripeCustomerId = undefined;
+    } catch {
+      stripeCustomerId = undefined;
+    }
+  }
   if (!stripeCustomerId) {
     const customer = await stripe.customers.create({
       email: customerEmail,
