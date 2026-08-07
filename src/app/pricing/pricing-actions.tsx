@@ -296,8 +296,8 @@ export function PricingCardsClient({ prices }: { prices: PriceMap }) {
             textAlign: "center",
           }}
         >
-          🎁 Code <strong>{refCode}</strong> applied — ส่วนลด 20% เดือนแรก + 100
-          OCR ฟรี (จะคำนวณตอน checkout)
+          🎁 Code <strong>{refCode}</strong> applied — ส่วนลด 20% เดือนแรก
+          (จะคำนวณตอน checkout)
         </div>
       )}
 

@@ -197,6 +197,12 @@ const NAV_GROUPS: NavGroup[] = [
         adminOnly: true,
       },
       {
+        // Affiliate เป็น per-user (ไม่ผูก org/permission) — ทุกคนสมัครได้
+        label: "โปรแกรมพันธมิตร",
+        href: "/affiliate",
+        icon: "🤝",
+      },
+      {
         label: "เชื่อมต่อ Google",
         href: "/settings/google",
         icon: "🔗",

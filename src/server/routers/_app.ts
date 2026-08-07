@@ -20,6 +20,8 @@ import { quotationRouter } from "./quotation.router";
 import { billingRouter } from "./billing.router";
 import { taxInvoiceRouter } from "./taxInvoice.router";
 import { lineGroupRouter } from "./line-group.router";
+import { affiliateRouter } from "./affiliate.router";
+import { affiliateAdminRouter } from "./affiliate-admin.router";
 
 export const appRouter = router({
   event: eventRouter,
@@ -39,6 +41,8 @@ export const appRouter = router({
   billing: billingRouter,
   taxInvoice: taxInvoiceRouter,
   lineGroup: lineGroupRouter,
+  affiliate: affiliateRouter,
+  affiliateAdmin: affiliateAdminRouter,
 });
 
 export type AppRouter = typeof appRouter;

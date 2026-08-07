@@ -76,6 +76,9 @@ export async function POST(req: NextRequest) {
       case "invoice.payment_failed":
         await handlePaymentFailed(event.data.object as Stripe.Invoice);
         break;
+      case "charge.refunded":
+        await handleChargeRefunded(event.data.object as Stripe.Charge);
+        break;
       default:
         // No-op for unhandled events; Stripe will mark as delivered
         console.log(`[stripe-webhook] unhandled event type: ${event.type}`);
@@ -208,6 +211,9 @@ async function handleSubscriptionDeleted(s: Stripe.Subscription) {
       summary: "Subscription cancelled — downgraded to Free",
     },
   });
+
+  // Clawback affiliate referral on cancel (unpaid commissions only).
+  await clawbackReferral(sub.orgId);
 }
 
 async function handleInvoicePaid(invoice: Stripe.Invoice) {
@@ -260,6 +266,14 @@ async function maybeConfirmReferral(orgId: string, invoice: Stripe.Invoice) {
     },
   });
 
+  // Only partner_affiliate earns cash commissions; a customer_referral
+  // (free-month model) is confirmed but accrues no cash.
+  const partner = await prisma.affiliatePartner.findUnique({
+    where: { id: referral.partnerId },
+    select: { programType: true },
+  });
+  if (partner?.programType !== "partner_affiliate") return;
+
   // Get monthly price baseline for commission calculation
   const sub = await prisma.subscription.findUnique({
     where: { orgId },
@@ -288,6 +302,38 @@ async function maybeConfirmReferral(orgId: string, invoice: Stripe.Invoice) {
       },
     });
   }
+}
+
+/** Invalidate a referral + claw back its UNPAID commissions (paid stay paid). */
+async function clawbackReferral(orgId: string) {
+  const referral = await prisma.referral.findUnique({
+    where: { referredOrgId: orgId },
+  });
+  if (!referral) return;
+  if (referral.status !== "refunded" && referral.status !== "invalid") {
+    await prisma.referral.update({
+      where: { id: referral.id },
+      data: { status: "refunded" },
+    });
+  }
+  // Only scheduled/held are clawed back — already-paid commissions stay paid
+  // (the money was already transferred).
+  await prisma.commission.updateMany({
+    where: { referralId: referral.id, status: { in: ["scheduled", "held"] } },
+    data: { status: "clawed_back" },
+  });
+}
+
+/** Charge refunded → treat like a cancel for affiliate commissions. */
+async function handleChargeRefunded(charge: Stripe.Charge) {
+  const customerId =
+    typeof charge.customer === "string" ? charge.customer : null;
+  if (!customerId) return;
+  const sub = await prisma.subscription.findFirst({
+    where: { stripeCustomerId: customerId },
+  });
+  if (!sub) return;
+  await clawbackReferral(sub.orgId);
 }
 
 async function handlePaymentFailed(invoice: Stripe.Invoice) {
