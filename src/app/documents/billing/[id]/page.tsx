@@ -101,6 +101,7 @@ export default async function BillingDocumentPage({
         vatAmount: parseFloat(header.VATAmount) || 0,
         vatIncluded:
           header.VATIncluded === "TRUE" || header.VATIncluded === "true",
+        isVat: header.IsVAT !== "FALSE", // legacy rows (ว่าง) = มี VAT
         whtPercent: parseFloat(header.WHTPercent) || 0,
         whtAmount: parseFloat(header.WHTAmount) || 0,
         grandTotal: parseFloat(header.GrandTotal) || 0,

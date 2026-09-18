@@ -65,6 +65,7 @@ export function EditQuotationClient({
     projectName: header.projectName,
     eventId: header.eventId,
     vatIncluded: header.vatIncluded,
+    isVat: header.isVat,
     discountAmount: header.discountAmount,
     notes: header.notes,
     terms: header.terms,

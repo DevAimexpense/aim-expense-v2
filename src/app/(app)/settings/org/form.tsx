@@ -25,11 +25,20 @@ interface Props {
   };
   isAdmin: boolean;
   isOwner: boolean;
+  /** ธุรกิจจดทะเบียน VAT หรือไม่ (จาก Organization.settings) */
+  vatRegistered: boolean;
   sheetUrl: string | null;
   driveUrl: string | null;
 }
 
-export function OrgSettingsForm({ org, isAdmin, isOwner, sheetUrl, driveUrl }: Props) {
+export function OrgSettingsForm({
+  org,
+  isAdmin,
+  isOwner,
+  vatRegistered: initialVatRegistered,
+  sheetUrl,
+  driveUrl,
+}: Props) {
   const utils = trpc.useUtils();
   const updateMut = trpc.org.update.useMutation();
   const isPersonal = org.entityType === "personal";
@@ -47,6 +56,7 @@ export function OrgSettingsForm({ org, isAdmin, isOwner, sheetUrl, driveUrl }: P
     org.signatureUrl,
   );
   const [signatoryName, setSignatoryName] = useState(org.signatoryName || "");
+  const [vatRegistered, setVatRegistered] = useState(initialVatRegistered);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
 
@@ -82,9 +92,11 @@ export function OrgSettingsForm({ org, isAdmin, isOwner, sheetUrl, driveUrl }: P
         logoUrl,
         signatureUrl,
         signatoryName: signatoryName.trim() || null,
+        vatRegistered,
       });
       setSuccess(true);
       utils.org.current.invalidate();
+      utils.org.get.invalidate(); // default โหมด VAT ในฟอร์มใบเสนอราคา/ใบวางบิล
       setTimeout(() => setSuccess(false), 3000);
     } catch (e) {
       setError(e instanceof Error ? e.message : "เกิดข้อผิดพลาด");
@@ -278,6 +290,49 @@ export function OrgSettingsForm({ org, isAdmin, isOwner, sheetUrl, driveUrl }: P
                 placeholder="02-xxx-xxxx"
                 maxLength={20}
               />
+            </div>
+
+            <div className="app-form-group">
+              <label className="app-label">ภาษีมูลค่าเพิ่ม (VAT)</label>
+              <div style={{ display: "flex", gap: "0.75rem", marginTop: "0.25rem" }}>
+                {(
+                  [
+                    { value: true, label: "จดทะเบียน VAT" },
+                    { value: false, label: "ไม่จดทะเบียน VAT" },
+                  ] as const
+                ).map((opt) => (
+                  <label
+                    key={String(opt.value)}
+                    style={{
+                      flex: 1,
+                      padding: "0.625rem 0.875rem",
+                      border: `2px solid ${vatRegistered === opt.value ? "#2563eb" : "#e2e8f0"}`,
+                      borderRadius: "0.5rem",
+                      background: vatRegistered === opt.value ? "#eff6ff" : "white",
+                      cursor: isAdmin ? "pointer" : "not-allowed",
+                      opacity: isAdmin ? 1 : 0.6,
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "0.5rem",
+                      fontSize: "0.875rem",
+                    }}
+                  >
+                    <input
+                      type="radio"
+                      name="vatRegistered"
+                      checked={vatRegistered === opt.value}
+                      onChange={() => setVatRegistered(opt.value)}
+                      disabled={!isAdmin}
+                    />
+                    {opt.label}
+                  </label>
+                ))}
+              </div>
+              <p className="app-hint">
+                {vatRegistered
+                  ? "ใบเสนอราคา/ใบวางบิลใหม่จะคิด VAT 7% เป็นค่าเริ่มต้น (เปลี่ยนได้รายใบ)"
+                  : "ใบเสนอราคา/ใบวางบิลใหม่จะเริ่มที่ \"ไม่มี VAT\" (เปลี่ยนได้รายใบ) — ออกใบกำกับภาษีไม่ได้"}
+              </p>
             </div>
 
             <div

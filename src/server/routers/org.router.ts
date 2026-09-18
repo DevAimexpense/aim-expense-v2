@@ -17,6 +17,8 @@ import { getAllDocPrefixes, isValidDocPrefix } from "../lib/doc-number";
 import { checkBusinessQuota } from "../lib/business-quota";
 import { PLAN_LABELS } from "@/lib/plans";
 import { TRPCError } from "@trpc/server";
+import type { Prisma } from "@prisma/client";
+import { readVatRegistered } from "@/lib/org-settings";
 
 /**
  * Helper: Get valid access token for a user (refresh if expired)
@@ -171,12 +173,18 @@ export const orgRouter = router({
         phone: true,
         branchType: true,
         branchNumber: true,
+        settings: true,
       },
     });
     if (!org) {
       throw new TRPCError({ code: "NOT_FOUND", message: "ไม่พบองค์กร" });
     }
-    return org;
+    const { settings, ...rest } = org;
+    return {
+      ...rest,
+      // ธุรกิจจดทะเบียน VAT หรือไม่ — default true (org เดิมทั้งหมด = มี VAT)
+      vatRegistered: readVatRegistered(settings),
+    };
   }),
 
   /**
@@ -382,6 +390,8 @@ export const orgRouter = router({
         logoUrl: z.string().max(900_000).nullable().optional(),
         signatureUrl: z.string().max(900_000).nullable().optional(),
         signatoryName: z.string().max(120).nullable().optional(),
+        // ธุรกิจจดทะเบียน VAT หรือไม่ (เก็บใน settings JSON — ไม่ต้อง migrate)
+        vatRegistered: z.boolean().optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -394,14 +404,28 @@ export const orgRouter = router({
       }
 
       // If branchType=HQ, force branchNumber to "00000"
-      const data = { ...input };
+      const { vatRegistered, ...data } = input;
       if (data.branchType === "HQ") {
         data.branchNumber = "00000";
       }
 
+      // settings JSON: merge เฉพาะ key ที่ส่งมา (ไม่ทับ key อื่น)
+      let settings: Prisma.InputJsonObject | undefined;
+      if (vatRegistered !== undefined) {
+        const current = await prisma.organization.findUnique({
+          where: { id: ctx.org.orgId },
+          select: { settings: true },
+        });
+        const existing =
+          current?.settings && typeof current.settings === "object" && !Array.isArray(current.settings)
+            ? (current.settings as Prisma.JsonObject)
+            : {};
+        settings = { ...existing, vatRegistered } as Prisma.InputJsonObject;
+      }
+
       await prisma.organization.update({
         where: { id: ctx.org.orgId },
-        data,
+        data: { ...data, ...(settings ? { settings } : {}) },
       });
 
       return { success: true };

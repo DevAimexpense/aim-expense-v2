@@ -142,9 +142,11 @@ export function BillingDetailClient({ billingId }: { billingId: string }) {
             </button>
           </>
         )}
-        {(header.status === "sent" ||
-          header.status === "partial" ||
-          header.status === "paid") && (
+        {/* ใบกำกับภาษีต้องมี VAT — เอกสาร "ไม่มี VAT" ออก TI ไม่ได้ */}
+        {header.isVat &&
+          (header.status === "sent" ||
+            header.status === "partial" ||
+            header.status === "paid") && (
           <Link
             href={`/tax-invoices/new?fromBilling=${billingId}`}
             className="app-btn app-btn-secondary"
@@ -265,7 +267,7 @@ export function BillingDetailClient({ billingId }: { billingId: string }) {
               marginBottom: "0.5rem",
             }}
           >
-            <span>ยอดก่อน VAT:</span>
+            <span>{header.isVat ? "ยอดก่อน VAT:" : "ยอดรวม:"}</span>
             <span className="num">{formatTHB(header.subtotal)}</span>
           </div>
           {header.discountAmount > 0 && (
@@ -281,16 +283,18 @@ export function BillingDetailClient({ billingId }: { billingId: string }) {
               <span className="num">−{formatTHB(header.discountAmount)}</span>
             </div>
           )}
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              marginBottom: "0.5rem",
-            }}
-          >
-            <span>VAT 7% {header.vatIncluded && "(included)"}:</span>
-            <span className="num">{formatTHB(header.vatAmount)}</span>
-          </div>
+          {header.isVat && (
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                marginBottom: "0.5rem",
+              }}
+            >
+              <span>VAT 7% {header.vatIncluded && "(included)"}:</span>
+              <span className="num">{formatTHB(header.vatAmount)}</span>
+            </div>
+          )}
           <div
             style={{
               display: "flex",

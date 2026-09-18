@@ -101,6 +101,7 @@ export default async function QuotationDocumentPage({
         vatAmount: parseFloat(header.VATAmount) || 0,
         vatIncluded:
           header.VATIncluded === "TRUE" || header.VATIncluded === "true",
+        isVat: header.IsVAT !== "FALSE", // legacy rows (ว่าง) = มี VAT
         grandTotal: parseFloat(header.GrandTotal) || 0,
         notes: header.Notes || "",
         terms: header.Terms || "",

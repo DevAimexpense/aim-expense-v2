@@ -60,6 +60,7 @@ export function EditBillingClient({ billingId }: { billingId: string }) {
     projectName: header.projectName,
     eventId: header.eventId,
     vatIncluded: header.vatIncluded,
+    isVat: header.isVat,
     discountAmount: header.discountAmount,
     whtPercent: header.whtPercent,
     notes: header.notes,

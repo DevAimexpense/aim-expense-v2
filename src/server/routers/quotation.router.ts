@@ -43,6 +43,8 @@ const QuotationCreateInput = z.object({
   eventId: z.string().optional(),
   projectName: z.string().max(200).optional(),
   vatIncluded: z.boolean(),
+  // false = ไม่มี VAT เลย (ธุรกิจไม่จดทะเบียน VAT) — default true เพื่อไม่กระทบ flow เดิม
+  isVat: z.boolean().default(true),
   discountAmount: z.number().min(0).default(0),
   notes: z.string().max(1000).optional(),
   terms: z.string().max(1000).optional(),
@@ -74,7 +76,8 @@ function round2(n: number): number {
 export function computeQuotationTotals(
   lines: { quantity: number; unitPrice: number; discountPercent: number }[],
   vatIncluded: boolean,
-  discountAmount: number
+  discountAmount: number,
+  isVat: boolean = true
 ): {
   lineTotals: number[];
   subtotal: number;
@@ -85,6 +88,12 @@ export function computeQuotationTotals(
     round2(l.quantity * l.unitPrice * (1 - l.discountPercent / 100))
   );
   const sumLines = lineTotals.reduce((a, b) => a + b, 0);
+
+  // ไม่มี VAT (ธุรกิจไม่จด VAT) → ไม่มีบรรทัด VAT, GrandTotal = Subtotal
+  if (!isVat) {
+    const subtotal = round2(sumLines - discountAmount);
+    return { lineTotals, subtotal, vatAmount: 0, grandTotal: subtotal };
+  }
 
   if (vatIncluded) {
     const grandTotalRaw = round2(sumLines - discountAmount);
@@ -124,6 +133,8 @@ function shapeHeader(r: Record<string, string>) {
     discountAmount: parseFloat(r.DiscountAmount) || 0,
     vatAmount: parseFloat(r.VATAmount) || 0,
     vatIncluded: r.VATIncluded === "TRUE" || r.VATIncluded === "true",
+    // legacy rows (คอลัมน์ว่าง) = มี VAT
+    isVat: r.IsVAT !== "FALSE",
     grandTotal: parseFloat(r.GrandTotal) || 0,
     notes: r.Notes || "",
     terms: r.Terms || "",
@@ -240,7 +251,8 @@ export const quotationRouter = router({
       const totals = computeQuotationTotals(
         input.lines,
         input.vatIncluded,
-        input.discountAmount
+        input.discountAmount,
+        input.isVat
       );
 
       // Snapshot issuing branch (HQ unless a branch is chosen)
@@ -268,6 +280,7 @@ export const quotationRouter = router({
           DiscountAmount: input.discountAmount,
           VATAmount: totals.vatAmount,
           VATIncluded: input.vatIncluded ? "TRUE" : "FALSE",
+          IsVAT: input.isVat ? "TRUE" : "FALSE",
           GrandTotal: totals.grandTotal,
           Notes: input.notes || "",
           Terms: input.terms || "",
@@ -341,6 +354,7 @@ export const quotationRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const sheets = await getSheetsService(ctx.org.orgId);
+      await ensureTabsCached(sheets, ctx.org.orgId); // IsVAT column on older sheets
       const existing = await sheets.getQuotationById(input.quotationId);
       if (!existing) {
         throw new TRPCError({ code: "NOT_FOUND", message: "ไม่พบใบเสนอราคา" });
@@ -360,7 +374,8 @@ export const quotationRouter = router({
       const totals = computeQuotationTotals(
         input.lines,
         input.vatIncluded,
-        input.discountAmount
+        input.discountAmount,
+        input.isVat
       );
 
       // Update header
@@ -381,6 +396,7 @@ export const quotationRouter = router({
           DiscountAmount: input.discountAmount,
           VATAmount: totals.vatAmount,
           VATIncluded: input.vatIncluded ? "TRUE" : "FALSE",
+          IsVAT: input.isVat ? "TRUE" : "FALSE",
           GrandTotal: totals.grandTotal,
           Notes: input.notes || "",
           Terms: input.terms || "",
@@ -559,6 +575,7 @@ export const quotationRouter = router({
       const vatAmount = parseFloat(q.VATAmount) || 0;
       const grandTotal = parseFloat(q.GrandTotal) || 0;
       const vatIncluded = q.VATIncluded === "TRUE" || q.VATIncluded === "true";
+      const isVat = q.IsVAT !== "FALSE";
       const whtPercent =
         input.whtPercent ?? parseFloat(customer.DefaultWHTPercent) ?? 0;
       const whtAmount = Math.round(((subtotal * whtPercent) / 100) * 100) / 100;
@@ -599,6 +616,7 @@ export const quotationRouter = router({
           DiscountAmount: discountAmount,
           VATAmount: vatAmount,
           VATIncluded: vatIncluded ? "TRUE" : "FALSE",
+          IsVAT: isVat ? "TRUE" : "FALSE",
           WHTPercent: whtPercent,
           WHTAmount: whtAmount,
           GrandTotal: grandTotal,

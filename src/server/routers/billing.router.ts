@@ -51,6 +51,8 @@ const BillingCreateInput = z.object({
   eventId: z.string().optional(),
   projectName: z.string().max(200).optional(),
   vatIncluded: z.boolean(),
+  // false = ไม่มี VAT เลย (ธุรกิจไม่จดทะเบียน VAT) — default true เพื่อไม่กระทบ flow เดิม
+  isVat: z.boolean().default(true),
   discountAmount: z.number().min(0).default(0),
   whtPercent: z.number().min(0).max(15).default(0),
   notes: z.string().max(1000).optional(),
@@ -78,7 +80,8 @@ export function computeBillingTotals(
   lines: { quantity: number; unitPrice: number; discountPercent: number }[],
   vatIncluded: boolean,
   discountAmount: number,
-  whtPercent: number
+  whtPercent: number,
+  isVat: boolean = true
 ): {
   lineTotals: number[];
   subtotal: number;
@@ -96,7 +99,12 @@ export function computeBillingTotals(
   let vatAmount: number;
   let grandTotal: number;
 
-  if (vatIncluded) {
+  if (!isVat) {
+    // ไม่มี VAT (ธุรกิจไม่จด VAT) → ไม่มีบรรทัด VAT, GrandTotal = Subtotal
+    subtotal = round2(sumLines - discountAmount);
+    vatAmount = 0;
+    grandTotal = subtotal;
+  } else if (vatIncluded) {
     grandTotal = round2(sumLines - discountAmount);
     vatAmount = round2((grandTotal * 7) / 107);
     subtotal = round2(grandTotal - vatAmount);
@@ -146,6 +154,8 @@ function shapeHeader(r: Record<string, string>) {
     discountAmount: parseFloat(r.DiscountAmount) || 0,
     vatAmount: parseFloat(r.VATAmount) || 0,
     vatIncluded: r.VATIncluded === "TRUE" || r.VATIncluded === "true",
+    // legacy rows (คอลัมน์ว่าง) = มี VAT
+    isVat: r.IsVAT !== "FALSE",
     whtPercent: parseFloat(r.WHTPercent) || 0,
     whtAmount: parseFloat(r.WHTAmount) || 0,
     grandTotal,
@@ -268,7 +278,8 @@ export const billingRouter = router({
         input.lines,
         input.vatIncluded,
         input.discountAmount,
-        input.whtPercent
+        input.whtPercent,
+        input.isVat
       );
 
       const issuer = await resolveIssuerBranch(ctx.org.orgId, input.branchId);
@@ -296,6 +307,7 @@ export const billingRouter = router({
           DiscountAmount: input.discountAmount,
           VATAmount: totals.vatAmount,
           VATIncluded: input.vatIncluded ? "TRUE" : "FALSE",
+          IsVAT: input.isVat ? "TRUE" : "FALSE",
           WHTPercent: input.whtPercent,
           WHTAmount: totals.whtAmount,
           GrandTotal: totals.grandTotal,
@@ -437,6 +449,7 @@ export const billingRouter = router({
           DiscountAmount: 0,
           VATAmount: vatAmount,
           VATIncluded: "FALSE",
+          IsVAT: "FALSE",
           WHTPercent: input.whtPercent,
           WHTAmount: whtAmount,
           GrandTotal: grandTotal,
@@ -502,6 +515,7 @@ export const billingRouter = router({
     .input(z.object({ billingId: z.string() }).merge(BillingCreateInput))
     .mutation(async ({ ctx, input }) => {
       const sheets = await getSheetsService(ctx.org.orgId);
+      await ensureTabsCached(sheets, ctx.org.orgId); // IsVAT column on older sheets
       const existing = await sheets.getBillingById(input.billingId);
       if (!existing) {
         throw new TRPCError({ code: "NOT_FOUND", message: "ไม่พบใบวางบิล" });
@@ -522,7 +536,8 @@ export const billingRouter = router({
         input.lines,
         input.vatIncluded,
         input.discountAmount,
-        input.whtPercent
+        input.whtPercent,
+        input.isVat
       );
 
       await sheets.updateById(
@@ -543,6 +558,7 @@ export const billingRouter = router({
           DiscountAmount: input.discountAmount,
           VATAmount: totals.vatAmount,
           VATIncluded: input.vatIncluded ? "TRUE" : "FALSE",
+          IsVAT: input.isVat ? "TRUE" : "FALSE",
           WHTPercent: input.whtPercent,
           WHTAmount: totals.whtAmount,
           GrandTotal: totals.grandTotal,

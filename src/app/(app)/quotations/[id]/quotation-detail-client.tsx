@@ -188,12 +188,15 @@ export function QuotationDetailClient({
             >
               → สร้างใบวางบิล
             </button>
-            <Link
-              href={`/tax-invoices/new?fromQuotation=${quotationId}`}
-              className="app-btn app-btn-secondary"
-            >
-              → ออกใบกำกับภาษี (ตรง)
-            </Link>
+            {/* ใบกำกับภาษีต้องมี VAT — เอกสาร "ไม่มี VAT" ออก TI ไม่ได้ */}
+            {header.isVat && (
+              <Link
+                href={`/tax-invoices/new?fromQuotation=${quotationId}`}
+                className="app-btn app-btn-secondary"
+              >
+                → ออกใบกำกับภาษี (ตรง)
+              </Link>
+            )}
             <button
               onClick={() =>
                 handleAction(voidMut, `ยกเลิกใบเสนอราคา ${header.docNumber}?`)
@@ -321,7 +324,7 @@ export function QuotationDetailClient({
               marginBottom: "0.5rem",
             }}
           >
-            <span>ยอดก่อน VAT:</span>
+            <span>{header.isVat ? "ยอดก่อน VAT:" : "ยอดรวม:"}</span>
             <span className="num">{formatTHB(header.subtotal)}</span>
           </div>
           {header.discountAmount > 0 && (
@@ -337,16 +340,18 @@ export function QuotationDetailClient({
               <span className="num">−{formatTHB(header.discountAmount)}</span>
             </div>
           )}
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              marginBottom: "0.5rem",
-            }}
-          >
-            <span>VAT 7% {header.vatIncluded && "(included)"}:</span>
-            <span className="num">{formatTHB(header.vatAmount)}</span>
-          </div>
+          {header.isVat && (
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                marginBottom: "0.5rem",
+              }}
+            >
+              <span>VAT 7% {header.vatIncluded && "(included)"}:</span>
+              <span className="num">{formatTHB(header.vatAmount)}</span>
+            </div>
+          )}
           <div
             style={{
               display: "flex",

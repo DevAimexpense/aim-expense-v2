@@ -1,9 +1,14 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { trpc } from "@/lib/trpc/client";
+import {
+  VatModePicker,
+  vatModeOf,
+  vatFlagsOf,
+} from "@/components/shared/vat-mode-picker";
 
 // ===== Helpers =====
 
@@ -12,12 +17,18 @@ const round2 = (n: number) => Math.round(n * 100) / 100;
 function computeTotalsClient(
   lines: { quantity: number; unitPrice: number; discountPercent: number }[],
   vatIncluded: boolean,
-  discountAmount: number
+  discountAmount: number,
+  isVat: boolean = true
 ) {
   const lineTotals = lines.map((l) =>
     round2(l.quantity * l.unitPrice * (1 - l.discountPercent / 100))
   );
   const sumLines = lineTotals.reduce((a, b) => a + b, 0);
+  if (!isVat) {
+    // ไม่มี VAT → ไม่มีบรรทัด VAT, ยอดรวม = ยอดก่อน VAT
+    const subtotal = round2(sumLines - discountAmount);
+    return { lineTotals, subtotal, vatAmount: 0, grandTotal: subtotal };
+  }
   if (vatIncluded) {
     const grandTotal = round2(sumLines - discountAmount);
     const vatAmount = round2((grandTotal * 7) / 107);
@@ -67,6 +78,7 @@ interface FormState {
   projectName: string;
   eventId: string;
   vatIncluded: boolean;
+  isVat: boolean;
   discountAmount: number;
   notes: string;
   terms: string;
@@ -82,6 +94,7 @@ export interface InitialQuotationData {
   projectName: string;
   eventId: string;
   vatIncluded: boolean;
+  isVat: boolean;
   discountAmount: number;
   notes: string;
   terms: string;
@@ -122,6 +135,7 @@ export function NewQuotationClient({ mode, initial }: Props) {
     projectName: initial?.projectName || "",
     eventId: initial?.eventId || "",
     vatIncluded: initial?.vatIncluded ?? false,
+    isVat: initial?.isVat ?? true,
     discountAmount: initial?.discountAmount || 0,
     notes: initial?.notes || "",
     terms: initial?.terms || "",
@@ -153,9 +167,26 @@ export function NewQuotationClient({ mode, initial }: Props) {
 
   const totals = useMemo(
     () =>
-      computeTotalsClient(form.lines, form.vatIncluded, form.discountAmount),
-    [form.lines, form.vatIncluded, form.discountAmount]
+      computeTotalsClient(
+        form.lines,
+        form.vatIncluded,
+        form.discountAmount,
+        form.isVat
+      ),
+    [form.lines, form.vatIncluded, form.discountAmount, form.isVat]
   );
+
+  // default โหมด VAT จากตั้งค่าองค์กร (ธุรกิจไม่จด VAT → เริ่มที่ "ไม่มี VAT")
+  // เฉพาะตอนสร้างใหม่ และก่อนที่ user จะแตะตัวเลือกเอง
+  const orgQuery = trpc.org.get.useQuery();
+  const [vatTouched, setVatTouched] = useState(false);
+  useEffect(() => {
+    if (mode !== "create" || vatTouched || !orgQuery.data) return;
+    if (orgQuery.data.vatRegistered === false) {
+      setForm((f) => ({ ...f, isVat: false, vatIncluded: false }));
+    }
+  }, [mode, vatTouched, orgQuery.data]);
+
 
   // ===== Handlers =====
 
@@ -227,6 +258,7 @@ export function NewQuotationClient({ mode, initial }: Props) {
       eventId: form.eventId || undefined,
       projectName: form.projectName.trim() || undefined,
       vatIncluded: form.vatIncluded,
+      isVat: form.isVat,
       discountAmount: form.discountAmount,
       notes: form.notes.trim() || undefined,
       terms: form.terms.trim() || undefined,
@@ -544,49 +576,13 @@ export function NewQuotationClient({ mode, initial }: Props) {
           </div>
           <div className="app-form-grid cols-2">
             <div>
-              <div className="app-form-group">
-                <label className="app-label">โหมด VAT</label>
-                <div style={{ display: "flex", gap: "0.5rem" }}>
-                  <label
-                    style={{
-                      flex: 1,
-                      padding: "0.5rem 0.75rem",
-                      border: `2px solid ${form.vatIncluded ? "#e2e8f0" : "#2563eb"}`,
-                      background: form.vatIncluded ? "white" : "#eff6ff",
-                      borderRadius: "0.5rem",
-                      cursor: "pointer",
-                      fontSize: "0.8125rem",
-                    }}
-                  >
-                    <input
-                      type="radio"
-                      checked={!form.vatIncluded}
-                      onChange={() => setForm({ ...form, vatIncluded: false })}
-                      style={{ marginRight: "0.5rem" }}
-                    />
-                    ราคายังไม่รวม VAT (บวก 7%)
-                  </label>
-                  <label
-                    style={{
-                      flex: 1,
-                      padding: "0.5rem 0.75rem",
-                      border: `2px solid ${form.vatIncluded ? "#2563eb" : "#e2e8f0"}`,
-                      background: form.vatIncluded ? "#eff6ff" : "white",
-                      borderRadius: "0.5rem",
-                      cursor: "pointer",
-                      fontSize: "0.8125rem",
-                    }}
-                  >
-                    <input
-                      type="radio"
-                      checked={form.vatIncluded}
-                      onChange={() => setForm({ ...form, vatIncluded: true })}
-                      style={{ marginRight: "0.5rem" }}
-                    />
-                    ราคารวม VAT แล้ว
-                  </label>
-                </div>
-              </div>
+              <VatModePicker
+                value={vatModeOf(form.isVat, form.vatIncluded)}
+                onChange={(m) => {
+                  setVatTouched(true);
+                  setForm({ ...form, ...vatFlagsOf(m) });
+                }}
+              />
               <div className="app-form-group">
                 <label className="app-label">ส่วนลดท้ายบิล (บาท)</label>
                 <input
@@ -620,19 +616,21 @@ export function NewQuotationClient({ mode, initial }: Props) {
                   marginBottom: "0.5rem",
                 }}
               >
-                <span>ราคา (ก่อน VAT):</span>
+                <span>{form.isVat ? "ราคา (ก่อน VAT):" : "ยอดรวม:"}</span>
                 <span className="num">{formatTHB(totals.subtotal)}</span>
               </div>
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  marginBottom: "0.5rem",
-                }}
-              >
-                <span>VAT 7%:</span>
-                <span className="num">{formatTHB(totals.vatAmount)}</span>
-              </div>
+              {form.isVat && (
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    marginBottom: "0.5rem",
+                  }}
+                >
+                  <span>VAT 7%:</span>
+                  <span className="num">{formatTHB(totals.vatAmount)}</span>
+                </div>
+              )}
               <div
                 style={{
                   display: "flex",

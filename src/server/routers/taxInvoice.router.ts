@@ -660,6 +660,14 @@ export const taxInvoiceRouter = router({
           message: "ใบวางบิลถูกยกเลิก ไม่สามารถออกใบกำกับภาษีได้",
         });
       }
+      // ใบกำกับภาษีต้องมี VAT เสมอ — เอกสารต้นทางที่ออกแบบ "ไม่มี VAT" แปลงไม่ได้
+      if (billing.IsVAT === "FALSE") {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message:
+            "ใบวางบิลนี้ออกแบบไม่มี VAT — ออกใบกำกับภาษีไม่ได้ (ใบกำกับภาษีต้องมี VAT 7% เสมอ)",
+        });
+      }
 
       const billingLines = await sheets.getBillingLines(input.billingId);
       if (billingLines.length === 0) {
@@ -792,6 +800,14 @@ export const taxInvoiceRouter = router({
         throw new TRPCError({
           code: "PRECONDITION_FAILED",
           message: "ใบเสนอราคาถูกยกเลิก/ปฏิเสธ ไม่สามารถออกใบกำกับภาษีได้",
+        });
+      }
+      // ใบกำกับภาษีต้องมี VAT เสมอ — เอกสารต้นทางที่ออกแบบ "ไม่มี VAT" แปลงไม่ได้
+      if (quotation.IsVAT === "FALSE") {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message:
+            "ใบเสนอราคานี้ออกแบบไม่มี VAT — ออกใบกำกับภาษีไม่ได้ (ใบกำกับภาษีต้องมี VAT 7% เสมอ)",
         });
       }
 

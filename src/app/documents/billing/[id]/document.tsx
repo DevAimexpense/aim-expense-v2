@@ -27,6 +27,7 @@ interface DocData {
     discountAmount: number;
     vatAmount: number;
     vatIncluded: boolean;
+    isVat: boolean;
     whtPercent: number;
     whtAmount: number;
     grandTotal: number;
@@ -623,7 +624,7 @@ function DocPage({
         </div>
         <div className="totals-block">
           <div className="totals-row-line">
-            <span>ราคา (ก่อน VAT):</span>
+            <span>{header.isVat ? "ราคา (ก่อน VAT):" : "ยอดรวม:"}</span>
             <span className="num">{formatMoney(header.subtotal)}</span>
           </div>
           {header.discountAmount > 0 && (
@@ -632,10 +633,12 @@ function DocPage({
               <span className="num">−{formatMoney(header.discountAmount)}</span>
             </div>
           )}
-          <div className="totals-row-line">
-            <span>VAT 7% {header.vatIncluded && "(included)"}:</span>
-            <span className="num">{formatMoney(header.vatAmount)}</span>
-          </div>
+          {header.isVat && (
+            <div className="totals-row-line">
+              <span>VAT 7% {header.vatIncluded && "(included)"}:</span>
+              <span className="num">{formatMoney(header.vatAmount)}</span>
+            </div>
+          )}
           <div className="totals-row-line grand">
             <span>ยอดรวมสุทธิ:</span>
             <span className="num">{formatMoney(header.grandTotal)}</span>
