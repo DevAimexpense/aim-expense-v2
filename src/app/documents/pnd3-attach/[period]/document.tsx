@@ -15,6 +15,7 @@
 // ===========================================
 
 import { useEffect, useState } from "react";
+import { formatDateTime } from "@/lib/utils/date";
 import {
   splitTaxIdBoxes,
   splitBranchBoxes,
@@ -63,7 +64,7 @@ export function PND3AttachDocument({ period, periodInfo, org, rows }: Props) {
 
   const [printedAt, setPrintedAt] = useState("");
   useEffect(() => {
-    setPrintedAt(new Date().toLocaleString("th-TH"));
+    setPrintedAt(formatDateTime(new Date()));
   }, []);
 
   // แบ่งรายการ 6/แผ่น

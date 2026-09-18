@@ -56,8 +56,8 @@ export const THAI_MONTHS_SHORT = [
 ];
 
 /**
- * Format ISO date (YYYY-MM-DD) → "DD/MM/YY" (BE 2-digit year — fits cell width)
- * ตามฟอร์มกรมสรรพากร (วัน เดือน ปี ที่จ่าย — ปีพ.ศ. 2 หลัก)
+ * Format ISO date (YYYY-MM-DD) → "DD/MM/YYYY" (BE 4-digit year — พ.ศ.)
+ * ตามฟอร์มกรมสรรพากร (วัน เดือน ปี ที่จ่าย — ปีพ.ศ. 4 หลัก)
  */
 export function formatThaiDateShort(iso: string): string {
   if (!iso) return "";
@@ -66,21 +66,20 @@ export function formatThaiDateShort(iso: string): string {
   const day = String(d.getDate()).padStart(2, "0");
   const month = String(d.getMonth() + 1).padStart(2, "0");
   const yearTH = d.getFullYear() + 543;
-  const yy = String(yearTH).slice(-2);
-  return `${day}/${month}/${yy}`;
+  return `${day}/${month}/${yearTH}`;
 }
 
 /**
- * Format ISO date → "DD เดือนเต็ม พ.ศ.YYYY" (full Thai date — ลงท้ายเอกสาร)
+ * Format ISO date → "DD/MM/YYYY" (พ.ศ. — dd/mm/yyyy for consistency)
  */
 export function formatThaiDateLong(iso: string): string {
   if (!iso) return "";
   const d = new Date(iso);
   if (isNaN(d.getTime())) return iso;
-  const day = d.getDate();
-  const month = THAI_MONTHS_FULL[d.getMonth()];
+  const day = String(d.getDate()).padStart(2, "0");
+  const month = String(d.getMonth() + 1).padStart(2, "0");
   const yearTH = d.getFullYear() + 543;
-  return `${day} ${month} ${yearTH}`;
+  return `${day}/${month}/${yearTH}`;
 }
 
 /**

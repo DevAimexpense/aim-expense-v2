@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { formatDate as formatThaiDate } from "@/lib/utils/date";
 
 interface DocData {
   org: {
@@ -54,30 +55,6 @@ const formatMoney = (n: number) =>
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
-
-function formatThaiDate(iso: string): string {
-  if (!iso) return "—";
-  try {
-    const d = new Date(iso);
-    const month = [
-      "มกราคม",
-      "กุมภาพันธ์",
-      "มีนาคม",
-      "เมษายน",
-      "พฤษภาคม",
-      "มิถุนายน",
-      "กรกฎาคม",
-      "สิงหาคม",
-      "กันยายน",
-      "ตุลาคม",
-      "พฤศจิกายน",
-      "ธันวาคม",
-    ];
-    return `${d.getDate()} ${month[d.getMonth()]} ${d.getFullYear() + 543}`;
-  } catch {
-    return iso;
-  }
-}
 
 function formatTaxId(taxId: string): string {
   if (!taxId) return "—";

@@ -10,6 +10,7 @@ import {
   EXPENSE_NATURE_OPTIONS,
 } from "@/lib/constants/expense-categories";
 import { pdfFirstPageToImage, isPdfFile } from "@/lib/utils/pdf-to-image";
+import { formatDate } from "@/lib/utils/date";
 
 interface Event {
   eventId: string;
@@ -1542,7 +1543,7 @@ function DuplicateAlert({
                 </div>
                 <div style={{ color: "#64748b", fontSize: "0.6875rem" }}>
                   {payeeMap[d.payeeId] || "?"} • {eventMap[d.eventId] || "?"}
-                  {date && ` • ${date.toLocaleDateString("th-TH", { day: "2-digit", month: "short" })}`}
+                  {date && ` • ${formatDate(date)}`}
                   {" • "}
                   <span
                     style={{

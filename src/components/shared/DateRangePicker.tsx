@@ -20,6 +20,7 @@ import {
   isValid,
   isSameDay,
 } from "date-fns";
+import { formatDate } from "@/lib/utils/date";
 
 export interface DateRange {
   from: Date;
@@ -62,13 +63,9 @@ function presetLabel(p: DateRangePreset): string {
   return p === "this-month" ? "เดือนนี้" : "เดือนก่อน";
 }
 
-/** Format a Date to Thai short form with Buddhist year, e.g. "1 เม.ย. 2569" */
+/** Format a Date to dd/mm/yyyy with Buddhist year, e.g. "01/04/2569" */
 function formatThai(d: Date): string {
-  return new Intl.DateTimeFormat("th-TH-u-ca-buddhist", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  }).format(d);
+  return formatDate(d);
 }
 
 function formatRange(r: DateRange): string {

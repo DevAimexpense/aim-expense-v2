@@ -4,6 +4,7 @@ import { useState } from "react";
 import { trpc } from "@/lib/trpc/client";
 import SearchableSelect, { type SearchableSelectOption } from "@/components/searchable-select";
 import DateInput from "@/components/shared/date-input";
+import { formatDate } from "@/lib/utils/date";
 
 const STATUS_LABEL: Record<string, { label: string; class: string }> = {
   active: { label: "ดำเนินการ", class: "app-badge-success" },
@@ -724,17 +725,6 @@ function formatNumber(n: number): string {
     minimumFractionDigits: 0,
     maximumFractionDigits: 2,
   }).format(n || 0);
-}
-
-function formatDate(s: string): string {
-  if (!s) return "-";
-  try {
-    const d = new Date(s);
-    if (isNaN(d.getTime())) return s;
-    return d.toLocaleDateString("th-TH", { day: "2-digit", month: "short", year: "2-digit" });
-  } catch {
-    return s;
-  }
 }
 
 function todayISO(): string {

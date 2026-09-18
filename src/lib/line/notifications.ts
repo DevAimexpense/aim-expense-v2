@@ -5,17 +5,10 @@
 // ===========================================
 
 import { pushMessage, type LineFlexMessage } from "./messaging";
+import { formatDate as formatThaiDate } from "@/lib/utils/date";
 
 function appUrl(): string {
   return process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-}
-
-function formatThaiDate(date: Date): string {
-  return date.toLocaleDateString("th-TH", {
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-  });
 }
 
 // ===== Trial-expiring reminder =====

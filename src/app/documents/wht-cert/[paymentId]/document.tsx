@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import type { WhtIncomeSection } from "@/lib/wht-doc-utils";
 import { saveDocumentPdf, runAutoSaveIfRequested } from "@/lib/utils/save-doc-pdf";
+import { formatDate as formatThaiDate, formatDateTime } from "@/lib/utils/date";
 
 interface WthCertProps {
   docNumber: { book: string; number: string };
@@ -36,7 +37,7 @@ export function WthCertDocument({
   // Timestamp แสดงเฉพาะ client หลัง mount (ป้องกัน hydration mismatch)
   const [printedAt, setPrintedAt] = useState("");
   useEffect(() => {
-    setPrintedAt(new Date().toLocaleString("th-TH"));
+    setPrintedAt(formatDateTime(new Date()));
   }, []);
 
   // Save PDF to Drive
@@ -747,21 +748,6 @@ function formatMoney(n: number): string {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(n);
-}
-
-function formatThaiDate(iso: string): string {
-  if (!iso) return "—";
-  try {
-    const d = new Date(iso);
-    if (isNaN(d.getTime())) return iso;
-    const day = d.getDate();
-    const months = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
-    const month = months[d.getMonth()];
-    const year = d.getFullYear() + 543;
-    return `${day} ${month} ${year}`;
-  } catch {
-    return iso;
-  }
 }
 
 function bahtText(n: number): string {

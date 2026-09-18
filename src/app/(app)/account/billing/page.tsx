@@ -8,6 +8,7 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth/session";
 import { prisma } from "@/lib/prisma";
+import { formatDate } from "@/lib/utils/date";
 import {
   PLAN_LABELS,
   PLAN_LIMITS,
@@ -253,8 +254,7 @@ export default async function AccountBillingPage() {
                 }}
               >
                 หมด{" "}
-                {sub?.trialEndsAt &&
-                  new Date(sub.trialEndsAt).toLocaleDateString("th-TH")}
+                {sub?.trialEndsAt && formatDate(sub.trialEndsAt)}
               </span>
             </div>
             <div

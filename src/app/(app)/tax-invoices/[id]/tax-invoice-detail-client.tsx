@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { trpc } from "@/lib/trpc/client";
 import { TaxInvoiceStatusBadge } from "../tax-invoices-client";
 import { RecordTaxInvoicePaymentModal } from "./payment-modal";
+import { formatDateTime } from "@/lib/utils/date";
 
 const formatTHB = (n: number) =>
   n.toLocaleString("th-TH", {
@@ -250,8 +251,7 @@ export function TaxInvoiceDetailClient({
           {header.status === "issued" ? (
             <>
               🔒 <strong>เอกสารถูก lock</strong> — ออกเมื่อ{" "}
-              {header.issuedAt &&
-                new Date(header.issuedAt).toLocaleString("th-TH")}{" "}
+              {header.issuedAt && formatDateTime(header.issuedAt)}{" "}
               · เลขใบกำกับภาษี{" "}
               <span className="mono" style={{ fontWeight: 700 }}>
                 {header.docNumber}
@@ -261,8 +261,7 @@ export function TaxInvoiceDetailClient({
           ) : (
             <>
               ❌ <strong>ใบกำกับภาษีถูกยกเลิก</strong> — เมื่อ{" "}
-              {header.voidedAt &&
-                new Date(header.voidedAt).toLocaleString("th-TH")}{" "}
+              {header.voidedAt && formatDateTime(header.voidedAt)}{" "}
               · เหตุผล: {header.voidReason || "—"}
             </>
           )}
@@ -536,8 +535,7 @@ export function TaxInvoiceDetailClient({
                 textAlign: "right",
               }}
             >
-              บันทึกเมื่อ{" "}
-              {new Date(header.paymentRecordedAt).toLocaleString("th-TH")}
+              บันทึกเมื่อ {formatDateTime(header.paymentRecordedAt)}
             </div>
           )}
         </div>

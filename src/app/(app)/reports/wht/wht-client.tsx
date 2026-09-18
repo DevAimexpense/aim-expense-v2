@@ -33,6 +33,7 @@
 import { useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { trpc } from "@/lib/trpc/client";
+import { formatMonthYear } from "@/lib/utils/date";
 import SearchableSelect from "@/components/searchable-select";
 import {
   StatCard,
@@ -418,7 +419,7 @@ export function WhtClient({ orgName }: { orgName: string }) {
           {isSingleMonth ? (
             <>
               📄 <strong>ดาวน์โหลด PDF ตามฟอร์มกรมสรรพากร</strong> (เดือน{" "}
-              {formatThaiDate(`${period}-15`).replace(/^15 /, "")}) — เปิดในแท็บใหม่
+              {formatMonthYear(`${period}-15`)}) — เปิดในแท็บใหม่
               เลือก "พิมพ์/บันทึกเป็น PDF"
             </>
           ) : (

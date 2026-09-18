@@ -12,6 +12,7 @@ import Link from "next/link";
 import { getSession } from "@/lib/auth/session";
 import { getOrgContext } from "@/lib/auth/middleware";
 import { prisma } from "@/lib/prisma";
+import { formatDate as formatThaiDate } from "@/lib/utils/date";
 
 export const metadata = {
   title: "เชื่อมต่อ Google | Aim Expense",
@@ -24,19 +25,6 @@ const USERINFO_SCOPE_PREFIX = "https://www.googleapis.com/auth/userinfo";
 
 function hasScope(scopes: string[], prefix: string): boolean {
   return scopes.some((s) => s.startsWith(prefix));
-}
-
-function formatThaiDate(date: Date | null | undefined): string {
-  if (!date) return "—";
-  try {
-    return date.toLocaleDateString("th-TH", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-    });
-  } catch {
-    return "—";
-  }
 }
 
 function formatExpiryRelative(expiry: Date | null): {

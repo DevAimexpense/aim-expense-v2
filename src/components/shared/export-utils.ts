@@ -5,6 +5,8 @@
  * Browser-only (use inside "use client" components).
  */
 
+import { formatDate, formatDateTime } from "@/lib/utils/date";
+
 export interface ExportColumn<TRow> {
   /** Object key used to read the value */
   key: keyof TRow & string;
@@ -21,7 +23,7 @@ function getCellValue<TRow>(
   const raw = row[col.key];
   if (col.format) return col.format(raw, row);
   if (raw === null || raw === undefined) return "";
-  if (raw instanceof Date) return raw.toLocaleDateString("th-TH");
+  if (raw instanceof Date) return formatDate(raw);
   return raw as any;
 }
 
@@ -139,8 +141,8 @@ export async function exportToPDF<TRow>(
   container.innerHTML =
     titleHtml +
     `<table style="width:100%;border-collapse:collapse;"><thead><tr>${headerCells}</tr></thead><tbody>${bodyRows}</tbody></table>` +
-    `<p style="margin-top:16px;font-size:10px;color:#94a3b8;">สร้างโดย Aim Expense • ${new Date().toLocaleString(
-      "th-TH"
+    `<p style="margin-top:16px;font-size:10px;color:#94a3b8;">สร้างโดย Aim Expense • ${formatDateTime(
+      new Date()
     )}</p>`;
   document.body.appendChild(container);
 

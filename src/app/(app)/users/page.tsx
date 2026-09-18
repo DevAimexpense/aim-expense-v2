@@ -4,6 +4,7 @@ import { useState } from "react";
 import { trpc } from "@/lib/trpc/client";
 import { PERMISSION_LABELS } from "@/types/permissions";
 import SearchableSelect, { type SearchableSelectOption } from "@/components/searchable-select";
+import { formatDate, formatDateTime } from "@/lib/utils/date";
 
 type Role = "admin" | "manager" | "accountant" | "staff" | "project_manager";
 
@@ -177,7 +178,7 @@ function InvitationRow({
       </td>
       <td style={{ fontSize: "0.8125rem", color: "#475569" }}>{scopeText}</td>
       <td style={{ fontSize: "0.75rem", color: "#64748b" }}>
-        {new Date(invitation.expiresAt).toLocaleString("th-TH")}
+        {formatDateTime(invitation.expiresAt)}
       </td>
       <td className="text-right">
         <div style={{ display: "flex", gap: "0.25rem", justifyContent: "flex-end" }}>
@@ -279,7 +280,7 @@ function MemberRow({
           </span>
         </td>
         <td style={{ fontSize: "0.75rem", color: "#64748b" }}>
-          {member.joinedAt ? new Date(member.joinedAt).toLocaleDateString("th-TH") : "-"}
+          {formatDate(member.joinedAt)}
         </td>
         <td className="text-right">
           <div style={{ display: "flex", gap: "0.25rem", justifyContent: "flex-end" }}>

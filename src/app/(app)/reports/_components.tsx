@@ -8,6 +8,8 @@
 
 "use client";
 
+import { formatDate } from "@/lib/utils/date";
+
 export function formatTHB(n: number): string {
   return new Intl.NumberFormat("th-TH", {
     minimumFractionDigits: 2,
@@ -32,19 +34,14 @@ export function toLocalDateString(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
+/**
+ * Format a date for display as `dd/mm/yyyy` with Buddhist year (พ.ศ.),
+ * e.g. `31/12/2569`. Delegates to the central date helper so the whole
+ * system stays consistent. Kept under this name + signature so existing
+ * consumers work unchanged.
+ */
 export function formatThaiDate(s: string): string {
-  if (!s) return "-";
-  try {
-    const d = new Date(s);
-    if (isNaN(d.getTime())) return s;
-    return d.toLocaleDateString("th-TH", {
-      day: "2-digit",
-      month: "short",
-      year: "2-digit",
-    });
-  } catch {
-    return s;
-  }
+  return formatDate(s);
 }
 
 export type PaymentStatus =

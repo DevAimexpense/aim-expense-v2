@@ -10,6 +10,7 @@
 // ===========================================
 
 import { useEffect, useState } from "react";
+import { formatDateTime } from "@/lib/utils/date";
 import {
   splitTaxIdBoxes,
   splitBranchBoxes,
@@ -58,7 +59,7 @@ export function PND53AttachDocument({ period, periodInfo, org, rows }: Props) {
 
   const [printedAt, setPrintedAt] = useState("");
   useEffect(() => {
-    setPrintedAt(new Date().toLocaleString("th-TH"));
+    setPrintedAt(formatDateTime(new Date()));
   }, []);
 
   const sheets = chunkInto(rows, ROWS_PER_SHEET);

@@ -9,6 +9,7 @@
 // ===========================================
 
 import { useEffect, useState } from "react";
+import { formatDateTime } from "@/lib/utils/date";
 import {
   splitTaxIdBoxes,
   splitBranchBoxes,
@@ -45,7 +46,7 @@ export function PND53SummaryDocument({ period, periodInfo, org, stats }: Props) 
 
   const [printedAt, setPrintedAt] = useState("");
   useEffect(() => {
-    setPrintedAt(new Date().toLocaleString("th-TH"));
+    setPrintedAt(formatDateTime(new Date()));
   }, []);
 
   const orgTaxBoxes = splitTaxIdBoxes(org.taxId);

@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { trpc } from "@/lib/trpc/client";
+import { formatDate } from "@/lib/utils/date";
 
 const ROLE_BADGE: Record<string, { label: string; color: string }> = {
   admin: { label: "Admin", color: "#dc2626" },
@@ -159,10 +160,7 @@ export default function SelectOrgPage() {
                         >
                           {role.label}
                         </span>
-                        เข้าร่วมเมื่อ{" "}
-                        {org.joinedAt
-                          ? new Date(org.joinedAt).toLocaleDateString("th-TH")
-                          : "-"}
+                        เข้าร่วมเมื่อ {formatDate(org.joinedAt)}
                       </div>
                     </div>
                     <span style={{ fontSize: "1.25rem", color: "#94a3b8" }}>→</span>

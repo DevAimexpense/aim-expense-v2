@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { trpc } from "@/lib/trpc/client";
+import { formatDateTime } from "@/lib/utils/date";
 
 const ROLE_LABEL: Record<string, string> = {
   admin: "Admin",
@@ -139,7 +140,7 @@ export default function InviteAcceptPage() {
         <InfoRow label="Role" value={ROLE_LABEL[inv.role] || inv.role} />
         <InfoRow
           label="หมดอายุ"
-          value={new Date(inv.expiresAt).toLocaleString("th-TH")}
+          value={formatDateTime(inv.expiresAt)}
         />
       </div>
 

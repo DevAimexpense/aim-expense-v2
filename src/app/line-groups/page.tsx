@@ -1,6 +1,7 @@
 "use client";
 
 import { trpc } from "@/lib/trpc/client";
+import { formatDate } from "@/lib/utils/date";
 
 export default function LineGroupsPage() {
   const utils = trpc.useUtils();
@@ -92,8 +93,7 @@ export default function LineGroupsPage() {
                     📁 โปรเจกต์: {g.eventName || "ไม่ระบุ (เริ่มต้น)"}
                   </div>
                   <div style={{ fontSize: "0.75rem", color: "#64748b", marginTop: 2 }}>
-                    เชื่อมโดย {g.boundByName} ·{" "}
-                    {new Date(g.createdAt).toLocaleDateString("th-TH")}
+                    เชื่อมโดย {g.boundByName} · {formatDate(g.createdAt)}
                   </div>
                   <div
                     style={{

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { saveDocumentPdf, runAutoSaveIfRequested } from "@/lib/utils/save-doc-pdf";
+import { formatDate as formatThaiDate, formatDateTime } from "@/lib/utils/date";
 
 interface Props {
   company: {
@@ -31,7 +32,7 @@ export function ReceiptVoucherDocument({ company, requester, payee, payment }: P
   // Timestamp แสดงเฉพาะ client หลัง mount (ป้องกัน hydration mismatch)
   const [printedAt, setPrintedAt] = useState("");
   useEffect(() => {
-    setPrintedAt(new Date().toLocaleString("th-TH"));
+    setPrintedAt(formatDateTime(new Date()));
   }, []);
 
   // Save PDF to Drive
@@ -444,16 +445,6 @@ function formatTaxId(s: string): string {
     return `${digits[0]}-${digits.slice(1, 5)}-${digits.slice(5, 10)}-${digits.slice(10, 12)}-${digits[12]}`;
   }
   return digits || "—";
-}
-
-function formatThaiDate(iso: string): string {
-  if (!iso) return "—";
-  try {
-    const d = new Date(iso);
-    if (isNaN(d.getTime())) return iso;
-    const months = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
-    return `${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear() + 543}`;
-  } catch { return iso; }
 }
 
 function bahtText(n: number): string {

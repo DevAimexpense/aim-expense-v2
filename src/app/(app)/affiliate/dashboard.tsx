@@ -7,6 +7,7 @@
 
 import { useState } from "react";
 import { trpc } from "@/lib/trpc/client";
+import { formatDate as thaiDate } from "@/lib/utils/date";
 
 const card: React.CSSProperties = {
   background: "#fff",
@@ -18,18 +19,6 @@ const card: React.CSSProperties = {
 
 function baht(n: number): string {
   return `฿${n.toLocaleString("th-TH", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
-}
-function thaiDate(d: Date | string | null): string {
-  if (!d) return "—";
-  try {
-    return new Date(d).toLocaleDateString("th-TH", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-    });
-  } catch {
-    return "—";
-  }
 }
 
 const REFERRAL_STATUS_TH: Record<string, { label: string; tone: string }> = {

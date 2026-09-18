@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { trpc } from "@/lib/trpc/client";
 import { PaymentModal } from "../payments/payment-modal";
+import { formatDate } from "@/lib/utils/date";
 import { UploadReceiptModal } from "./upload-receipt-modal";
 import { ManualReceiptModal } from "./manual-receipt-modal";
 import SearchableSelect, { type SearchableSelectOption } from "@/components/searchable-select";
@@ -538,19 +539,4 @@ function formatNumber(n: number): string {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(n || 0);
-}
-
-function formatDate(s: string): string {
-  if (!s) return "-";
-  try {
-    const d = new Date(s);
-    if (isNaN(d.getTime())) return s;
-    return d.toLocaleDateString("th-TH", {
-      day: "2-digit",
-      month: "short",
-      year: "2-digit",
-    });
-  } catch {
-    return s;
-  }
 }

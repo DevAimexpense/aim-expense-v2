@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { trpc } from "@/lib/trpc/client";
 import SearchableSelect from "@/components/searchable-select";
+import { formatDate } from "@/lib/utils/date";
 
 type DocTab = "need_receipt" | "need_clear" | "completed";
 
@@ -290,15 +291,4 @@ function formatNumber(n: number): string {
     minimumFractionDigits: 0,
     maximumFractionDigits: 2,
   }).format(n || 0);
-}
-
-function formatDate(s: string): string {
-  if (!s) return "-";
-  try {
-    const d = new Date(s);
-    if (isNaN(d.getTime())) return s;
-    return d.toLocaleDateString("th-TH", { day: "2-digit", month: "short", year: "2-digit" });
-  } catch {
-    return s;
-  }
 }

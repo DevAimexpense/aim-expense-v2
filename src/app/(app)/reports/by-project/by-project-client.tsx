@@ -24,7 +24,7 @@ import {
   type ColumnDef,
   type ExportColumn,
 } from "@/components/shared";
-import { toLocalDateString } from "../_components";
+import { toLocalDateString, formatThaiDate } from "../_components";
 
 type ProjectRow = {
   eventId: string;
@@ -54,21 +54,6 @@ function formatTHB(n: number): string {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(n || 0);
-}
-
-function formatThaiDate(s: string): string {
-  if (!s) return "-";
-  try {
-    const d = new Date(s);
-    if (isNaN(d.getTime())) return s;
-    return d.toLocaleDateString("th-TH", {
-      day: "2-digit",
-      month: "short",
-      year: "2-digit",
-    });
-  } catch {
-    return s;
-  }
 }
 
 /**
