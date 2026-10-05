@@ -65,6 +65,37 @@ export function OrgSettingsForm({
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
 
+  // ตั้งค่า VAT / เอกสารรับเงิน — บันทึกทันทีที่คลิก (ไม่ต้องเลื่อนลงไปกด "บันทึกการเปลี่ยนแปลง")
+  // ส่งเฉพาะ key ที่เปลี่ยน จึงไม่ทับข้อมูลบริษัทช่องอื่นที่ยังแก้ค้างอยู่
+  const [vatSaving, setVatSaving] = useState(false);
+  const [vatSaved, setVatSaved] = useState(false);
+  const [vatError, setVatError] = useState<string | null>(null);
+  const saveVatSetting = async (
+    patch: { vatRegistered: boolean } | { receiptMode: "separate" | "combined" },
+  ) => {
+    const prev = { vatRegistered, receiptMode };
+    if ("vatRegistered" in patch) setVatRegistered(patch.vatRegistered);
+    else setReceiptMode(patch.receiptMode);
+    setVatSaving(true);
+    setVatSaved(false);
+    setVatError(null);
+    try {
+      await updateMut.mutateAsync(patch);
+      setVatSaved(true);
+      utils.org.current.invalidate();
+      utils.org.get.invalidate(); // default โหมด VAT ในฟอร์มใบเสนอราคา/ใบวางบิล
+      router.refresh(); // sidebar: ซ่อน/แสดงเมนูใบกำกับภาษีตามสถานะจด VAT
+      setTimeout(() => setVatSaved(false), 3000);
+    } catch (e) {
+      // บันทึกไม่สำเร็จ → คืนค่าที่แสดงให้ตรงกับที่ระบบเก็บจริง
+      setVatRegistered(prev.vatRegistered);
+      setReceiptMode(prev.receiptMode);
+      setVatError(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ");
+    } finally {
+      setVatSaving(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -97,13 +128,11 @@ export function OrgSettingsForm({
         logoUrl,
         signatureUrl,
         signatoryName: signatoryName.trim() || null,
-        vatRegistered,
-        receiptMode,
       });
       setSuccess(true);
       utils.org.current.invalidate();
-      utils.org.get.invalidate(); // default โหมด VAT ในฟอร์มใบเสนอราคา/ใบวางบิล
-      router.refresh(); // sidebar: ซ่อน/แสดงเมนูใบกำกับภาษีตามสถานะจด VAT
+      utils.org.get.invalidate();
+      router.refresh();
       setTimeout(() => setSuccess(false), 3000);
     } catch (e) {
       setError(e instanceof Error ? e.message : "เกิดข้อผิดพลาด");
@@ -300,7 +329,19 @@ export function OrgSettingsForm({
             </div>
 
             <div className="app-form-group">
-              <label className="app-label">ภาษีมูลค่าเพิ่ม (VAT)</label>
+              <label className="app-label">
+                ภาษีมูลค่าเพิ่ม (VAT)
+                <span style={{ marginLeft: "0.5rem", fontWeight: 400, fontSize: "0.75rem" }}>
+                  {vatSaving ? (
+                    <span style={{ color: "#64748b" }}>กำลังบันทึก…</span>
+                  ) : vatSaved ? (
+                    <span style={{ color: "#166534" }}>✓ บันทึกแล้ว</span>
+                  ) : (
+                    <span style={{ color: "#94a3b8" }}>บันทึกอัตโนมัติเมื่อเลือก</span>
+                  )}
+                </span>
+              </label>
+              {vatError && <div className="app-error-msg">{vatError}</div>}
               <div style={{ display: "flex", gap: "0.75rem", marginTop: "0.25rem" }}>
                 {(
                   [
@@ -328,8 +369,8 @@ export function OrgSettingsForm({
                       type="radio"
                       name="vatRegistered"
                       checked={vatRegistered === opt.value}
-                      onChange={() => setVatRegistered(opt.value)}
-                      disabled={!isAdmin}
+                      onChange={() => saveVatSetting({ vatRegistered: opt.value })}
+                      disabled={!isAdmin || vatSaving}
                     />
                     {opt.label}
                   </label>
@@ -379,8 +420,8 @@ export function OrgSettingsForm({
                         type="radio"
                         name="receiptMode"
                         checked={receiptMode === opt.value}
-                        onChange={() => setReceiptMode(opt.value)}
-                        disabled={!isAdmin}
+                        onChange={() => saveVatSetting({ receiptMode: opt.value })}
+                        disabled={!isAdmin || vatSaving}
                         style={{ marginTop: "0.2rem" }}
                       />
                       <span>

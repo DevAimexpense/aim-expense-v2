@@ -14,6 +14,7 @@ interface NavItem {
   adminOnly?: boolean; // แสดงเฉพาะ role=admin (สำหรับเมนู settings/billing/google)
   companyOnly?: boolean; // ซ่อนสำหรับบุคคลธรรมดา (ใบกำกับภาษี, ภพ.30 — VAT/นิติบุคคลเท่านั้น)
   personalLabel?: string; // ชื่อเมนูทางเลือกเมื่อ org เป็นบุคคลธรรมดา
+  hideForPersonal?: boolean; // ซ่อนสำหรับบุคคลธรรมดา (ไม่ขึ้นกับสถานะจด VAT)
   backofficeOnly?: boolean; // เฉพาะ admin ของบริษัทหลังบ้าน (ทีมงาน Aim Expense)
 }
 
@@ -100,6 +101,13 @@ const NAV_GROUPS: NavGroup[] = [
         icon: "🧾",
         permission: "manageBillings",
         personalLabel: "รายรับ",
+      },
+      {
+        label: "ใบเสร็จรับเงิน",
+        href: "/receipts",
+        icon: "💵",
+        permission: "manageBillings",
+        hideForPersonal: true,
       },
       {
         label: "ใบกำกับภาษี",
@@ -263,6 +271,7 @@ export function Sidebar({
   function isVisible(item: NavItem): boolean {
     // companyOnly: ซ่อนเมนู VAT/นิติบุคคลสำหรับบุคคลธรรมดา (ยังไม่จด VAT)
     if (item.backofficeOnly) return isBackoffice && isAdmin;
+    if (item.hideForPersonal && isPersonal) return false;
     // และซ่อนเมื่อธุรกิจไม่จดทะเบียน VAT (ออกได้แต่ใบเสร็จรับเงิน ไม่มี ภ.พ.30)
     if (item.companyOnly && (isPersonal || !vatRegistered)) return false;
     // adminOnly: ซ่อนเมนูถ้าไม่ใช่ admin (settings องค์กร, billing, google)
