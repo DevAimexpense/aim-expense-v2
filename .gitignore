@@ -77,6 +77,8 @@ tha.traineddata
 
 # Large test files
 *.pdf
+# ฟอร์มราชการที่ระบบใช้เป็น template ตอน runtime (ไม่ใช่เอกสารอ้างอิง)
+!public/forms/*.pdf
 *.xlsm
 *.xlsx
 !AimExpense-*.xlsx
