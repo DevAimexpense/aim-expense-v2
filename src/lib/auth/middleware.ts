@@ -9,6 +9,7 @@ import { getSession, type SessionPayload } from "./session";
 import { prisma } from "@/lib/prisma";
 import type { Permissions, OrgRole } from "@/types/permissions";
 import { DEFAULT_PERMISSIONS } from "@/lib/permissions";
+import { readIsBackoffice } from "@/lib/org-settings";
 
 /**
  * Org context — loaded once per request
@@ -22,6 +23,8 @@ export interface OrgContext {
   eventScope: string[]; // EventIDs this member is assigned to (for scoped roles)
   googleSpreadsheetId: string | null;
   googleDriveFolderId: string | null;
+  /** org นี้คือบริษัทหลังบ้านของทีมงาน (เข้า /admin/customers ได้ถ้าเป็น admin) */
+  isBackoffice: boolean;
 }
 
 /**
@@ -133,6 +136,7 @@ export const getOrgContext = cache(async function getOrgContextImpl(
     eventScope: membership.eventScope ?? [],
     googleSpreadsheetId: membership.org.googleSpreadsheetId,
     googleDriveFolderId: membership.org.googleDriveFolderId,
+    isBackoffice: readIsBackoffice(membership.org.settings),
   };
 });
 

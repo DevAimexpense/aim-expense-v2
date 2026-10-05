@@ -14,6 +14,7 @@ interface NavItem {
   adminOnly?: boolean; // แสดงเฉพาะ role=admin (สำหรับเมนู settings/billing/google)
   companyOnly?: boolean; // ซ่อนสำหรับบุคคลธรรมดา (ใบกำกับภาษี, ภพ.30 — VAT/นิติบุคคลเท่านั้น)
   personalLabel?: string; // ชื่อเมนูทางเลือกเมื่อ org เป็นบุคคลธรรมดา
+  backofficeOnly?: boolean; // เฉพาะ admin ของบริษัทหลังบ้าน (ทีมงาน Aim Expense)
 }
 
 interface NavGroup {
@@ -221,6 +222,17 @@ const NAV_GROUPS: NavGroup[] = [
       },
     ],
   },
+  {
+    label: "หลังบ้านทีมงาน",
+    items: [
+      {
+        label: "จัดการลูกค้า",
+        href: "/admin/customers",
+        icon: "👥",
+        backofficeOnly: true,
+      },
+    ],
+  },
 ];
 
 interface SidebarProps {
@@ -230,6 +242,7 @@ interface SidebarProps {
   userName?: string;
   userAvatar?: string;
   isAdmin?: boolean;
+  isBackoffice?: boolean;
 }
 
 export function Sidebar({
@@ -239,6 +252,7 @@ export function Sidebar({
   userName = "",
   userAvatar,
   isAdmin = false,
+  isBackoffice = false,
 }: SidebarProps) {
   const pathname = usePathname();
   const [isCollapsed, setIsCollapsed] = useState(false);
@@ -246,6 +260,7 @@ export function Sidebar({
 
   function isVisible(item: NavItem): boolean {
     // companyOnly: ซ่อนเมนู VAT/นิติบุคคลสำหรับบุคคลธรรมดา (ยังไม่จด VAT)
+    if (item.backofficeOnly) return isBackoffice && isAdmin;
     if (item.companyOnly && isPersonal) return false;
     // adminOnly: ซ่อนเมนูถ้าไม่ใช่ admin (settings องค์กร, billing, google)
     if (item.adminOnly && !isAdmin) return false;

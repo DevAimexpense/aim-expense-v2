@@ -16,6 +16,7 @@ export function BillingDetailClient({ billingId }: { billingId: string }) {
   const detail = trpc.billing.getById.useQuery({ billingId });
   const sendMut = trpc.billing.send.useMutation();
   const voidMut = trpc.billing.void.useMutation();
+  const receiptMut = trpc.billing.issueReceipt.useMutation();
 
   const [error, setError] = useState<string | null>(null);
 
@@ -33,6 +34,17 @@ export function BillingDetailClient({ billingId }: { billingId: string }) {
     try {
       await mut.mutateAsync({ billingId });
       refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "เกิดข้อผิดพลาด");
+    }
+  };
+
+  const handleIssueReceipt = async () => {
+    setError(null);
+    try {
+      await receiptMut.mutateAsync({ billingId });
+      refresh();
+      window.open(`/documents/receipt/${billingId}`, "_blank", "noopener");
     } catch (e) {
       setError(e instanceof Error ? e.message : "เกิดข้อผิดพลาด");
     }
@@ -154,6 +166,26 @@ export function BillingDetailClient({ billingId }: { billingId: string }) {
             → ออกใบกำกับภาษี
           </Link>
         )}
+        {/* ใบเสร็จรับเงิน — ออกได้เมื่อรับเงินครบ (ใช้ได้ทั้งจด/ไม่จด VAT) */}
+        {header.status === "paid" &&
+          (header.receiptNumber ? (
+            <a
+              href={`/documents/receipt/${billingId}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="app-btn app-btn-primary"
+            >
+              🧾 พิมพ์ใบเสร็จรับเงิน ({header.receiptNumber})
+            </a>
+          ) : (
+            <button
+              onClick={handleIssueReceipt}
+              disabled={receiptMut.isPending}
+              className="app-btn app-btn-primary"
+            >
+              {receiptMut.isPending ? "กำลังออกใบเสร็จ…" : "🧾 ออกใบเสร็จรับเงิน"}
+            </button>
+          ))}
         <a
           href={`/documents/billing/${billingId}`}
           target="_blank"

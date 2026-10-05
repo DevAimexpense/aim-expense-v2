@@ -33,6 +33,7 @@ export interface TRPCContext {
     eventScope: string[];
     googleSpreadsheetId: string | null;
     googleDriveFolderId: string | null;
+    isBackoffice: boolean;
   } | null;
 }
 
@@ -68,6 +69,7 @@ export async function createTRPCContext(): Promise<TRPCContext> {
           eventScope: org.eventScope,
           googleSpreadsheetId: org.googleSpreadsheetId,
           googleDriveFolderId: org.googleDriveFolderId,
+          isBackoffice: org.isBackoffice,
         }
       : null,
   };
@@ -186,6 +188,24 @@ const isAffiliateAdminMw = t.middleware(async ({ ctx, next }) => {
   }
   return next({ ctx: { ...ctx, session: ctx.session } });
 });
+
+/**
+ * Backoffice middleware — เฉพาะ admin ของ "บริษัทหลังบ้าน" (org ที่มี
+ * settings.backoffice = true) และต้องกำลังเลือกบริษัทนั้นอยู่ (active org)
+ * ⚠️ procedure ที่ใช้ตัวนี้อ่าน/เขียนข้อมูล **ข้าม org** ได้
+ */
+const isBackofficeMw = t.middleware(({ ctx, next }) => {
+  if (!ctx.session) {
+    throw new TRPCError({ code: "UNAUTHORIZED", message: "กรุณาเข้าสู่ระบบ" });
+  }
+  if (!ctx.org || !ctx.org.isBackoffice || ctx.org.role !== "admin") {
+    throw new TRPCError({ code: "FORBIDDEN", message: "ไม่มีสิทธิ์เข้าถึง" });
+  }
+  return next({ ctx: { ...ctx, session: ctx.session, org: ctx.org } });
+});
+
+/** Procedure สำหรับหลังบ้านทีมงาน (จัดการลูกค้าข้ามบริษัท) */
+export const backofficeProcedure = t.procedure.use(isBackofficeMw);
 
 /** Procedure restricted to affiliate admins (AFFILIATE_ADMIN_EMAILS). */
 export const adminProcedure = t.procedure.use(isAffiliateAdminMw);

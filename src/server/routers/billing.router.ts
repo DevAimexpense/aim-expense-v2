@@ -173,6 +173,9 @@ function shapeHeader(r: Record<string, string>) {
     updatedAt: r.UpdatedAt || "",
     pdfUrl: r.PdfUrl || "",
     whtCertUrl: r.WHTCertUrl || "",
+    // ใบเสร็จรับเงิน (ออกเมื่อรับเงินครบ)
+    receiptNumber: r.ReceiptNumber || "",
+    receiptDate: r.ReceiptDate || "",
   };
 }
 
@@ -686,6 +689,71 @@ export const billingRouter = router({
    * - Status updates: partial (if < grandTotal) or paid (if >= grandTotal)
    * - PaidDate = วันที่รับเงิน (latest)
    */
+  /**
+   * ออกใบเสร็จรับเงิน — 1 ใบต่อ 1 ใบวางบิล ออกได้เมื่อรับเงินครบ (Status = paid)
+   * เลขรันแยก RC-{ปี}-{0001} เก็บในคอลัมน์ ReceiptNumber ของแถวใบวางบิลเดิม
+   * ใช้ได้ทั้งธุรกิจจด VAT และไม่จด VAT (ไม่จด VAT = เอกสารรับเงินหลักแทนใบกำกับภาษี)
+   * เรียกซ้ำได้ — ถ้าออกแล้วจะคืนเลขเดิม
+   */
+  issueReceipt: permissionProcedure("manageBillings")
+    .input(
+      z.object({
+        billingId: z.string(),
+        receiptDate: z.string().optional(), // default = วันที่รับเงินล่าสุด
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const sheets = await getSheetsService(ctx.org.orgId);
+      await ensureTabsCached(sheets, ctx.org.orgId); // ReceiptNumber column on older sheets
+      const existing = await sheets.getBillingById(input.billingId);
+      if (!existing) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "ไม่พบใบวางบิล" });
+      }
+      if (existing.ReceiptNumber) {
+        return { success: true, receiptNumber: existing.ReceiptNumber };
+      }
+      if (existing.Status !== "paid") {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "ออกใบเสร็จรับเงินได้เมื่อรับเงินครบแล้วเท่านั้น",
+        });
+      }
+
+      const receiptDate =
+        input.receiptDate ||
+        existing.PaidDate ||
+        new Date().toISOString().slice(0, 10);
+      const year =
+        new Date(receiptDate).getFullYear() || new Date().getFullYear();
+      const receiptNumber = await computeNextDocNumber(
+        sheets,
+        "RC",
+        year,
+        SHEET_TABS.BILLINGS,
+        undefined,
+        "ReceiptNumber"
+      );
+
+      await sheets.updateById(SHEET_TABS.BILLINGS, "BillingID", input.billingId, {
+        ReceiptNumber: receiptNumber,
+        ReceiptDate: receiptDate,
+        UpdatedAt: new Date().toISOString(),
+      });
+
+      await prisma.auditLog.create({
+        data: {
+          orgId: ctx.org.orgId,
+          userId: ctx.session.userId,
+          action: "create",
+          entityType: "receipt",
+          entityRef: input.billingId,
+          summary: `ออกใบเสร็จรับเงิน ${receiptNumber} (จากใบวางบิล ${existing.DocNumber})`,
+        },
+      });
+
+      return { success: true, receiptNumber };
+    }),
+
   recordPayment: permissionProcedure("manageBillings")
     .input(
       z.object({

@@ -147,6 +147,25 @@ async function updateSubscriptionRow(orgId: string, s: Stripe.Subscription) {
   const limits = PLAN_LIMITS[tier];
   const periodEnd = (s as Stripe.Subscription & { current_period_end?: number }).current_period_end;
 
+  // ฟรีตลอดชีพ (comped จากหลังบ้าน) → เก็บสถานะ Stripe ไว้ แต่ไม่ทับ plan/quota ที่ทีมงานให้
+  const existing = await prisma.subscription.findUnique({
+    where: { orgId },
+    select: { isBetaTester: true },
+  });
+  if (existing?.isBetaTester) {
+    await prisma.subscription.update({
+      where: { orgId },
+      data: {
+        stripeSubscriptionId: s.id,
+        stripePriceId: priceId,
+        billingInterval: interval,
+        currentPeriodEnd: periodEnd ? new Date(periodEnd * 1000) : null,
+        cancelAtPeriodEnd: s.cancel_at_period_end,
+      },
+    });
+    return;
+  }
+
   await prisma.subscription.update({
     where: { orgId },
     data: {
@@ -186,6 +205,20 @@ async function handleSubscriptionDeleted(s: Stripe.Subscription) {
   });
   if (!sub) return;
   const freeLimits = PLAN_LIMITS.free;
+  // ฟรีตลอดชีพ (comped) → ล้างแค่ข้อมูล Stripe, plan ที่ทีมงานให้ยังอยู่
+  if (sub.isBetaTester) {
+    await prisma.subscription.update({
+      where: { id: sub.id },
+      data: {
+        stripeSubscriptionId: null,
+        stripePriceId: null,
+        billingInterval: null,
+        currentPeriodEnd: null,
+        cancelAtPeriodEnd: false,
+      },
+    });
+    return;
+  }
   await prisma.subscription.update({
     where: { id: sub.id },
     data: {

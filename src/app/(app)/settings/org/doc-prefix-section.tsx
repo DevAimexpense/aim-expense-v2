@@ -22,18 +22,19 @@ export function DocPrefixSection({ isAdmin }: Props) {
   const { data, isLoading } = trpc.org.getDocPrefixes.useQuery();
   const updateMut = trpc.org.updateDocPrefixes.useMutation();
 
-  const [form, setForm] = useState({ QT: "QT", BIL: "BIL", TI: "TI" });
+  const [form, setForm] = useState({ QT: "QT", BIL: "BIL", TI: "TI", RC: "RC" });
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (data) setForm({ QT: data.QT, BIL: data.BIL, TI: data.TI });
+    if (data) setForm({ QT: data.QT, BIL: data.BIL, TI: data.TI, RC: data.RC });
   }, [data]);
 
   const errQT = validatePrefix(form.QT);
   const errBIL = validatePrefix(form.BIL);
   const errTI = validatePrefix(form.TI);
-  const hasErr = !!(errQT || errBIL || errTI);
+  const errRC = validatePrefix(form.RC);
+  const hasErr = !!(errQT || errBIL || errTI || errRC);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -48,6 +49,7 @@ export function DocPrefixSection({ isAdmin }: Props) {
         QT: form.QT.trim(),
         BIL: form.BIL.trim(),
         TI: form.TI.trim(),
+        RC: form.RC.trim(),
       });
       setSuccess(true);
       utils.org.getDocPrefixes.invalidate();
@@ -113,6 +115,14 @@ export function DocPrefixSection({ isAdmin }: Props) {
             value={form.TI}
             onChange={(v) => setForm({ ...form, TI: v.toUpperCase() })}
             error={errTI}
+            disabled={!isAdmin}
+          />
+          <PrefixField
+            label="ใบเสร็จรับเงิน (Receipt)"
+            preview={`${form.RC}-${new Date().getFullYear()}-0001`}
+            value={form.RC}
+            onChange={(v) => setForm({ ...form, RC: v.toUpperCase() })}
+            error={errRC}
             disabled={!isAdmin}
           />
 

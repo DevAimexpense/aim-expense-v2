@@ -455,6 +455,7 @@ export const orgRouter = router({
         QT: z.string().min(1).max(8),
         BIL: z.string().min(1).max(8),
         TI: z.string().min(1).max(8),
+        RC: z.string().min(1).max(8).default("RC"), // ใบเสร็จรับเงิน
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -484,6 +485,7 @@ export const orgRouter = router({
       await sheets.setConfig("DOC_PREFIX_QT", input.QT);
       await sheets.setConfig("DOC_PREFIX_BIL", input.BIL);
       await sheets.setConfig("DOC_PREFIX_TI", input.TI);
+      await sheets.setConfig("DOC_PREFIX_RC", input.RC);
 
       await prisma.auditLog.create({
         data: {
@@ -492,7 +494,7 @@ export const orgRouter = router({
           action: "update",
           entityType: "org",
           entityRef: ctx.org.orgId,
-          summary: `อัปเดต prefix เลขเอกสาร (QT=${input.QT}, BIL=${input.BIL}, TI=${input.TI})`,
+          summary: `อัปเดต prefix เลขเอกสาร (QT=${input.QT}, BIL=${input.BIL}, TI=${input.TI}, RC=${input.RC})`,
         },
       });
 

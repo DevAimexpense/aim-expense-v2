@@ -237,6 +237,8 @@ export const SHEET_HEADERS: Record<string, string[]> = {
     "WHTCertUrl", // ใบหัก ณ ที่จ่าย (50ทวิ) ที่ผู้จ่ายออกให้ — ใช้ใน flow รายรับบุคคลธรรมดา
     "IncomeType", // ประเภทเงินได้ (บุคคล): salary | service | rent | transport | other — ใช้แยกประเภทใน ภงด./50ทวิ
     "IsVAT", // FALSE = ไม่มี VAT (ธุรกิจไม่จด VAT) — ว่าง/TRUE = มี VAT 7% (legacy rows)
+    "ReceiptNumber", // ใบเสร็จรับเงิน RC-2026-0001 — ออกได้เมื่อรับเงินครบ (1 ใบต่อ 1 ใบวางบิล)
+    "ReceiptDate", // วันที่ใบเสร็จรับเงิน
   ],
   [SHEET_TABS.BILLING_LINES]: [
     "LineID",

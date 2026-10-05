@@ -65,11 +65,14 @@ export default async function AccountBillingPage() {
       cancelAtPeriodEnd: true,
       billingInterval: true,
       stripeSubscriptionId: true,
+      isBetaTester: true,
     },
   });
 
   const plan = effectivePlan(sub as SubscriptionState | null);
   const inTrial = isInTrial(sub as SubscriptionState | null);
+  // ฟรีตลอดชีพ — ทีมงานให้สิทธิ์จากหลังบ้าน (ไม่มีการเรียกเก็บเงิน)
+  const lifetime = sub?.isBetaTester === true && !inTrial;
   const limits = PLAN_LIMITS[plan];
   const price = PLAN_PRICING_THB[plan];
 
@@ -190,7 +193,9 @@ export default async function AccountBillingPage() {
                   color: "var(--color-brand-800)",
                 }}
               >
-                {price && !inTrial ? (
+                {lifetime ? (
+                  <span>🎁 ฟรีตลอดชีพ — ไม่มีค่าใช้จ่าย</span>
+                ) : price && !inTrial ? (
                   <>
                     <strong style={{ fontSize: "1rem" }}>
                       {formatTHB(price.monthly)} ฿
@@ -458,8 +463,23 @@ export default async function AccountBillingPage() {
           <p style={{ fontSize: "0.875rem", color: "#64748b" }}>
             ดูใบเสร็จย้อนหลัง / เปลี่ยนบัตร / ยกเลิกผ่าน Stripe Customer Portal
           </p>
-          <div style={{ marginTop: "0.5rem" }}>
+          <div
+            style={{
+              marginTop: "0.5rem",
+              display: "flex",
+              gap: "0.75rem",
+              alignItems: "flex-start",
+              flexWrap: "wrap",
+            }}
+          >
             <CustomerPortalButton />
+            <Link
+              href="/account/billing/cancel"
+              className="app-btn app-btn-ghost"
+              style={{ color: "#dc2626" }}
+            >
+              {sub?.cancelAtPeriodEnd ? "ใช้แพ็กเกจต่อ / ดูสถานะยกเลิก" : "ยกเลิกแพ็กเกจ"}
+            </Link>
           </div>
         </div>
       )}

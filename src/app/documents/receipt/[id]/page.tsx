@@ -1,0 +1,140 @@
+// ===========================================
+// /documents/receipt/[id] — ใบเสร็จรับเงิน (printable)
+// [id] = BillingID — ใบเสร็จออกจากใบวางบิลที่รับเงินครบ (billing.issueReceipt)
+// ใช้ layout เดียวกับใบวางบิล (BillingDocument) ในโหมด receipt
+// ใช้ window.print() ของ browser
+// ===========================================
+
+import { redirect } from "next/navigation";
+import { getSession } from "@/lib/auth/session";
+import { getOrgContext } from "@/lib/auth/middleware";
+import { getSheetsService, ensureTabsCached } from "@/server/lib/sheets-context";
+import { SHEET_TABS } from "@/server/services/google-sheets.service";
+import { prisma } from "@/lib/prisma";
+import { BillingDocument } from "../../billing/[id]/document";
+
+export const metadata = {
+  title: "ใบเสร็จรับเงิน | Aim Expense",
+};
+
+export default async function ReceiptDocumentPage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const session = await getSession();
+  if (!session) redirect("/login");
+
+  const orgCtx = await getOrgContext(session.userId);
+  if (!orgCtx) redirect("/");
+
+  const { id } = await params;
+  const sheets = await getSheetsService(orgCtx.orgId);
+  await ensureTabsCached(sheets, orgCtx.orgId);
+
+  // batchGet (header + lines in 1 HTTP call) parallel with prisma org lookup
+  const [batch, org] = await Promise.all([
+    sheets.getAllBatch([SHEET_TABS.BILLINGS, SHEET_TABS.BILLING_LINES]),
+    prisma.organization.findUnique({
+      where: { id: orgCtx.orgId },
+      select: {
+        name: true,
+        taxId: true,
+        address: true,
+        phone: true,
+        branchType: true,
+        branchNumber: true,
+        logoUrl: true,
+        signatureUrl: true,
+        signatoryName: true,
+      },
+    }),
+  ]);
+
+  const header = (batch[SHEET_TABS.BILLINGS] || []).find(
+    (r) => r.BillingID === id
+  );
+  if (!header) {
+    return (
+      <div style={{ padding: "2rem", fontFamily: "system-ui, sans-serif" }}>
+        <h1>ไม่พบใบวางบิล</h1>
+        <a href="/billings">← กลับ</a>
+      </div>
+    );
+  }
+
+  const lines = (batch[SHEET_TABS.BILLING_LINES] || [])
+    .filter((r) => r.BillingID === id)
+    .sort(
+      (a, b) =>
+        (parseInt(a.LineNumber, 10) || 0) - (parseInt(b.LineNumber, 10) || 0)
+    );
+
+  if (!org) redirect("/");
+
+  if (!header.ReceiptNumber) {
+    return (
+      <div style={{ padding: "2rem", fontFamily: "system-ui, sans-serif" }}>
+        <h1>ยังไม่ได้ออกใบเสร็จรับเงิน</h1>
+        <p>ออกใบเสร็จได้จากหน้าใบวางบิล เมื่อรับเงินครบแล้ว</p>
+        <a href={`/billings/${id}`}>← กลับไปที่ใบวางบิล</a>
+      </div>
+    );
+  }
+
+  return (
+    <BillingDocument
+      billingId={id}
+      org={{
+        name: org.name,
+        taxId: org.taxId,
+        address: header.IssuerAddressSnapshot || org.address || "",
+        phone: org.phone || "",
+        branchInfo:
+          header.IssuerBranchSnapshot ||
+          (org.branchType === "Branch" && org.branchNumber
+            ? `สาขา ${org.branchNumber}`
+            : "สำนักงานใหญ่"),
+        logoUrl: org.logoUrl,
+        signatureUrl: org.signatureUrl,
+        signatoryName: org.signatoryName,
+      }}
+      header={{
+        docNumber: header.DocNumber,
+        docDate: header.DocDate,
+        dueDate: header.DueDate,
+        status: header.Status || "draft",
+        customerName: header.CustomerNameSnapshot,
+        customerTaxId: header.CustomerTaxIdSnapshot,
+        customerAddress: header.CustomerAddressSnapshot,
+        projectName: header.ProjectName || "",
+        subtotal: parseFloat(header.Subtotal) || 0,
+        discountAmount: parseFloat(header.DiscountAmount) || 0,
+        vatAmount: parseFloat(header.VATAmount) || 0,
+        vatIncluded:
+          header.VATIncluded === "TRUE" || header.VATIncluded === "true",
+        isVat: header.IsVAT !== "FALSE", // legacy rows (ว่าง) = มี VAT
+        receipt: {
+          number: header.ReceiptNumber,
+          date: header.ReceiptDate || header.PaidDate || header.DocDate,
+        },
+        whtPercent: parseFloat(header.WHTPercent) || 0,
+        whtAmount: parseFloat(header.WHTAmount) || 0,
+        grandTotal: parseFloat(header.GrandTotal) || 0,
+        amountReceivable: parseFloat(header.AmountReceivable) || 0,
+        paidAmount: parseFloat(header.PaidAmount) || 0,
+        notes: header.Notes || "",
+        terms: header.Terms || "",
+        preparedBy: header.PreparedBy || "",
+      }}
+      lines={lines.map((l) => ({
+        lineNumber: parseInt(l.LineNumber, 10) || 0,
+        description: l.Description || "",
+        quantity: parseFloat(l.Quantity) || 0,
+        unitPrice: parseFloat(l.UnitPrice) || 0,
+        discountPercent: parseFloat(l.DiscountPercent) || 0,
+        lineTotal: parseFloat(l.LineTotal) || 0,
+      }))}
+    />
+  );
+}

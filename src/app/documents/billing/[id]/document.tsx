@@ -28,6 +28,8 @@ interface DocData {
     vatAmount: number;
     vatIncluded: boolean;
     isVat: boolean;
+    /** มีค่า = render เป็น "ใบเสร็จรับเงิน" (ใช้จาก /documents/receipt/[id]) */
+    receipt?: { number: string; date: string } | null;
     whtPercent: number;
     whtAmount: number;
     grandTotal: number;
@@ -123,7 +125,7 @@ export function BillingDocument({ billingId, org, header, lines }: Props) {
   >("idle");
   const [errorMsg, setErrorMsg] = useState("");
 
-  const filename = `${header.docNumber || "billing"}.pdf`;
+  const filename = `${header.receipt?.number || header.docNumber || "billing"}.pdf`;
 
   const handleDownload = async () => {
     setDownloadState("downloading");
@@ -484,6 +486,7 @@ function DocPage({
   copyType: "original" | "copy";
 } & DocData) {
   const balance = header.grandTotal - header.paidAmount;
+  const receipt = header.receipt || null;
 
   return (
     <div className={`doc-page doc-page-${copyType}`}>
@@ -501,8 +504,12 @@ function DocPage({
           {org.phone && <div className="company-line">โทร: {org.phone}</div>}
         </div>
         <div className="doc-meta">
-          <div className="doc-title">ใบวางบิล / ใบแจ้งหนี้</div>
-          <div className="doc-title-sub">BILLING / INVOICE</div>
+          <div className="doc-title">
+            {receipt ? "ใบเสร็จรับเงิน" : "ใบวางบิล / ใบแจ้งหนี้"}
+          </div>
+          <div className="doc-title-sub">
+            {receipt ? "RECEIPT" : "BILLING / INVOICE"}
+          </div>
           <div
             className={`copy-stamp copy-${copyType}`}
             style={{ marginTop: "0.5rem" }}
@@ -528,16 +535,27 @@ function DocPage({
         <div className="info-block right">
           <div className="info-row">
             <span>เลขที่:</span>
-            <strong className="mono">{header.docNumber}</strong>
+            <strong className="mono">
+              {receipt ? receipt.number : header.docNumber}
+            </strong>
           </div>
           <div className="info-row">
             <span>วันที่:</span>
-            <strong>{formatThaiDate(header.docDate)}</strong>
+            <strong>
+              {formatThaiDate(receipt ? receipt.date : header.docDate)}
+            </strong>
           </div>
-          <div className="info-row">
-            <span>ครบกำหนด:</span>
-            <strong>{formatThaiDate(header.dueDate)}</strong>
-          </div>
+          {receipt ? (
+            <div className="info-row">
+              <span>อ้างอิงใบวางบิล:</span>
+              <strong className="mono">{header.docNumber}</strong>
+            </div>
+          ) : (
+            <div className="info-row">
+              <span>ครบกำหนด:</span>
+              <strong>{formatThaiDate(header.dueDate)}</strong>
+            </div>
+          )}
           {header.projectName && (
             <div className="info-row">
               <span>โครงการ:</span>
@@ -596,7 +614,7 @@ function DocPage({
 
       <div className="totals-row">
         <div className="terms-block">
-          {header.terms && (
+          {header.terms && !receipt && (
             <>
               <div className="terms-title">เงื่อนไขการชำระ</div>
               <div className="terms-text">{header.terms}</div>
@@ -612,7 +630,8 @@ function DocPage({
           )}
           {header.paidAmount > 0 && (
             <div className="paid-info" style={{ marginTop: "0.75rem" }}>
-              ✓ รับเงินแล้ว: <strong>{formatMoney(header.paidAmount)}</strong>{" "}
+              ✓ {receipt ? "ได้รับเงินไว้เรียบร้อยแล้ว" : "รับเงินแล้ว"}:{" "}
+              <strong>{formatMoney(header.paidAmount)}</strong>{" "}
               บาท
               {balance > 0 && (
                 <span style={{ color: "#c2410c", marginLeft: "0.5rem" }}>
@@ -669,7 +688,7 @@ function DocPage({
           <div className="sig-line">
             ลงชื่อ ...................................................
           </div>
-          <div className="sig-label">ผู้เรียกเก็บ</div>
+          <div className="sig-label">{receipt ? "ผู้รับเงิน" : "ผู้เรียกเก็บ"}</div>
           {(org.signatoryName || header.preparedBy) && (
             <div className="sig-name">
               ({org.signatoryName || header.preparedBy})
@@ -680,7 +699,7 @@ function DocPage({
           <div className="sig-line">
             ลงชื่อ ...................................................
           </div>
-          <div className="sig-label">ผู้รับวางบิล</div>
+          <div className="sig-label">{receipt ? "ผู้จ่ายเงิน" : "ผู้รับวางบิล"}</div>
           <div className="sig-date">วันที่ ........../........../..........</div>
         </div>
       </div>
