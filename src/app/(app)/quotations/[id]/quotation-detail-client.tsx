@@ -31,6 +31,8 @@ export function QuotationDetailClient({
   const rejectMut = trpc.quotation.reject.useMutation();
   const voidMut = trpc.quotation.void.useMutation();
   const convertMut = trpc.quotation.convertToBilling.useMutation();
+  const orgQuery = trpc.org.get.useQuery();
+  const vatRegistered = orgQuery.data?.vatRegistered ?? true;
 
   const [error, setError] = useState<string | null>(null);
   const [showConvertModal, setShowConvertModal] = useState(false);
@@ -189,7 +191,7 @@ export function QuotationDetailClient({
               → สร้างใบวางบิล
             </button>
             {/* ใบกำกับภาษีต้องมี VAT — เอกสาร "ไม่มี VAT" ออก TI ไม่ได้ */}
-            {header.isVat && (
+            {header.isVat && vatRegistered && (
               <Link
                 href={`/tax-invoices/new?fromQuotation=${quotationId}`}
                 className="app-btn app-btn-secondary"

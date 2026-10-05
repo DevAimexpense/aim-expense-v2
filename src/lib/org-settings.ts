@@ -29,3 +29,20 @@ export function readIsBackoffice(settings: unknown): boolean {
   }
   return false;
 }
+
+/**
+ * วิธีออกเอกสารรับเงินของธุรกิจที่จด VAT
+ *   separate = ออกแยก: ใบกำกับภาษี 1 ใบ + ใบเสร็จรับเงิน 1 ใบ (default — พฤติกรรมเดิม)
+ *   combined = รวมใบเดียว: "ใบเสร็จรับเงิน / ใบกำกับภาษี"
+ * ธุรกิจไม่จด VAT ไม่ใช้ค่านี้ — ออกได้แต่ใบเสร็จรับเงิน
+ */
+export type ReceiptMode = "separate" | "combined";
+
+export function readReceiptMode(settings: unknown): ReceiptMode {
+  if (settings && typeof settings === "object" && !Array.isArray(settings)) {
+    if ((settings as Record<string, unknown>).receiptMode === "combined") {
+      return "combined";
+    }
+  }
+  return "separate";
+}

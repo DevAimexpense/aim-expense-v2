@@ -9,7 +9,7 @@ import { getSession, type SessionPayload } from "./session";
 import { prisma } from "@/lib/prisma";
 import type { Permissions, OrgRole } from "@/types/permissions";
 import { DEFAULT_PERMISSIONS } from "@/lib/permissions";
-import { readIsBackoffice } from "@/lib/org-settings";
+import { readIsBackoffice, readVatRegistered } from "@/lib/org-settings";
 
 /**
  * Org context — loaded once per request
@@ -25,6 +25,8 @@ export interface OrgContext {
   googleDriveFolderId: string | null;
   /** org นี้คือบริษัทหลังบ้านของทีมงาน (เข้า /admin/customers ได้ถ้าเป็น admin) */
   isBackoffice: boolean;
+  /** ธุรกิจจดทะเบียน VAT หรือไม่ — ไม่จด = ซ่อนใบกำกับภาษี / ภ.พ.30 */
+  vatRegistered: boolean;
 }
 
 /**
@@ -137,6 +139,7 @@ export const getOrgContext = cache(async function getOrgContextImpl(
     googleSpreadsheetId: membership.org.googleSpreadsheetId,
     googleDriveFolderId: membership.org.googleDriveFolderId,
     isBackoffice: readIsBackoffice(membership.org.settings),
+    vatRegistered: readVatRegistered(membership.org.settings),
   };
 });
 

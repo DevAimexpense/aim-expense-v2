@@ -7,7 +7,7 @@ import { getSession } from "@/lib/auth/session";
 import { getOrgContext } from "@/lib/auth/middleware";
 import { prisma } from "@/lib/prisma";
 import { OrgSettingsForm } from "./form";
-import { readVatRegistered } from "@/lib/org-settings";
+import { readVatRegistered, readReceiptMode } from "@/lib/org-settings";
 
 export default async function OrgSettingsPage() {
   const session = await getSession();
@@ -47,6 +47,7 @@ export default async function OrgSettingsPage() {
       isAdmin={isAdmin}
       isOwner={isOwner}
       vatRegistered={readVatRegistered(org.settings)}
+      receiptMode={readReceiptMode(org.settings)}
       sheetUrl={
         org.googleSpreadsheetId
           ? `https://docs.google.com/spreadsheets/d/${org.googleSpreadsheetId}`

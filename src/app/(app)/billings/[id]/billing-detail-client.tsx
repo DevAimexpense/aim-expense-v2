@@ -17,6 +17,7 @@ export function BillingDetailClient({ billingId }: { billingId: string }) {
   const sendMut = trpc.billing.send.useMutation();
   const voidMut = trpc.billing.void.useMutation();
   const receiptMut = trpc.billing.issueReceipt.useMutation();
+  const orgQuery = trpc.org.get.useQuery();
 
   const [error, setError] = useState<string | null>(null);
 
@@ -71,6 +72,16 @@ export function BillingDetailClient({ billingId }: { billingId: string }) {
 
   const { header, lines } = detail.data;
   const isLoading = sendMut.isPending || voidMut.isPending;
+
+  // เอกสารรับเงินตามตั้งค่าองค์กร:
+  //   ไม่จด VAT              → ใบเสร็จรับเงินอย่างเดียว (ไม่มีใบกำกับภาษี)
+  //   จด VAT + ออกแยก        → ใบกำกับภาษี + ใบเสร็จรับเงิน
+  //   จด VAT + รวมใบเดียว    → ใบเสร็จรับเงิน/ใบกำกับภาษี (ออกจากปุ่มใบกำกับภาษี)
+  // ใบวางบิลที่เลือก "ไม่มี VAT" รายใบ → ใบเสร็จรับเงินเสมอ
+  const vatRegistered = orgQuery.data?.vatRegistered ?? true;
+  const combined = orgQuery.data?.receiptMode === "combined";
+  const canTaxInvoice = vatRegistered && header.isVat;
+  const canReceipt = !canTaxInvoice || !combined;
 
   return (
     <div className="app-page">
@@ -155,7 +166,7 @@ export function BillingDetailClient({ billingId }: { billingId: string }) {
           </>
         )}
         {/* ใบกำกับภาษีต้องมี VAT — เอกสาร "ไม่มี VAT" ออก TI ไม่ได้ */}
-        {header.isVat &&
+        {canTaxInvoice &&
           (header.status === "sent" ||
             header.status === "partial" ||
             header.status === "paid") && (
@@ -163,11 +174,12 @@ export function BillingDetailClient({ billingId }: { billingId: string }) {
             href={`/tax-invoices/new?fromBilling=${billingId}`}
             className="app-btn app-btn-secondary"
           >
-            → ออกใบกำกับภาษี
+            {combined ? "→ ออกใบเสร็จรับเงิน/ใบกำกับภาษี" : "→ ออกใบกำกับภาษี"}
           </Link>
         )}
         {/* ใบเสร็จรับเงิน — ออกได้เมื่อรับเงินครบ (ใช้ได้ทั้งจด/ไม่จด VAT) */}
         {header.status === "paid" &&
+          (canReceipt || !!header.receiptNumber) &&
           (header.receiptNumber ? (
             <a
               href={`/documents/receipt/${billingId}`}

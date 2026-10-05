@@ -13,6 +13,8 @@ interface DocData {
     logoUrl?: string | null;
     signatureUrl?: string | null;
     signatoryName?: string | null;
+    /** ตั้งค่าองค์กร "รวมเป็นใบเดียว" → หัวเอกสาร ใบเสร็จรับเงิน / ใบกำกับภาษี */
+    combinedReceipt?: boolean;
   };
   header: {
     docNumber: string;
@@ -523,8 +525,12 @@ function DocPage({
           {org.phone && <div className="company-line">โทร: {org.phone}</div>}
         </div>
         <div className="doc-meta">
-          <div className="doc-title">ใบกำกับภาษี</div>
-          <div className="doc-title-sub">TAX INVOICE</div>
+          <div className="doc-title">
+            {org.combinedReceipt ? "ใบเสร็จรับเงิน / ใบกำกับภาษี" : "ใบกำกับภาษี"}
+          </div>
+          <div className="doc-title-sub">
+            {org.combinedReceipt ? "RECEIPT / TAX INVOICE" : "TAX INVOICE"}
+          </div>
           <div
             className={`copy-stamp copy-${copyType}`}
             style={{ marginTop: "0.5rem" }}
@@ -677,7 +683,9 @@ function DocPage({
           <div className="sig-line">
             ลงชื่อ ...................................................
           </div>
-          <div className="sig-label">ผู้ออกใบกำกับภาษี</div>
+          <div className="sig-label">
+            {org.combinedReceipt ? "ผู้รับเงิน / ผู้ออกใบกำกับภาษี" : "ผู้ออกใบกำกับภาษี"}
+          </div>
           {(org.signatoryName || header.preparedBy) && (
             <div className="sig-name">
               ({org.signatoryName || header.preparedBy})
@@ -688,7 +696,9 @@ function DocPage({
           <div className="sig-line">
             ลงชื่อ ...................................................
           </div>
-          <div className="sig-label">ผู้รับใบกำกับภาษี</div>
+          <div className="sig-label">
+            {org.combinedReceipt ? "ผู้จ่ายเงิน / ผู้รับใบกำกับภาษี" : "ผู้รับใบกำกับภาษี"}
+          </div>
           <div className="sig-date">วันที่ ........../........../..........</div>
         </div>
       </div>

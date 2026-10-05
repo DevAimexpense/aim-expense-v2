@@ -243,6 +243,7 @@ interface SidebarProps {
   userAvatar?: string;
   isAdmin?: boolean;
   isBackoffice?: boolean;
+  vatRegistered?: boolean;
 }
 
 export function Sidebar({
@@ -253,6 +254,7 @@ export function Sidebar({
   userAvatar,
   isAdmin = false,
   isBackoffice = false,
+  vatRegistered = true,
 }: SidebarProps) {
   const pathname = usePathname();
   const [isCollapsed, setIsCollapsed] = useState(false);
@@ -261,7 +263,8 @@ export function Sidebar({
   function isVisible(item: NavItem): boolean {
     // companyOnly: ซ่อนเมนู VAT/นิติบุคคลสำหรับบุคคลธรรมดา (ยังไม่จด VAT)
     if (item.backofficeOnly) return isBackoffice && isAdmin;
-    if (item.companyOnly && isPersonal) return false;
+    // และซ่อนเมื่อธุรกิจไม่จดทะเบียน VAT (ออกได้แต่ใบเสร็จรับเงิน ไม่มี ภ.พ.30)
+    if (item.companyOnly && (isPersonal || !vatRegistered)) return false;
     // adminOnly: ซ่อนเมนูถ้าไม่ใช่ admin (settings องค์กร, billing, google)
     if (item.adminOnly && !isAdmin) return false;
     if (!item.permission) return true;

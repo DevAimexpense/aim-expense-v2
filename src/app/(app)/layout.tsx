@@ -41,6 +41,7 @@ export default async function AppLayout({
           userAvatar={session.avatarUrl || undefined}
           isAdmin={org.role === "admin"}
           isBackoffice={org.isBackoffice}
+          vatRegistered={org.vatRegistered}
         />
         <main className="flex-1 overflow-y-auto bg-slate-50">{children}</main>
       </div>

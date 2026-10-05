@@ -18,7 +18,7 @@ import { checkBusinessQuota } from "../lib/business-quota";
 import { PLAN_LABELS } from "@/lib/plans";
 import { TRPCError } from "@trpc/server";
 import type { Prisma } from "@prisma/client";
-import { readVatRegistered } from "@/lib/org-settings";
+import { readVatRegistered, readReceiptMode } from "@/lib/org-settings";
 
 /**
  * Helper: Get valid access token for a user (refresh if expired)
@@ -184,6 +184,8 @@ export const orgRouter = router({
       ...rest,
       // ธุรกิจจดทะเบียน VAT หรือไม่ — default true (org เดิมทั้งหมด = มี VAT)
       vatRegistered: readVatRegistered(settings),
+      // จด VAT: ออกใบเสร็จรับเงินแยกจากใบกำกับภาษี หรือรวมใบเดียว
+      receiptMode: readReceiptMode(settings),
     };
   }),
 
@@ -392,6 +394,8 @@ export const orgRouter = router({
         signatoryName: z.string().max(120).nullable().optional(),
         // ธุรกิจจดทะเบียน VAT หรือไม่ (เก็บใน settings JSON — ไม่ต้อง migrate)
         vatRegistered: z.boolean().optional(),
+        // จด VAT: ออกใบเสร็จรับเงินแยก (separate) หรือรวมกับใบกำกับภาษี (combined)
+        receiptMode: z.enum(["separate", "combined"]).optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -404,14 +408,14 @@ export const orgRouter = router({
       }
 
       // If branchType=HQ, force branchNumber to "00000"
-      const { vatRegistered, ...data } = input;
+      const { vatRegistered, receiptMode, ...data } = input;
       if (data.branchType === "HQ") {
         data.branchNumber = "00000";
       }
 
       // settings JSON: merge เฉพาะ key ที่ส่งมา (ไม่ทับ key อื่น)
       let settings: Prisma.InputJsonObject | undefined;
-      if (vatRegistered !== undefined) {
+      if (vatRegistered !== undefined || receiptMode !== undefined) {
         const current = await prisma.organization.findUnique({
           where: { id: ctx.org.orgId },
           select: { settings: true },
@@ -420,7 +424,11 @@ export const orgRouter = router({
           current?.settings && typeof current.settings === "object" && !Array.isArray(current.settings)
             ? (current.settings as Prisma.JsonObject)
             : {};
-        settings = { ...existing, vatRegistered } as Prisma.InputJsonObject;
+        settings = {
+          ...existing,
+          ...(vatRegistered !== undefined ? { vatRegistered } : {}),
+          ...(receiptMode !== undefined ? { receiptMode } : {}),
+        } as Prisma.InputJsonObject;
       }
 
       await prisma.organization.update({

@@ -27,6 +27,8 @@ interface Props {
   isOwner: boolean;
   /** ธุรกิจจดทะเบียน VAT หรือไม่ (จาก Organization.settings) */
   vatRegistered: boolean;
+  /** จด VAT: ออกใบเสร็จรับเงินแยกจากใบกำกับภาษี หรือรวมใบเดียว */
+  receiptMode: "separate" | "combined";
   sheetUrl: string | null;
   driveUrl: string | null;
 }
@@ -36,9 +38,11 @@ export function OrgSettingsForm({
   isAdmin,
   isOwner,
   vatRegistered: initialVatRegistered,
+  receiptMode: initialReceiptMode,
   sheetUrl,
   driveUrl,
 }: Props) {
+  const router = useRouter();
   const utils = trpc.useUtils();
   const updateMut = trpc.org.update.useMutation();
   const isPersonal = org.entityType === "personal";
@@ -57,6 +61,7 @@ export function OrgSettingsForm({
   );
   const [signatoryName, setSignatoryName] = useState(org.signatoryName || "");
   const [vatRegistered, setVatRegistered] = useState(initialVatRegistered);
+  const [receiptMode, setReceiptMode] = useState(initialReceiptMode);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
 
@@ -93,10 +98,12 @@ export function OrgSettingsForm({
         signatureUrl,
         signatoryName: signatoryName.trim() || null,
         vatRegistered,
+        receiptMode,
       });
       setSuccess(true);
       utils.org.current.invalidate();
       utils.org.get.invalidate(); // default โหมด VAT ในฟอร์มใบเสนอราคา/ใบวางบิล
+      router.refresh(); // sidebar: ซ่อน/แสดงเมนูใบกำกับภาษีตามสถานะจด VAT
       setTimeout(() => setSuccess(false), 3000);
     } catch (e) {
       setError(e instanceof Error ? e.message : "เกิดข้อผิดพลาด");
@@ -331,9 +338,62 @@ export function OrgSettingsForm({
               <p className="app-hint">
                 {vatRegistered
                   ? "ใบเสนอราคา/ใบวางบิลใหม่จะคิด VAT 7% เป็นค่าเริ่มต้น (เปลี่ยนได้รายใบ)"
-                  : "ใบเสนอราคา/ใบวางบิลใหม่จะเริ่มที่ \"ไม่มี VAT\" (เปลี่ยนได้รายใบ) — ออกใบกำกับภาษีไม่ได้"}
+                  : "ใบเสนอราคา/ใบวางบิลใหม่จะเริ่มที่ \"ไม่มี VAT\" (เปลี่ยนได้รายใบ) — ไม่มีใบกำกับภาษี ออกได้เฉพาะใบเสร็จรับเงิน"}
               </p>
             </div>
+
+            {vatRegistered && (
+              <div className="app-form-group">
+                <label className="app-label">เอกสารเมื่อรับเงิน</label>
+                <div style={{ display: "grid", gap: "0.5rem", marginTop: "0.25rem" }}>
+                  {(
+                    [
+                      {
+                        value: "separate",
+                        label: "ออกแยกกัน",
+                        hint: "ใบกำกับภาษี 1 ใบ + ใบเสร็จรับเงิน 1 ใบ (เลขรันแยก)",
+                      },
+                      {
+                        value: "combined",
+                        label: "รวมเป็นใบเดียว",
+                        hint: "ใบเสร็จรับเงิน / ใบกำกับภาษี ในใบเดียว (ใช้เลขใบกำกับภาษี)",
+                      },
+                    ] as const
+                  ).map((opt) => (
+                    <label
+                      key={opt.value}
+                      style={{
+                        padding: "0.625rem 0.875rem",
+                        border: `2px solid ${receiptMode === opt.value ? "#2563eb" : "#e2e8f0"}`,
+                        borderRadius: "0.5rem",
+                        background: receiptMode === opt.value ? "#eff6ff" : "white",
+                        cursor: isAdmin ? "pointer" : "not-allowed",
+                        opacity: isAdmin ? 1 : 0.6,
+                        display: "flex",
+                        alignItems: "flex-start",
+                        gap: "0.5rem",
+                        fontSize: "0.875rem",
+                      }}
+                    >
+                      <input
+                        type="radio"
+                        name="receiptMode"
+                        checked={receiptMode === opt.value}
+                        onChange={() => setReceiptMode(opt.value)}
+                        disabled={!isAdmin}
+                        style={{ marginTop: "0.2rem" }}
+                      />
+                      <span>
+                        <span style={{ fontWeight: 600 }}>{opt.label}</span>
+                        <span style={{ display: "block", fontSize: "0.75rem", color: "#64748b" }}>
+                          {opt.hint}
+                        </span>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <div
               style={{

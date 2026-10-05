@@ -10,6 +10,7 @@
 // Auto-handles: auth check → org check → trial → plan → redirect with reason.
 // ===========================================
 
+import { readVatRegistered } from "@/lib/org-settings";
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth/session";
 import { prisma } from "@/lib/prisma";
@@ -76,10 +77,14 @@ export async function requireCompanyOrg(): Promise<void> {
 
   const org = await prisma.organization.findUnique({
     where: { id: session.activeOrgId },
-    select: { entityType: true },
+    select: { entityType: true, settings: true },
   });
   if (org?.entityType === "personal") {
     redirect("/dashboard?restricted=company-only");
+  }
+  // ธุรกิจไม่จดทะเบียน VAT → ไม่มีใบกำกับภาษี / ภ.พ.30 (ใช้ใบเสร็จรับเงินแทน)
+  if (org && !readVatRegistered(org.settings)) {
+    redirect("/dashboard?restricted=vat-only");
   }
 }
 

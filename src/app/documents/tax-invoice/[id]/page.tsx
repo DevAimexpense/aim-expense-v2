@@ -10,6 +10,7 @@ import { requireCompanyOrg } from "@/lib/auth/require-plan";
 import { getSheetsService, ensureTabsCached } from "@/server/lib/sheets-context";
 import { SHEET_TABS } from "@/server/services/google-sheets.service";
 import { prisma } from "@/lib/prisma";
+import { readReceiptMode } from "@/lib/org-settings";
 import { TaxInvoiceDocument } from "./document";
 
 export const metadata = {
@@ -47,6 +48,7 @@ export default async function TaxInvoiceDocumentPage({
         logoUrl: true,
         signatureUrl: true,
         signatoryName: true,
+        settings: true,
       },
     }),
   ]);
@@ -89,6 +91,7 @@ export default async function TaxInvoiceDocumentPage({
         logoUrl: org.logoUrl,
         signatureUrl: org.signatureUrl,
         signatoryName: org.signatoryName,
+        combinedReceipt: readReceiptMode(org.settings) === "combined",
       }}
       header={{
         docNumber: header.DocNumber || "",
