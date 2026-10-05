@@ -827,6 +827,103 @@ export const billingRouter = router({
       return { success: true, billingId, receiptNumber };
     }),
 
+  /**
+   * แก้ไขใบเสร็จรับเงินที่ออกโดยตรง — เลขที่ใบเสร็จคงเดิม
+   * (ใบเสร็จที่ออกจากใบวางบิลแก้ที่นี่ไม่ได้ — เนื้อหามาจากใบวางบิล)
+   */
+  updateReceipt: permissionProcedure("manageBillings")
+    .input(
+      BillingCreateInput.omit({ dueDate: true, sourceQuotationId: true, terms: true }).extend({
+        billingId: z.string(),
+        paymentMethod: PaymentMethod.default("transfer"),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const sheets = await getSheetsService(ctx.org.orgId);
+      await ensureTabsCached(sheets, ctx.org.orgId);
+      const existing = await sheets.getBillingById(input.billingId);
+      if (!existing || existing.DocKind !== "receipt") {
+        throw new TRPCError({ code: "NOT_FOUND", message: "ไม่พบใบเสร็จรับเงิน" });
+      }
+      if (existing.Status === "void") {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "ใบเสร็จรับเงินนี้ถูกยกเลิกแล้ว แก้ไขไม่ได้",
+        });
+      }
+      const customer = await sheets.getCustomerById(input.customerId);
+      if (!customer) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "ไม่พบลูกค้า" });
+      }
+
+      const totals = computeBillingTotals(
+        input.lines,
+        input.vatIncluded,
+        input.discountAmount,
+        input.whtPercent,
+        input.isVat
+      );
+
+      await sheets.updateById(SHEET_TABS.BILLINGS, "BillingID", input.billingId, {
+        DocDate: input.docDate,
+        DueDate: input.docDate,
+        CustomerID: customer.CustomerID,
+        CustomerNameSnapshot: customer.CustomerName || "",
+        CustomerTaxIdSnapshot: customer.TaxID || "",
+        CustomerAddressSnapshot:
+          customer.BillingAddress || customer.Address || "",
+        EventID: input.eventId || "",
+        ProjectName: input.projectName || "",
+        Subtotal: totals.subtotal,
+        DiscountAmount: input.discountAmount,
+        VATAmount: totals.vatAmount,
+        VATIncluded: input.vatIncluded ? "TRUE" : "FALSE",
+        IsVAT: input.isVat ? "TRUE" : "FALSE",
+        WHTPercent: input.whtPercent,
+        WHTAmount: totals.whtAmount,
+        GrandTotal: totals.grandTotal,
+        AmountReceivable: totals.amountReceivable,
+        PaidAmount: totals.grandTotal,
+        PaidDate: input.docDate,
+        PaymentMethod: input.paymentMethod,
+        Notes: input.notes || "",
+        ReceiptDate: input.docDate,
+        UpdatedAt: new Date().toISOString(),
+      });
+
+      const oldLines = await sheets.getBillingLines(input.billingId);
+      for (const ol of oldLines) {
+        await sheets.deleteById(SHEET_TABS.BILLING_LINES, "LineID", ol.LineID);
+      }
+      for (let i = 0; i < input.lines.length; i++) {
+        const l = input.lines[i];
+        await sheets.appendRowByHeaders(SHEET_TABS.BILLING_LINES, {
+          LineID: GoogleSheetsService.generateId("BILL"),
+          BillingID: input.billingId,
+          LineNumber: i + 1,
+          Description: l.description,
+          Quantity: l.quantity,
+          UnitPrice: l.unitPrice,
+          DiscountPercent: l.discountPercent,
+          LineTotal: totals.lineTotals[i],
+          Notes: l.notes || "",
+        });
+      }
+
+      await prisma.auditLog.create({
+        data: {
+          orgId: ctx.org.orgId,
+          userId: ctx.session.userId,
+          action: "update",
+          entityType: "receipt",
+          entityRef: input.billingId,
+          summary: `แก้ไขใบเสร็จรับเงิน ${existing.ReceiptNumber || existing.DocNumber}`,
+        },
+      });
+
+      return { success: true, billingId: input.billingId };
+    }),
+
   /** ยกเลิกใบเสร็จรับเงินที่ออกโดยตรง (เลขที่ยังคงอยู่ ไม่นำกลับมาใช้ซ้ำ) */
   voidReceipt: permissionProcedure("manageBillings")
     .input(z.object({ billingId: z.string() }))

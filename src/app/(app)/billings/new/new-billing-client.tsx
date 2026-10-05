@@ -92,6 +92,8 @@ export interface InitialBillingData {
   whtPercent: number;
   notes: string;
   terms: string;
+  /** ใช้เฉพาะโหมดใบเสร็จรับเงิน */
+  paymentMethod?: string;
   lines: {
     description: string;
     quantity: number;
@@ -120,7 +122,10 @@ export function NewBillingClient({ mode, initial, kind = "billing" }: Props) {
   const isReceipt = kind === "receipt";
   const backHref = isReceipt ? "/receipts" : "/billings";
   const [paymentMethod, setPaymentMethod] =
-    useState<(typeof PAYMENT_METHODS)[number]["value"]>("transfer");
+    useState<(typeof PAYMENT_METHODS)[number]["value"]>(
+      PAYMENT_METHODS.find((m) => m.value === initial?.paymentMethod)?.value ??
+        "transfer"
+    );
   const router = useRouter();
   const utils = trpc.useUtils();
   const customersQuery = trpc.customer.list.useQuery();
@@ -133,6 +138,7 @@ export function NewBillingClient({ mode, initial, kind = "billing" }: Props) {
   const createMut = trpc.billing.create.useMutation();
   const updateMut = trpc.billing.update.useMutation();
   const receiptMut = trpc.billing.createReceipt.useMutation();
+  const receiptUpdateMut = trpc.billing.updateReceipt.useMutation();
 
   const [form, setForm] = useState(() => ({
     customerId: initial?.customerId || "",
@@ -294,11 +300,16 @@ export function NewBillingClient({ mode, initial, kind = "billing" }: Props) {
       if (isReceipt) {
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
         const { dueDate, terms, ...receiptPayload } = payload;
-        const result = await receiptMut.mutateAsync({
-          ...receiptPayload,
-          paymentMethod,
-        });
+        const result =
+          mode === "edit" && initial
+            ? await receiptUpdateMut.mutateAsync({
+                billingId: initial.billingId,
+                ...receiptPayload,
+                paymentMethod,
+              })
+            : await receiptMut.mutateAsync({ ...receiptPayload, paymentMethod });
         utils.billing.list.invalidate();
+        utils.billing.getById.invalidate({ billingId: result.billingId });
         window.open(`/documents/receipt/${result.billingId}`, "_blank", "noopener");
         router.push("/receipts");
         return;
@@ -319,7 +330,10 @@ export function NewBillingClient({ mode, initial, kind = "billing" }: Props) {
   };
 
   const isLoading =
-    createMut.isPending || updateMut.isPending || receiptMut.isPending;
+    createMut.isPending ||
+    updateMut.isPending ||
+    receiptMut.isPending ||
+    receiptUpdateMut.isPending;
 
   return (
     <div className="app-page">
@@ -327,14 +341,18 @@ export function NewBillingClient({ mode, initial, kind = "billing" }: Props) {
         <div>
           <h1 className="app-page-title">
             {isReceipt
-              ? "💵 สร้างใบเสร็จรับเงิน"
+              ? mode === "edit"
+                ? "✏️ แก้ไขใบเสร็จรับเงิน"
+                : "💵 สร้างใบเสร็จรับเงิน"
               : mode === "edit"
                 ? "✏️ แก้ไขใบวางบิล"
                 : "🧾 สร้างใบวางบิล"}
           </h1>
           <p className="app-page-subtitle">
             {isReceipt
-              ? "รับเงินแล้วออกใบเสร็จได้เลย — ไม่ต้องสร้างใบวางบิลก่อน"
+              ? mode === "edit"
+                ? "แก้ไขข้อมูลแล้วบันทึก — เลขที่ใบเสร็จคงเดิม"
+                : "รับเงินแล้วออกใบเสร็จได้เลย — ไม่ต้องสร้างใบวางบิลก่อน"
               : "กรอกข้อมูลลูกค้า + รายการ + WHT แล้วบันทึกเป็น draft"}
           </p>
         </div>
@@ -801,7 +819,7 @@ export function NewBillingClient({ mode, initial, kind = "billing" }: Props) {
                 <span className="app-spinner" /> กำลังบันทึก...
               </>
             ) : isReceipt ? (
-              "💵 ออกใบเสร็จรับเงิน"
+              mode === "edit" ? "💾 บันทึกการแก้ไข" : "💵 ออกใบเสร็จรับเงิน"
             ) : mode === "edit" ? (
               "💾 บันทึกการแก้ไข"
             ) : (
