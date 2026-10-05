@@ -338,6 +338,8 @@ export function UploadReceiptModal({ events, payees, onClose, onSuccess, attachT
           eventId: form.eventId, payeeId, expenseType: form.expenseType,
           companyBankId: form.companyBankId || undefined, invoiceNumber: form.receiptNumber.trim() || undefined,
           dueDate: form.dueDate, notes: form.notes.trim() || undefined,
+          // วันที่จ่ายเงิน = วันที่ตามใบเสร็จ/เอกสาร (ใช้ออกใบหัก ณ ที่จ่าย) — ไม่ใช่วันที่คีย์
+          paymentDate: form.documentDate || undefined,
           description: form.description.trim() || form.vendorName.trim() || "ค่าใช้จ่าย",
           costPerUnit: Math.round(costPerUnit * 100) / 100, days: 1, numberOfPeople: 1,
           pctWTH: effectiveWthRate, isVatPayee: form.hasVat,

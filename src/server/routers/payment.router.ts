@@ -35,6 +35,12 @@ const PaymentInputSchema = z.object({
   // ===== Approval flow: skip approval for expense recording =====
   // "pending" = ตั้งเบิก (ต้องอนุมัติ), "paid" = บันทึกค่าใช้จ่าย (จ่ายแล้ว ข้ามอนุมัติ)
   initialStatus: z.enum(["pending", "paid"]).default("pending"),
+  // วันที่จ่ายเงินจริง (YYYY-MM-DD) สำหรับ "บันทึกค่าใช้จ่าย" — ปกติคือวันที่ตามใบเสร็จ
+  // ไม่ส่ง = วันนี้ · ใช้ออกหนังสือรับรองหัก ณ ที่จ่าย และลงงวดรายงานภาษี
+  paymentDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
 });
 
 function toPaymentRow(payment: Record<string, string>) {
@@ -277,7 +283,8 @@ export const paymentRouter = router({
         VATAmount: calc.vatAmount,
         GTTLAmount: calc.gttlAmount,
         Status: status,
-        PaymentDate: isPaidDirect ? now.slice(0, 10) : "",
+        // วันที่จ่ายเงิน = วันที่ตามเอกสาร/ใบเสร็จที่ผู้ใช้กรอก (ไม่ใช่วันที่คีย์รายการ)
+        PaymentDate: isPaidDirect ? input.paymentDate || now.slice(0, 10) : "",
         DueDate: input.dueDate,
         ApprovedBy: isPaidDirect ? ctx.session.displayName : "",
         ApprovedAt: isPaidDirect ? now : "",
@@ -287,7 +294,7 @@ export const paymentRouter = router({
         ClearedAt: "",
         ReceiptURL: "",
         ReceiptNumber: "",
-        ReceiptDate: "",
+        ReceiptDate: isPaidDirect ? input.paymentDate || "" : "",
         // R5: tax compliance fields
         DocumentType: input.documentType || "",
         ExpenseNature: input.expenseNature || "",
@@ -768,8 +775,11 @@ export const paymentRouter = router({
       const sheets = await getSheetsService(ctx.org.orgId);
       const existing = await sheets.getById(SHEET_TABS.PAYMENTS, "PaymentID", input.paymentId);
       if (!existing) throw new Error("ไม่พบรายการ");
-      if (existing.Status !== "pending" && existing.Status !== "rejected") {
-        throw new Error("ลบได้เฉพาะรายการที่ยังไม่อนุมัติ");
+      // Admin ลบได้ทุกสถานะ (เช่น รายการที่คีย์ผิด/ทดสอบ ซึ่ง "บันทึกค่าใช้จ่าย" ข้ามอนุมัติเป็น paid ทันที)
+      // คนอื่นลบได้เฉพาะรายการที่ยังไม่อนุมัติ
+      const isAdmin = ctx.org.role === "admin";
+      if (!isAdmin && existing.Status !== "pending" && existing.Status !== "rejected") {
+        throw new Error("ลบได้เฉพาะรายการที่ยังไม่อนุมัติ (รายการที่อนุมัติ/จ่ายแล้ว ให้ Admin เป็นผู้ลบ)");
       }
 
       // PM may only delete team expenses inside their assigned events.
@@ -789,7 +799,7 @@ export const paymentRouter = router({
           action: "delete",
           entityType: "payment",
           entityRef: input.paymentId,
-          summary: `ลบรายการจ่าย`,
+          summary: `ลบรายการจ่าย: ${existing.Description || "-"} · ${existing.GTTLAmount || "0"} บาท · สถานะ ${existing.Status}${existing.PaymentDate ? ` · จ่าย ${existing.PaymentDate}` : ""}`,
         },
       });
 

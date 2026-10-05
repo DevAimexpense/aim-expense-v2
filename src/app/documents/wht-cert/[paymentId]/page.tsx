@@ -10,7 +10,7 @@ import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth/session";
 import { getOrgContext } from "@/lib/auth/middleware";
 import { WthCertDocument } from "./document";
-import { loadWhtCertData } from "@/server/lib/wht-cert-data";
+import { loadWhtCertData, WhtCertNoDateError } from "@/server/lib/wht-cert-data";
 import { AutoFailMessenger } from "@/lib/utils/auto-fail-messenger";
 
 export default async function WthCertPage({
@@ -27,10 +27,15 @@ export default async function WthCertPage({
   const { paymentId } = await params;
 
   let data = null;
+  let reason: string | undefined;
   try {
     data = await loadWhtCertData(orgCtx.orgId, paymentId);
   } catch (e) {
-    console.error(`[wht-cert/page] load failed:`, e);
+    if (e instanceof WhtCertNoDateError) reason = e.message;
+    else console.error(`[wht-cert/page] load failed:`, e);
+  }
+  if (reason) {
+    return <WhtCertNotFound paymentId={paymentId} reason={reason} title="ยังออกเอกสารไม่ได้" />;
   }
   if (!data) {
     // render error page ให้ client auto-save ส่ง postMessage error กลับ parent (iframe)
@@ -51,16 +56,30 @@ export default async function WthCertPage({
  * Client component — แสดงเมื่อหา payment ไม่เจอ
  * จะ auto-detect ?auto=1 แล้วส่ง postMessage error กลับ parent (iframe)
  */
-function WhtCertNotFound({ paymentId, reason }: { paymentId: string; reason?: string }) {
+function WhtCertNotFound({
+  paymentId,
+  reason,
+  title = "ไม่พบรายการ",
+}: {
+  paymentId: string;
+  reason?: string;
+  title?: string;
+}) {
   return (
     <div style={{ padding: "2rem", fontFamily: "system-ui, sans-serif" }}>
       <NotFoundAutoMessenger paymentId={paymentId} reason={reason} />
       <h1 style={{ fontSize: "1.25rem", fontWeight: 600, marginBottom: "0.5rem" }}>
-        ไม่พบรายการ
+        {title}
       </h1>
       <p style={{ color: "#64748b", marginBottom: "1rem" }}>
-        ไม่พบ payment id: <code>{paymentId}</code>
-        {reason && <span> ({reason})</span>}
+        {title === "ไม่พบรายการ" ? (
+          <>
+            ไม่พบ payment id: <code>{paymentId}</code>
+            {reason && <span> ({reason})</span>}
+          </>
+        ) : (
+          reason
+        )}
       </p>
       <a href="/payments" style={{ color: "#2563eb" }}>← กลับไปหน้าตั้งเบิก</a>
     </div>

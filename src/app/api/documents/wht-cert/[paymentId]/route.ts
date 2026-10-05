@@ -7,7 +7,7 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session";
 import { getOrgContext } from "@/lib/auth/middleware";
-import { loadWhtCertData } from "@/server/lib/wht-cert-data";
+import { loadWhtCertData, WhtCertNoDateError } from "@/server/lib/wht-cert-data";
 import { generateWhtCertPdf } from "@/lib/wht-cert/generate";
 
 export const dynamic = "force-dynamic";
@@ -68,6 +68,9 @@ export async function GET(
       },
     });
   } catch (err) {
+    if (err instanceof WhtCertNoDateError) {
+      return NextResponse.json({ error: err.message }, { status: 409 });
+    }
     // route ที่ client อ่านผลเป็นไฟล์ — ห้ามปล่อย exception หลุดเป็น 500 body ว่าง
     const message = err instanceof Error ? err.message : String(err);
     console.error("[wht-cert/pdf]", err);

@@ -43,6 +43,34 @@ export function generateWhtDocNumber(
 }
 
 /**
+ * วันที่ของหนังสือรับรองหัก ณ ที่จ่าย = **วันที่จ่ายเงิน หรือวันที่ตามใบเสร็จเท่านั้น**
+ * (ห้ามใช้วันที่คีย์รายการ / วันที่อนุมัติ / วันนี้)
+ *
+ *   - รายการปกติ (ตั้งเบิก → อนุมัติ → จ่าย): PaymentDate (วันที่จ่ายจริง) → ReceiptDate
+ *   - "บันทึกค่าใช้จ่าย" รุ่นเก่า (ก่อนแก้ 2026-10): ระบบเคยใส่ PaymentDate = วันที่คีย์
+ *     ตรวจได้จาก PaymentDate == วันที่ของ CreatedAt และข้ามอนุมัติ (ApprovedAt == PaidAt)
+ *     → ใช้ ReceiptDate แทนถ้ามี
+ *
+ * คืน "" ถ้ายังไม่มีทั้งสองวันที่ — ผู้เรียกต้องไม่ออกเอกสาร
+ */
+export function resolveWhtCertDate(p: {
+  PaymentDate?: string;
+  ReceiptDate?: string;
+  CreatedAt?: string;
+  ApprovedAt?: string;
+  PaidAt?: string;
+}): string {
+  const isDate = (v?: string) => !!v && /^\d{4}-\d{2}-\d{2}/.test(v);
+  const pay = isDate(p.PaymentDate) ? p.PaymentDate!.slice(0, 10) : "";
+  const receipt = isDate(p.ReceiptDate) ? p.ReceiptDate!.slice(0, 10) : "";
+  const paidDirect = !!p.ApprovedAt && p.ApprovedAt === p.PaidAt;
+  const stampedWithEntryDate =
+    paidDirect && !!pay && pay === (p.CreatedAt || "").slice(0, 10);
+  if (stampedWithEntryDate && receipt) return receipt;
+  return pay || receipt;
+}
+
+/**
  * ตัดสิน ภ.ง.ด. form จากประเภทผู้ถูกหัก (payee)
  *   - ภ.ง.ด.3 = บุคคลธรรมดา (TaxID ขึ้นต้น 1-8 = เลขบัตรประชาชน)
  *   - ภ.ง.ด.53 = นิติบุคคล (TaxID ขึ้นต้น 0 = เลขผู้เสียภาษีนิติบุคคล)

@@ -12,6 +12,7 @@ import {
   generateWhtDocNumber,
   getPndForm,
   mapWhtToIncomeSection,
+  resolveWhtCertDate,
   type WhtIncomeSection,
 } from "@/lib/wht-doc-utils";
 
@@ -37,6 +38,16 @@ export interface WhtCertData {
     wthAmount: number;
     eventName: string;
   };
+}
+
+/** ยังไม่มีวันที่จ่ายเงิน/วันที่ใบเสร็จ → ออกหนังสือรับรองไม่ได้ */
+export class WhtCertNoDateError extends Error {
+  constructor() {
+    super(
+      "ยังออกหนังสือรับรองหัก ณ ที่จ่ายไม่ได้ — รายการนี้ยังไม่มีวันที่จ่ายเงินหรือวันที่ตามใบเสร็จ (บันทึกจ่ายเงินหรือแนบใบเสร็จก่อน)"
+    );
+    this.name = "WhtCertNoDateError";
+  }
 }
 
 // Retry getById ไม่กี่ครั้งเพื่อรอ Sheets eventual consistency
@@ -82,8 +93,10 @@ export async function loadWhtCertData(
   const totalAmount = parseFloat(payment.TTLAmount) || 0;
   const wthAmount = parseFloat(payment.WTHAmount) || 0;
   const wthRate = parseFloat(payment.PctWTH) || 0;
-  const paymentDate =
-    payment.PaymentDate || payment.ApprovedAt?.slice(0, 10) || new Date().toISOString().slice(0, 10);
+  // วันที่ของหนังสือรับรอง = วันที่จ่ายเงิน หรือวันที่ตามใบเสร็จเท่านั้น
+  // (ไม่ใช้วันที่คีย์รายการ / วันที่อนุมัติ / วันนี้)
+  const paymentDate = resolveWhtCertDate(payment);
+  if (!paymentDate) throw new WhtCertNoDateError();
 
   // หา WHT type (best guess จาก rate)
   const wthType = findWthTypeByRate(wthRate);
@@ -102,7 +115,7 @@ export async function loadWhtCertData(
     const docMonth = docDate.getMonth() + 1;
     monthPayments = allPayments
       .filter((p) => {
-        const pDateStr = p.PaymentDate || p.ApprovedAt?.slice(0, 10);
+        const pDateStr = resolveWhtCertDate(p);
         if (!pDateStr) return false;
         const d = new Date(pDateStr);
         return (

@@ -25,6 +25,10 @@ const TYPE_LABEL: Record<string, { label: string; cls: string; icon: string }> =
 export default function ExpensesPage() {
   const utils = trpc.useUtils();
   const paymentsQuery = trpc.payment.list.useQuery();
+  const meQuery = trpc.org.me.useQuery();
+  const deleteMut = trpc.payment.delete.useMutation();
+  const isAdmin = meQuery.data?.role === "admin";
+  const canDeleteUnapproved = isAdmin || !!meQuery.data?.permissions?.deletePayments;
   const eventsQuery = trpc.event.list.useQuery();
   const payeesQuery = trpc.payee.list.useQuery();
 
@@ -411,7 +415,7 @@ export default function ExpensesPage() {
                     <td style={{ fontSize: "0.75rem", color: "#64748b" }}>
                       {formatDate(p.dueDate)}
                     </td>
-                    <td className="text-center">
+                    <td className="text-center" style={{ whiteSpace: "nowrap" }}>
                       <button
                         className="app-btn app-btn-ghost app-btn-sm"
                         onClick={() => setViewPaymentId(p.paymentId)}
@@ -419,6 +423,37 @@ export default function ExpensesPage() {
                       >
                         👁
                       </button>
+                      {/* Admin ลบได้ทุกสถานะ · ผู้มีสิทธิ์ลบ ลบได้เฉพาะที่ยังไม่อนุมัติ */}
+                      {(isAdmin ||
+                        (canDeleteUnapproved &&
+                          (p.status === "pending" || p.status === "rejected"))) && (
+                        <button
+                          className="app-btn app-btn-ghost app-btn-sm"
+                          style={{ color: "#dc2626" }}
+                          disabled={deleteMut.isPending}
+                          title="ลบรายการ"
+                          onClick={async () => {
+                            const warn =
+                              p.status === "pending" || p.status === "rejected"
+                                ? ""
+                                : "\n\nรายการนี้อนุมัติ/จ่ายแล้ว — ลบแล้วจะหายจากรายงานและภาษีหัก ณ ที่จ่าย (ไฟล์ใน Google Drive ไม่ถูกลบ)";
+                            if (
+                              !window.confirm(
+                                `ลบรายการ "${p.description || "-"}" ยอด ${p.gttlAmount.toLocaleString("th-TH")} บาท ?${warn}`
+                              )
+                            )
+                              return;
+                            try {
+                              await deleteMut.mutateAsync({ paymentId: p.paymentId });
+                              refreshAll();
+                            } catch (e) {
+                              window.alert(e instanceof Error ? e.message : "ลบไม่สำเร็จ");
+                            }
+                          }}
+                        >
+                          🗑
+                        </button>
+                      )}
                     </td>
                   </tr>
                 );
