@@ -29,7 +29,7 @@ interface DocData {
     vatIncluded: boolean;
     isVat: boolean;
     /** มีค่า = render เป็น "ใบเสร็จรับเงิน" (ใช้จาก /documents/receipt/[id]) */
-    receipt?: { number: string; date: string } | null;
+    receipt?: { number: string; date: string; direct?: boolean } | null;
     whtPercent: number;
     whtAmount: number;
     grandTotal: number;
@@ -519,6 +519,22 @@ function DocPage({
         </div>
       </div>
 
+      {receipt && header.status === "void" && (
+        <div
+          style={{
+            margin: "0.5rem 0",
+            padding: "0.5rem 0.75rem",
+            border: "1px solid #fecaca",
+            background: "#fef2f2",
+            color: "#991b1b",
+            fontWeight: 600,
+            textAlign: "center",
+          }}
+        >
+          ❌ ใบเสร็จรับเงินนี้ถูกยกเลิก
+        </div>
+      )}
+
       <div className="info-grid">
         <div className="info-block">
           <div className="info-label">ลูกค้า</div>
@@ -546,10 +562,12 @@ function DocPage({
             </strong>
           </div>
           {receipt ? (
-            <div className="info-row">
-              <span>อ้างอิงใบวางบิล:</span>
-              <strong className="mono">{header.docNumber}</strong>
-            </div>
+            receipt.direct ? null : (
+              <div className="info-row">
+                <span>อ้างอิงใบวางบิล:</span>
+                <strong className="mono">{header.docNumber}</strong>
+              </div>
+            )
           ) : (
             <div className="info-row">
               <span>ครบกำหนด:</span>

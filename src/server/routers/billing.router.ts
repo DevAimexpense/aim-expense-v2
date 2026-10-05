@@ -176,6 +176,10 @@ function shapeHeader(r: Record<string, string>) {
     // ใบเสร็จรับเงิน (ออกเมื่อรับเงินครบ)
     receiptNumber: r.ReceiptNumber || "",
     receiptDate: r.ReceiptDate || "",
+    // "receipt" = ใบเสร็จที่ออกโดยตรง ไม่มีใบวางบิล
+    docKind: (r.DocKind === "receipt" ? "receipt" : "billing") as
+      | "billing"
+      | "receipt",
   };
 }
 
@@ -204,6 +208,8 @@ export const billingRouter = router({
           customerId: z.string().optional(),
           from: z.string().optional(),
           to: z.string().optional(),
+          // "billing" = เฉพาะใบวางบิล (ไม่รวมใบเสร็จที่ออกโดยตรง) · ไม่ส่ง = ทั้งหมด
+          kind: z.enum(["billing", "receipt"]).optional(),
         })
         .optional()
     )
@@ -213,6 +219,10 @@ export const billingRouter = router({
       const all = await sheets.getBillings();
 
       const filtered = all.filter((r) => {
+        if (input?.kind) {
+          const k = r.DocKind === "receipt" ? "receipt" : "billing";
+          if (k !== input.kind) return false;
+        }
         if (input?.status && r.Status !== input.status) return false;
         if (input?.customerId && r.CustomerID !== input.customerId)
           return false;
@@ -689,6 +699,163 @@ export const billingRouter = router({
    * - Status updates: partial (if < grandTotal) or paid (if >= grandTotal)
    * - PaidDate = วันที่รับเงิน (latest)
    */
+  /**
+   * สร้างใบเสร็จรับเงินโดยตรง — ไม่ต้องมีใบวางบิล (ขายแล้วรับเงินเลย)
+   * เก็บใน Billings tab เดียวกัน (รายรับ/รายงานนับรวมอัตโนมัติ) โดย
+   *   DocKind = "receipt", DocNumber = ReceiptNumber = RC-{ปี}-{0001}
+   *   Status = paid, PaidAmount = GrandTotal (นิยามเดียวกับ recordPayment)
+   * ใช้เลขรัน RC ชุดเดียวกับใบเสร็จที่ออกจากใบวางบิล
+   */
+  createReceipt: permissionProcedure("manageBillings")
+    .input(
+      BillingCreateInput.omit({ dueDate: true, sourceQuotationId: true, terms: true }).extend({
+        paymentMethod: PaymentMethod.default("transfer"),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const sheets = await getSheetsService(ctx.org.orgId);
+      await ensureTabsCached(sheets, ctx.org.orgId);
+
+      const customer = await sheets.getCustomerById(input.customerId);
+      if (!customer) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "ไม่พบลูกค้า" });
+      }
+
+      const billingId = GoogleSheetsService.generateId("RC");
+      const year =
+        new Date(input.docDate).getFullYear() || new Date().getFullYear();
+      const receiptNumber = await computeNextDocNumber(
+        sheets,
+        "RC",
+        year,
+        SHEET_TABS.BILLINGS,
+        undefined,
+        "ReceiptNumber"
+      );
+      const totals = computeBillingTotals(
+        input.lines,
+        input.vatIncluded,
+        input.discountAmount,
+        input.whtPercent,
+        input.isVat
+      );
+      const issuer = await resolveIssuerBranch(ctx.org.orgId, input.branchId);
+      const now = new Date().toISOString();
+
+      try {
+        await sheets.appendRowByHeaders(SHEET_TABS.BILLINGS, {
+          BillingID: billingId,
+          DocNumber: receiptNumber,
+          DocDate: input.docDate,
+          DueDate: input.docDate,
+          CustomerID: customer.CustomerID,
+          CustomerNameSnapshot: customer.CustomerName || "",
+          CustomerTaxIdSnapshot: customer.TaxID || "",
+          CustomerAddressSnapshot:
+            customer.BillingAddress || customer.Address || "",
+          IssuerBranchSnapshot: issuer.branchLabel,
+          IssuerAddressSnapshot: issuer.address,
+          SourceQuotationID: "",
+          EventID: input.eventId || "",
+          ProjectName: input.projectName || "",
+          Status: "paid",
+          Subtotal: totals.subtotal,
+          DiscountAmount: input.discountAmount,
+          VATAmount: totals.vatAmount,
+          VATIncluded: input.vatIncluded ? "TRUE" : "FALSE",
+          IsVAT: input.isVat ? "TRUE" : "FALSE",
+          WHTPercent: input.whtPercent,
+          WHTAmount: totals.whtAmount,
+          GrandTotal: totals.grandTotal,
+          AmountReceivable: totals.amountReceivable,
+          // ชำระครบ = PaidAmount เท่ากับ GrandTotal (ตามนิยาม balance = GrandTotal - PaidAmount)
+          PaidAmount: totals.grandTotal,
+          PaidDate: input.docDate,
+          PaymentMethod: input.paymentMethod,
+          BankAccountID: "",
+          Notes: input.notes || "",
+          Terms: "",
+          PreparedBy: ctx.session.displayName || "",
+          PreparedByUserId: ctx.session.userId,
+          CreatedAt: now,
+          UpdatedAt: now,
+          PdfUrl: "",
+          ReceiptNumber: receiptNumber,
+          ReceiptDate: input.docDate,
+          DocKind: "receipt",
+        });
+
+        for (let i = 0; i < input.lines.length; i++) {
+          const l = input.lines[i];
+          await sheets.appendRowByHeaders(SHEET_TABS.BILLING_LINES, {
+            LineID: GoogleSheetsService.generateId("BILL"),
+            BillingID: billingId,
+            LineNumber: i + 1,
+            Description: l.description,
+            Quantity: l.quantity,
+            UnitPrice: l.unitPrice,
+            DiscountPercent: l.discountPercent,
+            LineTotal: totals.lineTotals[i],
+            Notes: l.notes || "",
+          });
+        }
+      } catch (e) {
+        // Cleanup orphan
+        try {
+          await sheets.deleteById(SHEET_TABS.BILLINGS, "BillingID", billingId);
+          const orphanLines = await sheets.getBillingLines(billingId);
+          for (const ol of orphanLines) {
+            await sheets.deleteById(SHEET_TABS.BILLING_LINES, "LineID", ol.LineID);
+          }
+        } catch {
+          /* ignore */
+        }
+        throw e;
+      }
+
+      await prisma.auditLog.create({
+        data: {
+          orgId: ctx.org.orgId,
+          userId: ctx.session.userId,
+          action: "create",
+          entityType: "receipt",
+          entityRef: billingId,
+          summary: `สร้างใบเสร็จรับเงิน ${receiptNumber}`,
+        },
+      });
+
+      return { success: true, billingId, receiptNumber };
+    }),
+
+  /** ยกเลิกใบเสร็จรับเงินที่ออกโดยตรง (เลขที่ยังคงอยู่ ไม่นำกลับมาใช้ซ้ำ) */
+  voidReceipt: permissionProcedure("manageBillings")
+    .input(z.object({ billingId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const sheets = await getSheetsService(ctx.org.orgId);
+      const existing = await sheets.getBillingById(input.billingId);
+      if (!existing || existing.DocKind !== "receipt") {
+        throw new TRPCError({ code: "NOT_FOUND", message: "ไม่พบใบเสร็จรับเงิน" });
+      }
+      if (existing.Status === "void") {
+        return { success: true };
+      }
+      await sheets.updateById(SHEET_TABS.BILLINGS, "BillingID", input.billingId, {
+        Status: "void",
+        UpdatedAt: new Date().toISOString(),
+      });
+      await prisma.auditLog.create({
+        data: {
+          orgId: ctx.org.orgId,
+          userId: ctx.session.userId,
+          action: "update",
+          entityType: "receipt",
+          entityRef: input.billingId,
+          summary: `ยกเลิกใบเสร็จรับเงิน ${existing.ReceiptNumber || existing.DocNumber}`,
+        },
+      });
+      return { success: true };
+    }),
+
   /**
    * ออกใบเสร็จรับเงิน — 1 ใบต่อ 1 ใบวางบิล ออกได้เมื่อรับเงินครบ (Status = paid)
    * เลขรันแยก RC-{ปี}-{0001} เก็บในคอลัมน์ ReceiptNumber ของแถวใบวางบิลเดิม

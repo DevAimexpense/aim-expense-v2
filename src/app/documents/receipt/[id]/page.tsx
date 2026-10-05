@@ -117,6 +117,7 @@ export default async function ReceiptDocumentPage({
         receipt: {
           number: header.ReceiptNumber,
           date: header.ReceiptDate || header.PaidDate || header.DocDate,
+          direct: header.DocKind === "receipt",
         },
         whtPercent: parseFloat(header.WHTPercent) || 0,
         whtAmount: parseFloat(header.WHTAmount) || 0,

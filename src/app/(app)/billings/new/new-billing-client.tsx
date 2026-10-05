@@ -104,9 +104,23 @@ export interface InitialBillingData {
 interface Props {
   mode: "create" | "edit";
   initial?: InitialBillingData;
+  /** "receipt" = ออกใบเสร็จรับเงินโดยตรง (ไม่มีใบวางบิล) — ใช้จาก /receipts/new */
+  kind?: "billing" | "receipt";
 }
 
-export function NewBillingClient({ mode, initial }: Props) {
+const PAYMENT_METHODS = [
+  { value: "transfer", label: "โอนเงิน" },
+  { value: "cash", label: "เงินสด" },
+  { value: "cheque", label: "เช็ค" },
+  { value: "creditCard", label: "บัตรเครดิต" },
+  { value: "other", label: "อื่น ๆ" },
+] as const;
+
+export function NewBillingClient({ mode, initial, kind = "billing" }: Props) {
+  const isReceipt = kind === "receipt";
+  const backHref = isReceipt ? "/receipts" : "/billings";
+  const [paymentMethod, setPaymentMethod] =
+    useState<(typeof PAYMENT_METHODS)[number]["value"]>("transfer");
   const router = useRouter();
   const utils = trpc.useUtils();
   const customersQuery = trpc.customer.list.useQuery();
@@ -118,6 +132,7 @@ export function NewBillingClient({ mode, initial }: Props) {
 
   const createMut = trpc.billing.create.useMutation();
   const updateMut = trpc.billing.update.useMutation();
+  const receiptMut = trpc.billing.createReceipt.useMutation();
 
   const [form, setForm] = useState(() => ({
     customerId: initial?.customerId || "",
@@ -225,9 +240,11 @@ export function NewBillingClient({ mode, initial }: Props) {
   const validate = (): string | null => {
     if (!form.customerId) return "กรุณาเลือกลูกค้า";
     if (!form.docDate) return "กรุณาระบุวันที่ออก";
-    if (!form.dueDate) return "กรุณาระบุวันครบกำหนด";
-    if (form.dueDate < form.docDate)
-      return "วันครบกำหนดต้องไม่น้อยกว่าวันที่ออก";
+    if (!isReceipt) {
+      if (!form.dueDate) return "กรุณาระบุวันครบกำหนด";
+      if (form.dueDate < form.docDate)
+        return "วันครบกำหนดต้องไม่น้อยกว่าวันที่ออก";
+    }
     if (form.lines.length === 0) return "ต้องมีอย่างน้อย 1 รายการ";
     for (const [idx, l] of form.lines.entries()) {
       if (!l.description.trim())
@@ -274,6 +291,18 @@ export function NewBillingClient({ mode, initial }: Props) {
       })),
     };
     try {
+      if (isReceipt) {
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        const { dueDate, terms, ...receiptPayload } = payload;
+        const result = await receiptMut.mutateAsync({
+          ...receiptPayload,
+          paymentMethod,
+        });
+        utils.billing.list.invalidate();
+        window.open(`/documents/receipt/${result.billingId}`, "_blank", "noopener");
+        router.push("/receipts");
+        return;
+      }
       if (mode === "edit" && initial) {
         await updateMut.mutateAsync({ billingId: initial.billingId, ...payload });
         utils.billing.list.invalidate();
@@ -289,20 +318,27 @@ export function NewBillingClient({ mode, initial }: Props) {
     }
   };
 
-  const isLoading = createMut.isPending || updateMut.isPending;
+  const isLoading =
+    createMut.isPending || updateMut.isPending || receiptMut.isPending;
 
   return (
     <div className="app-page">
       <div className="app-page-header">
         <div>
           <h1 className="app-page-title">
-            {mode === "edit" ? "✏️ แก้ไขใบวางบิล" : "🧾 สร้างใบวางบิล"}
+            {isReceipt
+              ? "💵 สร้างใบเสร็จรับเงิน"
+              : mode === "edit"
+                ? "✏️ แก้ไขใบวางบิล"
+                : "🧾 สร้างใบวางบิล"}
           </h1>
           <p className="app-page-subtitle">
-            กรอกข้อมูลลูกค้า + รายการ + WHT แล้วบันทึกเป็น draft
+            {isReceipt
+              ? "รับเงินแล้วออกใบเสร็จได้เลย — ไม่ต้องสร้างใบวางบิลก่อน"
+              : "กรอกข้อมูลลูกค้า + รายการ + WHT แล้วบันทึกเป็น draft"}
           </p>
         </div>
-        <Link href="/billings" className="app-btn app-btn-secondary">
+        <Link href={backHref} className="app-btn app-btn-secondary">
           ← กลับ
         </Link>
       </div>
@@ -394,7 +430,9 @@ export function NewBillingClient({ mode, initial }: Props) {
           </div>
           <div className="app-form-grid cols-2">
             <div className="app-form-group">
-              <label className="app-label app-label-required">วันที่ออก</label>
+              <label className="app-label app-label-required">
+                {isReceipt ? "วันที่รับเงิน" : "วันที่ออก"}
+              </label>
               <input
                 type="date"
                 value={form.docDate}
@@ -402,17 +440,40 @@ export function NewBillingClient({ mode, initial }: Props) {
                 className="app-input"
               />
             </div>
-            <div className="app-form-group">
-              <label className="app-label app-label-required">
-                วันครบกำหนดชำระ
-              </label>
-              <input
-                type="date"
-                value={form.dueDate}
-                onChange={(e) => setForm({ ...form, dueDate: e.target.value })}
-                className="app-input"
-              />
-            </div>
+            {isReceipt ? (
+              <div className="app-form-group">
+                <label className="app-label app-label-required">
+                  ช่องทางรับเงิน
+                </label>
+                <select
+                  value={paymentMethod}
+                  onChange={(e) =>
+                    setPaymentMethod(
+                      e.target.value as (typeof PAYMENT_METHODS)[number]["value"]
+                    )
+                  }
+                  className="app-select"
+                >
+                  {PAYMENT_METHODS.map((m) => (
+                    <option key={m.value} value={m.value}>
+                      {m.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : (
+              <div className="app-form-group">
+                <label className="app-label app-label-required">
+                  วันครบกำหนดชำระ
+                </label>
+                <input
+                  type="date"
+                  value={form.dueDate}
+                  onChange={(e) => setForm({ ...form, dueDate: e.target.value })}
+                  className="app-input"
+                />
+              </div>
+            )}
           </div>
           <div className="app-form-grid cols-2">
             <div className="app-form-group">
@@ -690,7 +751,9 @@ export function NewBillingClient({ mode, initial }: Props) {
         {/* Section 5: Notes + Terms */}
         <div className="app-card" style={{ marginBottom: "1rem" }}>
           <div className="app-card-header">
-            <h2 className="app-card-title">5. หมายเหตุ + เงื่อนไข</h2>
+            <h2 className="app-card-title">
+              {isReceipt ? "5. หมายเหตุ" : "5. หมายเหตุ + เงื่อนไข"}
+            </h2>
           </div>
           <div className="app-form-grid cols-2">
             <div className="app-form-group">
@@ -703,16 +766,18 @@ export function NewBillingClient({ mode, initial }: Props) {
                 maxLength={1000}
               />
             </div>
-            <div className="app-form-group">
-              <label className="app-label">เงื่อนไขการชำระ</label>
-              <textarea
-                value={form.terms}
-                onChange={(e) => setForm({ ...form, terms: e.target.value })}
-                rows={4}
-                className="app-textarea"
-                maxLength={1000}
-              />
-            </div>
+            {!isReceipt && (
+              <div className="app-form-group">
+                <label className="app-label">เงื่อนไขการชำระ</label>
+                <textarea
+                  value={form.terms}
+                  onChange={(e) => setForm({ ...form, terms: e.target.value })}
+                  rows={4}
+                  className="app-textarea"
+                  maxLength={1000}
+                />
+              </div>
+            )}
           </div>
         </div>
 
@@ -723,7 +788,7 @@ export function NewBillingClient({ mode, initial }: Props) {
             gap: "0.5rem",
           }}
         >
-          <Link href="/billings" className="app-btn app-btn-secondary">
+          <Link href={backHref} className="app-btn app-btn-secondary">
             ยกเลิก
           </Link>
           <button
@@ -735,6 +800,8 @@ export function NewBillingClient({ mode, initial }: Props) {
               <>
                 <span className="app-spinner" /> กำลังบันทึก...
               </>
+            ) : isReceipt ? (
+              "💵 ออกใบเสร็จรับเงิน"
             ) : mode === "edit" ? (
               "💾 บันทึกการแก้ไข"
             ) : (

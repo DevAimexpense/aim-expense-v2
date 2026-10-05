@@ -60,6 +60,7 @@ export function BillingsClient({ entityType = "company" }: { entityType?: string
   const queryInput = statusFilter === "all" ? {} : { status: statusFilter };
   const listQuery = trpc.billing.list.useQuery({
     ...queryInput,
+    kind: "billing", // ใบเสร็จที่ออกโดยตรงอยู่ที่เมนู "ใบเสร็จรับเงิน"
     customerId: customerFilter === "all" ? undefined : customerFilter,
     from: from || undefined,
     to: to || undefined,

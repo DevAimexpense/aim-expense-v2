@@ -239,6 +239,7 @@ export const SHEET_HEADERS: Record<string, string[]> = {
     "IsVAT", // FALSE = ไม่มี VAT (ธุรกิจไม่จด VAT) — ว่าง/TRUE = มี VAT 7% (legacy rows)
     "ReceiptNumber", // ใบเสร็จรับเงิน RC-2026-0001 — ออกได้เมื่อรับเงินครบ (1 ใบต่อ 1 ใบวางบิล)
     "ReceiptDate", // วันที่ใบเสร็จรับเงิน
+    "DocKind", // "receipt" = ใบเสร็จรับเงินที่ออกโดยตรง (ไม่มีใบวางบิล, DocNumber = เลข RC) — ว่าง = ใบวางบิลปกติ
   ],
   [SHEET_TABS.BILLING_LINES]: [
     "LineID",
