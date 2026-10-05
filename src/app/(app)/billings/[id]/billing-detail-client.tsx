@@ -151,6 +151,19 @@ export function BillingDetailClient({ billingId }: { billingId: string }) {
             </button>
           </>
         )}
+        {/* แก้ไขได้หลังส่ง/รับเงินแล้วด้วย (ใบเสร็จที่ออกจากใบนี้จะเปลี่ยนตาม) */}
+        {(header.status === "sent" ||
+          header.status === "partial" ||
+          header.status === "paid") &&
+          !!header.customerId &&
+          header.docKind !== "receipt" && (
+            <Link
+              href={`/billings/${billingId}/edit`}
+              className="app-btn app-btn-secondary"
+            >
+              ✏️ แก้ไข
+            </Link>
+          )}
         {(header.status === "sent" || header.status === "partial") && (
           <>
             <button

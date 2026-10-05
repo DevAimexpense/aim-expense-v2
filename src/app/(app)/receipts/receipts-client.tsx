@@ -205,9 +205,13 @@ export function ReceiptsClient() {
                 </td>
                 <td className="num" style={{ textAlign: "right" }}>{formatTHB(b.grandTotal)}</td>
                 <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
-                  {b.docKind === "receipt" && b.status !== "void" && (
+                  {b.status !== "void" && (
                     <Link
-                      href={`/receipts/${b.billingId}/edit`}
+                      href={
+                        b.docKind === "receipt"
+                          ? `/receipts/${b.billingId}/edit`
+                          : `/billings/${b.billingId}/edit`
+                      }
                       className="app-btn app-btn-secondary app-btn-sm"
                       style={{ marginRight: "0.375rem" }}
                     >

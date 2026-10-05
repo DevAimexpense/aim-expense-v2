@@ -533,10 +533,18 @@ export const billingRouter = router({
       if (!existing) {
         throw new TRPCError({ code: "NOT_FOUND", message: "ไม่พบใบวางบิล" });
       }
-      if (existing.Status !== "draft") {
+      // แก้ไขได้ทุกสถานะยกเว้นยกเลิก (เดิมแก้ได้เฉพาะ draft) — ใบเสร็จรับเงินที่ออกจาก
+      // ใบวางบิลนี้อ่านข้อมูลจากแถวเดียวกัน จึงเปลี่ยนตามทันที
+      if (existing.Status === "void") {
         throw new TRPCError({
           code: "PRECONDITION_FAILED",
-          message: `แก้ไขไม่ได้ — สถานะปัจจุบัน: ${existing.Status}`,
+          message: "ใบวางบิลนี้ถูกยกเลิกแล้ว แก้ไขไม่ได้",
+        });
+      }
+      if (existing.DocKind === "receipt") {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "เอกสารนี้เป็นใบเสร็จรับเงิน — แก้ไขจากเมนูใบเสร็จรับเงิน",
         });
       }
 
@@ -553,11 +561,30 @@ export const billingRouter = router({
         input.isVat
       );
 
+      // ยอดรับเงินหลังแก้ไข:
+      //   รับครบแล้ว (paid)  → ยังถือว่ารับครบ: ยอดรับ = ยอดรวมใหม่
+      //   รับบางส่วน (partial) → คงยอดที่บันทึกรับไว้ แล้วคิดสถานะใหม่จากยอดรวมใหม่
+      const paidBefore = parseFloat(existing.PaidAmount) || 0;
+      const paymentPatch: Record<string, string | number> = {};
+      if (existing.Status === "paid") {
+        paymentPatch.PaidAmount = totals.grandTotal;
+      } else if (existing.Status === "partial") {
+        if (paidBefore > totals.grandTotal) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: `ยอดรวมใหม่ (${totals.grandTotal}) น้อยกว่ายอดที่รับเงินไว้แล้ว (${paidBefore})`,
+          });
+        }
+        paymentPatch.Status =
+          paidBefore >= totals.grandTotal ? "paid" : "partial";
+      }
+
       await sheets.updateById(
         SHEET_TABS.BILLINGS,
         "BillingID",
         input.billingId,
         {
+          ...paymentPatch,
           DocDate: input.docDate,
           DueDate: input.dueDate,
           CustomerID: customer.CustomerID,

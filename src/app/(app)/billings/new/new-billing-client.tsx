@@ -108,6 +108,8 @@ interface Props {
   initial?: InitialBillingData;
   /** "receipt" = ออกใบเสร็จรับเงินโดยตรง (ไม่มีใบวางบิล) — ใช้จาก /receipts/new */
   kind?: "billing" | "receipt";
+  /** ข้อความเตือนใต้หัวหน้า (เช่น แก้ไขเอกสารที่รับเงินแล้ว) */
+  notice?: string;
 }
 
 const PAYMENT_METHODS = [
@@ -118,7 +120,12 @@ const PAYMENT_METHODS = [
   { value: "other", label: "อื่น ๆ" },
 ] as const;
 
-export function NewBillingClient({ mode, initial, kind = "billing" }: Props) {
+export function NewBillingClient({
+  mode,
+  initial,
+  kind = "billing",
+  notice,
+}: Props) {
   const isReceipt = kind === "receipt";
   const backHref = isReceipt ? "/receipts" : "/billings";
   const [paymentMethod, setPaymentMethod] =
@@ -353,7 +360,9 @@ export function NewBillingClient({ mode, initial, kind = "billing" }: Props) {
               ? mode === "edit"
                 ? "แก้ไขข้อมูลแล้วบันทึก — เลขที่ใบเสร็จคงเดิม"
                 : "รับเงินแล้วออกใบเสร็จได้เลย — ไม่ต้องสร้างใบวางบิลก่อน"
-              : "กรอกข้อมูลลูกค้า + รายการ + WHT แล้วบันทึกเป็น draft"}
+              : mode === "edit"
+                ? "แก้ไขข้อมูลแล้วบันทึก — เลขที่เอกสารคงเดิม"
+                : "กรอกข้อมูลลูกค้า + รายการ + WHT แล้วบันทึกเป็น draft"}
           </p>
         </div>
         <Link href={backHref} className="app-btn app-btn-secondary">
@@ -361,6 +370,21 @@ export function NewBillingClient({ mode, initial, kind = "billing" }: Props) {
         </Link>
       </div>
 
+      {notice && (
+        <div
+          style={{
+            background: "#fef3c7",
+            border: "1px solid #fcd34d",
+            color: "#78350f",
+            padding: "0.75rem 1rem",
+            borderRadius: "0.5rem",
+            fontSize: "0.875rem",
+            marginBottom: "1rem",
+          }}
+        >
+          ⚠️ {notice}
+        </div>
+      )}
       {error && <div className="app-error-msg">{error}</div>}
 
       <form onSubmit={handleSubmit}>

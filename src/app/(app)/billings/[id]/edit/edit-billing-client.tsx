@@ -29,7 +29,11 @@ export function EditBillingClient({ billingId }: { billingId: string }) {
     );
   }
 
-  if (detail.data.header.status !== "draft") {
+  if (
+    detail.data.header.status === "void" ||
+    detail.data.header.docKind === "receipt" ||
+    !detail.data.header.customerId
+  ) {
     return (
       <div className="app-page">
         <div className="app-card">
@@ -37,7 +41,9 @@ export function EditBillingClient({ billingId }: { billingId: string }) {
             <div className="app-empty-icon">🔒</div>
             <p className="app-empty-title">แก้ไขไม่ได้</p>
             <p className="app-empty-desc">
-              สถานะปัจจุบัน: {detail.data.header.status} — แก้ไขได้เฉพาะ draft
+              {detail.data.header.status === "void"
+                ? "ใบวางบิลนี้ถูกยกเลิกแล้ว"
+                : "เอกสารนี้แก้ไขจากหน้านี้ไม่ได้"}
             </p>
             <Link
               href={`/billings/${billingId}`}
@@ -74,5 +80,15 @@ export function EditBillingClient({ billingId }: { billingId: string }) {
     })),
   };
 
-  return <NewBillingClient mode="edit" initial={initial} />;
+  // แจ้งผลของการแก้ไขเอกสารที่ส่ง/รับเงินไปแล้ว
+  const notice =
+    header.status === "paid"
+      ? `ใบวางบิลนี้รับเงินครบแล้ว${header.receiptNumber ? ` และออกใบเสร็จรับเงิน ${header.receiptNumber} แล้ว` : ""} — เมื่อบันทึก ยอดรับเงินจะปรับตามยอดรวมใหม่${header.receiptNumber ? " และใบเสร็จจะเปลี่ยนตาม (เลขที่คงเดิม)" : ""}`
+      : header.status === "partial"
+        ? "ใบวางบิลนี้รับเงินบางส่วนแล้ว — ยอดที่รับไว้คงเดิม ยอดรวมใหม่ต้องไม่น้อยกว่ายอดที่รับแล้ว"
+        : header.status === "sent"
+          ? "ใบวางบิลนี้ส่งให้ลูกค้าแล้ว — อย่าลืมส่งฉบับแก้ไขให้ลูกค้าอีกครั้ง"
+          : undefined;
+
+  return <NewBillingClient mode="edit" initial={initial} notice={notice} />;
 }

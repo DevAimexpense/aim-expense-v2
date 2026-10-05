@@ -37,11 +37,23 @@ export function EditReceiptClient({ billingId }: { billingId: string }) {
   const { header, lines } = detail.data;
   if (header.docKind !== "receipt") {
     return (
-      <Blocked
-        icon="🔒"
-        title="แก้ไขที่นี่ไม่ได้"
-        desc="ใบเสร็จนี้ออกจากใบวางบิล — เนื้อหามาจากใบวางบิลใบนั้น"
-      />
+      <div className="app-page">
+        <div className="app-card">
+          <div className="app-empty">
+            <div className="app-empty-icon">🧾</div>
+            <p className="app-empty-title">ใบเสร็จนี้ออกจากใบวางบิล {header.docNumber}</p>
+            <p className="app-empty-desc">
+              แก้ไขที่ใบวางบิล แล้วใบเสร็จจะเปลี่ยนตาม (เลขที่ใบเสร็จคงเดิม)
+            </p>
+            <Link
+              href={`/billings/${billingId}/edit`}
+              className="app-btn app-btn-primary"
+            >
+              ✏️ แก้ไขใบวางบิล
+            </Link>
+          </div>
+        </div>
+      </div>
     );
   }
   if (header.status === "void") {
