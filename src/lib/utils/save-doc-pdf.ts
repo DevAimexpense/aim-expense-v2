@@ -45,11 +45,16 @@ export async function saveDocumentPdf(options: {
   selector: string;
   /** ถ้าระบุ: ใช้ PDF ที่ server สร้าง (vector) แทนการ capture หน้าจอด้วย html2canvas */
   pdfUrl?: string;
+  /** PDF ที่โหลดมาแล้ว — ใช้ตัวนี้เลย ไม่ต้องขอ server ซ้ำ */
+  pdfBlob?: Blob;
   paymentId: string;
   docType: "wht-cert" | "substitute-receipt" | "receipt-voucher";
   docDate: string;
   onStage?: (stage: "waiting" | "capturing" | "uploading" | "done") => void;
 }): Promise<{ fileUrl: string; fileName: string; folderPath: string }> {
+  if (options.pdfBlob) {
+    return uploadDocumentPdf(options.pdfBlob, options);
+  }
   if (options.pdfUrl) {
     options.onStage?.("capturing");
     const pdfRes = await fetch(options.pdfUrl, { cache: "no-store" });
@@ -153,6 +158,7 @@ const __autoSaveStarted = new Set<string>();
 export async function runAutoSaveIfRequested(params: {
   selector: string;
   pdfUrl?: string;
+  pdfBlob?: Blob;
   paymentId: string;
   docType: "wht-cert" | "substitute-receipt" | "receipt-voucher";
   docDate: string;
@@ -201,6 +207,7 @@ export async function runAutoSaveIfRequested(params: {
     const result = await saveDocumentPdf({
       selector: params.selector,
       pdfUrl: params.pdfUrl,
+      pdfBlob: params.pdfBlob,
       paymentId: params.paymentId,
       docType: params.docType,
       docDate: params.docDate,

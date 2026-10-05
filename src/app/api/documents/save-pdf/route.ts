@@ -13,7 +13,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session";
 import { getOrgContext } from "@/lib/auth/middleware";
-import { getSheetsService, getDriveService } from "@/server/lib/sheets-context";
+import { getSheetsService, getDriveService, ensureTabsCached } from "@/server/lib/sheets-context";
 import { SHEET_TABS } from "@/server/services/google-sheets.service";
 import { prisma } from "@/lib/prisma";
 
@@ -57,7 +57,7 @@ export async function POST(req: NextRequest) {
 
     // Get payment for description (ใช้ใน filename)
     const sheets = await getSheetsService(org.orgId);
-    await sheets.ensureAllTabsExist();
+    await ensureTabsCached(sheets, org.orgId); // cached — ไม่อ่าน header ทุกแท็บทุกครั้ง
     const payment = await sheets.getById(SHEET_TABS.PAYMENTS, "PaymentID", paymentId);
     if (!payment) {
       return NextResponse.json({ error: "ไม่พบรายการจ่าย" }, { status: 404 });

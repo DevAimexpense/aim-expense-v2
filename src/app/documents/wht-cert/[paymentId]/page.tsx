@@ -2,16 +2,14 @@
 // หนังสือรับรองการหักภาษี ณ ที่จ่าย (Withholding Tax Certificate)
 // ตามมาตรา 50 ทวิ แห่งประมวลรัษฎากร
 //
-// ตัวเอกสารคือ PDF (vector) จาก /api/documents/wht-cert/[paymentId] —
-// หน้านี้เป็นตัวแสดง + ปุ่มพิมพ์/ดาวน์โหลด/บันทึกลง Drive
+// ตัวเอกสารคือ PDF (vector) จาก /api/documents/wht-cert/[paymentId]
+// หน้านี้เป็นแค่ตัวแสดง + ปุ่มพิมพ์/ดาวน์โหลด/บันทึกลง Drive — **ไม่อ่าน Sheet เอง**
+// (เดิมโหลดข้อมูลทั้งที่หน้านี้และที่ API = อ่าน Sheet ซ้ำสองรอบต่อการเปิด 1 ครั้ง)
 // ===========================================
 
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth/session";
-import { getOrgContext } from "@/lib/auth/middleware";
 import { WthCertDocument } from "./document";
-import { loadWhtCertData, WhtCertNoDateError } from "@/server/lib/wht-cert-data";
-import { AutoFailMessenger } from "@/lib/utils/auto-fail-messenger";
 
 export default async function WthCertPage({
   params,
@@ -21,71 +19,6 @@ export default async function WthCertPage({
   const session = await getSession();
   if (!session) redirect("/login");
 
-  const orgCtx = await getOrgContext(session.userId);
-  if (!orgCtx) redirect("/");
-
   const { paymentId } = await params;
-
-  let data = null;
-  let reason: string | undefined;
-  try {
-    data = await loadWhtCertData(orgCtx.orgId, paymentId);
-  } catch (e) {
-    if (e instanceof WhtCertNoDateError) reason = e.message;
-    else console.error(`[wht-cert/page] load failed:`, e);
-  }
-  if (reason) {
-    return <WhtCertNotFound paymentId={paymentId} reason={reason} title="ยังออกเอกสารไม่ได้" />;
-  }
-  if (!data) {
-    // render error page ให้ client auto-save ส่ง postMessage error กลับ parent (iframe)
-    return <WhtCertNotFound paymentId={paymentId} />;
-  }
-
-  return (
-    <WthCertDocument
-      paymentId={data.payment.paymentId}
-      paymentDate={data.payment.paymentDate}
-      docNumber={data.docNumber}
-      payeeName={data.payee.name}
-    />
-  );
-}
-
-/**
- * Client component — แสดงเมื่อหา payment ไม่เจอ
- * จะ auto-detect ?auto=1 แล้วส่ง postMessage error กลับ parent (iframe)
- */
-function WhtCertNotFound({
-  paymentId,
-  reason,
-  title = "ไม่พบรายการ",
-}: {
-  paymentId: string;
-  reason?: string;
-  title?: string;
-}) {
-  return (
-    <div style={{ padding: "2rem", fontFamily: "system-ui, sans-serif" }}>
-      <NotFoundAutoMessenger paymentId={paymentId} reason={reason} />
-      <h1 style={{ fontSize: "1.25rem", fontWeight: 600, marginBottom: "0.5rem" }}>
-        {title}
-      </h1>
-      <p style={{ color: "#64748b", marginBottom: "1rem" }}>
-        {title === "ไม่พบรายการ" ? (
-          <>
-            ไม่พบ payment id: <code>{paymentId}</code>
-            {reason && <span> ({reason})</span>}
-          </>
-        ) : (
-          reason
-        )}
-      </p>
-      <a href="/payments" style={{ color: "#2563eb" }}>← กลับไปหน้าตั้งเบิก</a>
-    </div>
-  );
-}
-
-function NotFoundAutoMessenger({ paymentId, reason }: { paymentId: string; reason?: string }) {
-  return <AutoFailMessenger paymentId={paymentId} reason={reason || "payment-not-found"} />;
+  return <WthCertDocument paymentId={paymentId} />;
 }

@@ -468,13 +468,22 @@ export class GoogleSheetsService {
     // ถ้าขาด → append column ใหม่ที่ปลาย row 1 (header)
     const columnsAdded: Record<string, string[]> = {};
     const existingRequired = requiredTabs.filter((t) => existingTabs.has(t));
+    // อ่านแถว header ของทุกแท็บใน 1 request (batchGet) — เดิมอ่านทีละแท็บ (~20+ requests)
+    // ซึ่งชนโควตา "Read requests per minute per user" (60/นาที) ของ Sheets API ได้ง่าย
+    const headerRows: Record<string, string[]> = {};
+    if (existingRequired.length > 0) {
+      const batch = await this.sheets.spreadsheets.values.batchGet({
+        spreadsheetId: this.spreadsheetId,
+        ranges: existingRequired.map((t) => `${t}!1:1`),
+      });
+      const valueRanges = batch.data.valueRanges || [];
+      existingRequired.forEach((t, i) => {
+        headerRows[t] = (valueRanges[i]?.values?.[0] as string[] | undefined) || [];
+      });
+    }
     for (const tabName of existingRequired) {
       const expectedHeaders = SHEET_HEADERS[tabName];
-      const actualResp = await this.sheets.spreadsheets.values.get({
-        spreadsheetId: this.spreadsheetId,
-        range: `${tabName}!1:1`,
-      });
-      const actual = (actualResp.data.values?.[0] as string[] | undefined) || [];
+      const actual = headerRows[tabName] || [];
       const missingCols = expectedHeaders.filter((h) => !actual.includes(h));
       if (missingCols.length > 0) {
         const startCol = actual.length + 1;

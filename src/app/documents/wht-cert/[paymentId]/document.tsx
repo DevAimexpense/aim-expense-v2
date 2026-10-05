@@ -11,14 +11,90 @@ import { saveDocumentPdf, runAutoSaveIfRequested } from "@/lib/utils/save-doc-pd
 
 interface WthCertProps {
   paymentId: string;
-  paymentDate: string;
-  docNumber: { book: string; number: string };
-  payeeName: string;
 }
 
-export function WthCertDocument({ paymentId, paymentDate, docNumber, payeeName }: WthCertProps) {
+type Loaded = { blob: Blob; url: string; docDate: string; docNumber: string; filename: string };
+
+export function WthCertDocument({ paymentId }: WthCertProps) {
   const pdfUrl = `/api/documents/wht-cert/${encodeURIComponent(paymentId)}`;
   const frameRef = useRef<HTMLIFrameElement>(null);
+
+  // โหลด PDF ครั้งเดียว แล้วใช้ไฟล์เดียวกันทั้งแสดง / พิมพ์ / ดาวน์โหลด / บันทึกลง Drive
+  const [doc, setDoc] = useState<Loaded | null>(null);
+  const [loadError, setLoadError] = useState("");
+
+  // Save PDF to Drive
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [savedUrl, setSavedUrl] = useState("");
+  const [saveError, setSaveError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    let objectUrl = "";
+    const isAuto =
+      new URLSearchParams(window.location.search).get("auto") === "1";
+
+    (async () => {
+      try {
+        const res = await fetch(pdfUrl, { cache: "no-store" });
+        if (!res.ok) {
+          const d = await res.json().catch(() => ({}));
+          throw new Error(d.error || "สร้างเอกสารไม่สำเร็จ");
+        }
+        const blob = await res.blob();
+        if (cancelled) return;
+        objectUrl = URL.createObjectURL(blob);
+        const loaded: Loaded = {
+          blob,
+          url: objectUrl,
+          docDate: res.headers.get("x-doc-date") || new Date().toISOString().slice(0, 10),
+          docNumber: res.headers.get("x-doc-number") || "",
+          filename: res.headers.get("x-doc-filename") || "50tawi.pdf",
+        };
+        setDoc(loaded);
+
+        // Auto-save mode: ?auto=1 → บันทึกลง Drive อัตโนมัติ + postMessage กลับ parent
+        await runAutoSaveIfRequested({
+          selector: ".wth-doc",
+          pdfBlob: loaded.blob,
+          paymentId,
+          docType: "wht-cert",
+          docDate: loaded.docDate,
+          onStateChange: (state, info) => {
+            if (state === "saving") setSaveState("saving");
+            else if (state === "saved") {
+              setSaveState("saved");
+              setSavedUrl(info?.fileUrl || "");
+            } else if (state === "error") {
+              setSaveState("error");
+              setSaveError(info?.error || "");
+            }
+          },
+        });
+      } catch (e) {
+        if (cancelled) return;
+        const msg = e instanceof Error ? e.message : "สร้างเอกสารไม่สำเร็จ";
+        setLoadError(msg);
+        // auto mode: แจ้ง parent ว่าไม่สำเร็จ (ไม่งั้น parent จะรอจน timeout)
+        if (isAuto && window.parent !== window) {
+          try {
+            window.parent.postMessage(
+              { type: "doc-gen-result", success: false, error: msg },
+              window.location.origin
+            );
+          } catch {
+            /* ignore */
+          }
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // พิมพ์ PDF ตัวจริง (ไม่ใช่ภาพหน้าจอ) — ถ้า browser ไม่ยอมให้สั่งพิมพ์ใน iframe ให้เปิดแท็บใหม่
   const handlePrint = () => {
@@ -28,24 +104,21 @@ export function WthCertDocument({ paymentId, paymentDate, docNumber, payeeName }
       w.focus();
       w.print();
     } catch {
-      window.open(pdfUrl, "_blank", "noopener");
+      if (doc) window.open(doc.url, "_blank", "noopener");
     }
   };
 
-  // Save PDF to Drive
-  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
-  const [savedUrl, setSavedUrl] = useState("");
-  const [saveError, setSaveError] = useState("");
   const handleSavePdf = async () => {
+    if (!doc) return;
     setSaveState("saving");
     setSaveError("");
     try {
       const result = await saveDocumentPdf({
         selector: ".wth-doc",
-        pdfUrl,
+        pdfBlob: doc.blob,
         paymentId,
         docType: "wht-cert",
-        docDate: paymentDate,
+        docDate: doc.docDate,
       });
       setSavedUrl(result.fileUrl);
       setSaveState("saved");
@@ -55,48 +128,25 @@ export function WthCertDocument({ paymentId, paymentDate, docNumber, payeeName }
     }
   };
 
-  // Auto-save mode: ?auto=1 → บันทึกลง Drive อัตโนมัติ + postMessage กลับ parent
-  useEffect(() => {
-    runAutoSaveIfRequested({
-      selector: ".wth-doc",
-      pdfUrl,
-      paymentId,
-      docType: "wht-cert",
-      docDate: paymentDate,
-      onStateChange: (state, info) => {
-        if (state === "saving") setSaveState("saving");
-        else if (state === "saved") {
-          setSaveState("saved");
-          setSavedUrl(info?.fileUrl || "");
-        } else if (state === "error") {
-          setSaveState("error");
-          setSaveError(info?.error || "");
-        }
-      },
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   return (
     <div className="wth-view">
       <div className="wth-bar">
         <div className="wth-bar-title">
           <strong>หนังสือรับรองการหักภาษี ณ ที่จ่าย (50 ทวิ)</strong>
-          <span>
-            เล่มที่ {docNumber.book} เลขที่ {docNumber.number}
-            {payeeName ? ` • ${payeeName}` : ""}
-          </span>
+          <span>{doc?.docNumber ? `เลขที่ ${doc.docNumber}` : loadError ? "" : "กำลังสร้างเอกสาร…"}</span>
         </div>
         <div className="wth-bar-actions">
           <button onClick={() => window.history.back()} className="app-btn app-btn-secondary">
             ← กลับ
           </button>
-          <button onClick={handlePrint} className="app-btn app-btn-secondary">
+          <button onClick={handlePrint} disabled={!doc} className="app-btn app-btn-secondary">
             🖨️ พิมพ์
           </button>
-          <a href={`${pdfUrl}?download=1`} className="app-btn app-btn-secondary">
-            ⬇️ ดาวน์โหลด PDF
-          </a>
+          {doc && (
+            <a href={doc.url} download={doc.filename} className="app-btn app-btn-secondary">
+              ⬇️ ดาวน์โหลด PDF
+            </a>
+          )}
           {saveState === "saved" && savedUrl ? (
             <a
               href={savedUrl}
@@ -110,7 +160,7 @@ export function WthCertDocument({ paymentId, paymentDate, docNumber, payeeName }
           ) : (
             <button
               onClick={handleSavePdf}
-              disabled={saveState === "saving"}
+              disabled={saveState === "saving" || !doc}
               className="app-btn app-btn-primary"
             >
               {saveState === "saving" ? "⏳ กำลังบันทึก..." : "💾 บันทึก PDF ลง Drive"}
@@ -120,14 +170,27 @@ export function WthCertDocument({ paymentId, paymentDate, docNumber, payeeName }
       </div>
       {saveError && <div className="wth-error">⚠️ {saveError}</div>}
 
-      <iframe ref={frameRef} src={pdfUrl} title="หนังสือรับรองหัก ณ ที่จ่าย" className="wth-doc" />
+      {loadError ? (
+        <div className="wth-doc wth-msg">
+          <p>⚠️ {loadError}</p>
+          <a href="/expenses">← กลับไปหน้าบันทึกค่าใช้จ่าย</a>
+        </div>
+      ) : doc ? (
+        <iframe ref={frameRef} src={doc.url} title="หนังสือรับรองหัก ณ ที่จ่าย" className="wth-doc" />
+      ) : (
+        <div className="wth-doc wth-msg">
+          <p>กำลังสร้างเอกสาร…</p>
+        </div>
+      )}
 
-      <p className="wth-fallback">
-        ถ้าเอกสารไม่แสดง{" "}
-        <a href={pdfUrl} target="_blank" rel="noopener noreferrer">
-          เปิด PDF ในแท็บใหม่
-        </a>
-      </p>
+      {doc && (
+        <p className="wth-fallback">
+          ถ้าเอกสารไม่แสดง{" "}
+          <a href={doc.url} target="_blank" rel="noopener noreferrer">
+            เปิด PDF ในแท็บใหม่
+          </a>
+        </p>
+      )}
 
       <style jsx>{`
         .wth-view {
@@ -173,6 +236,20 @@ export function WthCertDocument({ paymentId, paymentDate, docNumber, payeeName }
           width: 100%;
           border: 0;
           background: #e2e8f0;
+        }
+        .wth-msg {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          gap: 0.75rem;
+          color: #334155;
+          font-size: 0.9375rem;
+          text-align: center;
+          padding: 2rem;
+        }
+        .wth-msg a {
+          color: #2563eb;
         }
         .wth-fallback {
           margin: 0;

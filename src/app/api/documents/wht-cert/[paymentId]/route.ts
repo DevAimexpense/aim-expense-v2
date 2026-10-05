@@ -65,6 +65,10 @@ export async function GET(
         "content-type": "application/pdf",
         "content-disposition": `${download ? "attachment" : "inline"}; filename="${filename}"`,
         "cache-control": "no-store",
+        // ให้หน้า viewer ใช้ต่อ (ตั้งชื่อไฟล์ / จัดโฟลเดอร์ตอนบันทึกลง Drive) โดยไม่ต้องโหลดข้อมูลซ้ำ
+        "x-doc-date": data.payment.paymentDate,
+        "x-doc-number": `${data.docNumber.book}-${data.docNumber.number}`,
+        "x-doc-filename": filename,
       },
     });
   } catch (err) {
