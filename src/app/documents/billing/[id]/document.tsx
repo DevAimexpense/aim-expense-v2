@@ -465,13 +465,45 @@ export function BillingDocument({ billingId, org, header, lines }: Props) {
           .no-print {
             display: none !important;
           }
+          /* พิมพ์: ให้ 1 ฉบับ (ต้นฉบับ/สำเนา) อยู่ใน 1 หน้า A4 — ขอบกระดาษใช้ @page แล้ว
+             จึงไม่ต้องมี padding ซ้ำ และบีบระยะห่าง/แถวว่างลง ไม่ให้ช่องลงชื่อล้นไปหน้าใหม่ */
           .doc-page {
             box-shadow: none;
             margin: 0;
-            padding: 1.5rem;
+            padding: 0;
+            max-width: none;
           }
           .doc-page + .doc-page {
             page-break-before: always;
+          }
+          .doc-header {
+            margin-bottom: 0.75rem;
+            padding-bottom: 0.625rem;
+          }
+          .info-grid,
+          .doc-table {
+            margin-bottom: 0.75rem;
+          }
+          .doc-table td {
+            padding-top: 0.25rem;
+            padding-bottom: 0.25rem;
+          }
+          .empty-row td {
+            height: 1.125rem;
+            padding-top: 0;
+            padding-bottom: 0;
+            line-height: 1;
+          }
+          .doc-table tr {
+            break-inside: avoid;
+          }
+          .totals-row {
+            margin-bottom: 0.75rem;
+            break-inside: avoid;
+          }
+          .signatures {
+            margin-top: 1.5rem;
+            break-inside: avoid;
           }
           @page {
             size: A4;
