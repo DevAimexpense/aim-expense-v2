@@ -188,6 +188,12 @@ export function BillingDocument({ billingId, org, header, lines }: Props) {
           ✕ ปิด
         </button>
         <button
+          onClick={() => window.print()}
+          className="app-btn app-btn-secondary"
+        >
+          🖨️ พิมพ์
+        </button>
+        <button
           onClick={handleDownload}
           disabled={downloadState === "downloading"}
           className="app-btn app-btn-primary"

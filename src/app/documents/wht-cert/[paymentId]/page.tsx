@@ -140,6 +140,7 @@ export default async function WthCertPage({
         taxId: org.taxId,
         address: org.address,
         branchInfo: payerBranchInfo,
+        signatureUrl: org.signatureUrl,
       }}
       payee={{
         name: payee?.PayeeName || "",

@@ -190,6 +190,12 @@ export function TaxInvoiceDocument({
           ✕ ปิด
         </button>
         <button
+          onClick={() => window.print()}
+          className="app-btn app-btn-secondary"
+        >
+          🖨️ พิมพ์
+        </button>
+        <button
           onClick={handleDownload}
           disabled={downloadState === "downloading"}
           className="app-btn app-btn-primary"

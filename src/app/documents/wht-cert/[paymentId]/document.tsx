@@ -10,7 +10,13 @@ interface WthCertProps {
   pndForm: "3" | "53"; // ภ.ง.ด.3 (บุคคล) / ภ.ง.ด.53 (นิติบุคคล)
   incomeSection: WhtIncomeSection; // section ในฟอร์มที่ amount จะใส่
   incomeLabel: string; // label ของประเภทเงินได้ (แสดงใน section 5/6)
-  payer: { name: string; taxId: string; address: string; branchInfo: string };
+  payer: {
+    name: string;
+    taxId: string;
+    address: string;
+    branchInfo: string;
+    signatureUrl?: string | null;
+  };
   payee: { name: string; taxId: string; address: string; branchInfo: string };
   payment: {
     paymentId: string;
@@ -86,20 +92,18 @@ export function WthCertDocument({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ช่วย render amount เฉพาะ section ที่ตรง
-  const amt = (forSection: WhtIncomeSection) =>
-    incomeSection === forSection ? formatMoney(payment.totalBeforeTax) : "";
-  const tax = (forSection: WhtIncomeSection) =>
-    incomeSection === forSection ? formatMoney(payment.wthAmount) : "";
-  const dateCol = (forSection: WhtIncomeSection) =>
-    incomeSection === forSection ? formatThaiDate(payment.paymentDate) : "";
+  // ลำดับที่ในแบบ ภ.ง.ด. = ลำดับ running ของเดือน (ส่วนท้ายของเลขที่เอกสาร)
+  const seqInForm = String(parseInt(docNumber.number.split("/")[1] || "1", 10) || 1);
 
-  const CheckBox = ({ checked, children }: { checked: boolean; children: React.ReactNode }) => (
-    <span className="cb">
-      <span className={`cb-box ${checked ? "checked" : ""}`}>{checked ? "✓" : ""}</span>
-      <span>{children}</span>
-    </span>
-  );
+  // วัน เดือน ปี (พ.ศ.) ที่ออกหนังสือรับรอง
+  const issuedDate = new Date(payment.paymentDate);
+  const issued = isNaN(issuedDate.getTime())
+    ? { day: "", month: "", year: "" }
+    : {
+        day: String(issuedDate.getDate()),
+        month: THAI_MONTHS[issuedDate.getMonth()],
+        year: String(issuedDate.getFullYear() + 543),
+      };
 
   return (
     <>
@@ -141,572 +145,120 @@ export function WthCertDocument({
         </div>
       )}
 
+      {/* ฟอร์มทางการของกรมสรรพากร (หนังสือรับรอง 50 ทวิ — approve_wh3_081156) เป็นพื้นหลัง
+          แล้ววางข้อมูลทับตามตำแหน่งช่อง · พิกัดอ้างอิงจากภาพ 2480×3509 px (A4 @300dpi) */}
       <div className="wth-doc">
-        {/* Top: copy info + title + book/number */}
-        <div className="wth-top">
-          <div className="wth-copies">
-            <div>ฉบับที่ 1 (สำหรับผู้ถูกหักภาษี ณ ที่จ่าย ใช้แนบพร้อมกับแบบแสดงรายการภาษี)</div>
-            <div>ฉบับที่ 2 (สำหรับผู้ถูกหักภาษี ณ ที่จ่าย เก็บไว้เป็นหลักฐาน)</div>
-          </div>
-          <div className="wth-title-wrap">
-            <div className="wth-title">หนังสือรับรองการหักภาษี ณ ที่จ่าย</div>
-            <div className="wth-subtitle">ตามมาตรา 50 ทวิ แห่งประมวลรัษฎากร</div>
-          </div>
-          <div className="wth-bn">
-            <div>เล่มที่ <span className="ul">{docNumber.book}</span></div>
-            <div>เลขที่ <span className="ul mono">{docNumber.number}</span></div>
-          </div>
-        </div>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/forms/wht-50tawi.png" alt="" className="wth-bg" />
 
-        {/* Main box with inner border */}
-        <div className="wth-box">
-          {/* ผู้มีหน้าที่หักภาษี ณ ที่จ่าย */}
-          <div className="wth-party">
-            <div className="party-row">
-              <div className="party-label">ผู้มีหน้าที่หักภาษี ณ ที่จ่าย :-</div>
-              <div className="tax-boxes">
-                <span className="tax-boxes-label">เลขประจำตัวผู้เสียภาษีอากร (13 หลัก)</span>
-                <TaxIdBoxes taxId={payer.taxId} />
-              </div>
-            </div>
-            <div className="party-row">
-              <div className="field-label">ชื่อ</div>
-              <div className="field-value">
-                {payer.name}
-                {payer.branchInfo ? ` (${payer.branchInfo})` : ""}
-              </div>
-            </div>
-            <div className="party-hint">(ให้ระบุว่าเป็น บุคคล นิติบุคคล บริษัท สมาคม หรือคณะบุคคล)</div>
-            <div className="party-row">
-              <div className="field-label">ที่อยู่</div>
-              <div className="field-value">{payer.address || "—"}</div>
-            </div>
-            <div className="party-hint">(ให้ระบุชื่ออาคาร/หมู่บ้าน ห้องเลขที่ ชั้น เลขที่ ตรอก/ซอย หมู่ที่ ถนน ตำบล/แขวง อำเภอ/เขต จังหวัด)</div>
-          </div>
+        {/* เล่มที่ / เลขที่ */}
+        <F x={2175} y={256} w={180} h={50}>{docNumber.book}</F>
+        <F x={2175} y={316} w={180} h={50} mono>{docNumber.number}</F>
 
-          {/* ผู้ถูกหักภาษี ณ ที่จ่าย */}
-          <div className="wth-party">
-            <div className="party-row">
-              <div className="party-label">ผู้ถูกหักภาษี ณ ที่จ่าย :-</div>
-              <div className="tax-boxes">
-                <span className="tax-boxes-label">เลขประจำตัวผู้เสียภาษีอากร (13 หลัก)</span>
-                <TaxIdBoxes taxId={payee.taxId} />
-              </div>
-            </div>
-            <div className="party-row">
-              <div className="field-label">ชื่อ</div>
-              <div className="field-value">
-                {payee.name || "—"}
-                {payee.branchInfo ? ` (${payee.branchInfo})` : ""}
-              </div>
-            </div>
-            <div className="party-hint">(ให้ระบุว่าเป็น บุคคล นิติบุคคล บริษัท สมาคม หรือคณะบุคคล)</div>
-            <div className="party-row">
-              <div className="field-label">ที่อยู่</div>
-              <div className="field-value">{payee.address || "—"}</div>
-            </div>
-            <div className="party-hint">(ให้ระบุชื่ออาคาร/หมู่บ้าน ห้องเลขที่ ชั้น เลขที่ ตรอก/ซอย หมู่ที่ ถนน ตำบล/แขวง อำเภอ/เขต จังหวัด)</div>
-          </div>
+        {/* ผู้มีหน้าที่หักภาษี ณ ที่จ่าย */}
+        <TaxIdDigits taxId={payer.taxId} centers={PAYER_TAXID_X} y={403} />
+        <F x={215} y={490} w={1085} h={52}>
+          {payer.name}
+          {payer.branchInfo ? ` (${payer.branchInfo})` : ""}
+        </F>
+        <F x={245} y={586} w={2040} h={52} size={12}>{payer.address}</F>
 
-          {/* ลำดับที่ในแบบ ภ.ง.ด. */}
-          <div className="wth-form-row">
-            <div className="field-label">ลำดับที่ <span className="ul mono">&nbsp;&nbsp;1&nbsp;&nbsp;</span> ในแบบ</div>
-            <div className="form-checks">
-              <CheckBox checked={false}>(1) ภ.ง.ด.1ก</CheckBox>
-              <CheckBox checked={false}>(2) ภ.ง.ด.1ก พิเศษ</CheckBox>
-              <CheckBox checked={false}>(3) ภ.ง.ด.2</CheckBox>
-              <CheckBox checked={pndForm === "3"}>(4) ภ.ง.ด.3</CheckBox>
-              <CheckBox checked={false}>(5) ภ.ง.ด.2ก</CheckBox>
-              <CheckBox checked={false}>(6) ภ.ง.ด.3ก</CheckBox>
-              <CheckBox checked={pndForm === "53"}>(7) ภ.ง.ด.53</CheckBox>
-            </div>
-          </div>
+        {/* ผู้ถูกหักภาษี ณ ที่จ่าย */}
+        <TaxIdDigits taxId={payee.taxId} centers={PAYEE_TAXID_X} y={691} />
+        <F x={215} y={795} w={1090} h={52}>
+          {payee.name}
+          {payee.branchInfo ? ` (${payee.branchInfo})` : ""}
+        </F>
+        <F x={250} y={901} w={2035} h={52} size={12}>{payee.address}</F>
 
-          {/* Detail table */}
-          <table className="wth-table">
-            <thead>
-              <tr>
-                <th style={{ width: "52%" }}>ประเภทเงินได้พึงประเมินที่จ่าย</th>
-                <th style={{ width: "14%" }}>วัน เดือน<br />หรือปีภาษี ที่จ่าย</th>
-                <th style={{ width: "17%" }} className="text-right">จำนวนเงินที่จ่าย</th>
-                <th style={{ width: "17%" }} className="text-right">ภาษีที่หัก<br />และนำส่งไว้</th>
-              </tr>
-            </thead>
-            <tbody>
-              {/* Section 1 — เงินเดือน */}
-              <tr>
-                <td>1. เงินเดือน ค่าจ้าง เบี้ยเลี้ยง โบนัส ฯลฯ ตามมาตรา 40 (1)</td>
-                <td>{dateCol("1")}</td>
-                <td className="text-right num">{amt("1")}</td>
-                <td className="text-right num">{tax("1")}</td>
-              </tr>
-              {/* Section 2 — ค่าธรรมเนียม ค่านายหน้า */}
-              <tr>
-                <td>2. ค่าธรรมเนียม ค่านายหน้า ฯลฯ ตามมาตรา 40 (2)</td>
-                <td>{dateCol("2")}</td>
-                <td className="text-right num">{amt("2")}</td>
-                <td className="text-right num">{tax("2")}</td>
-              </tr>
-              {/* Section 3 — ค่าลิขสิทธิ์ */}
-              <tr>
-                <td>3. ค่าแห่งลิขสิทธิ์ ฯลฯ ตามมาตรา 40 (3)</td>
-                <td>{dateCol("3")}</td>
-                <td className="text-right num">{amt("3")}</td>
-                <td className="text-right num">{tax("3")}</td>
-              </tr>
-              {/* Section 4(a) — ดอกเบี้ย */}
-              <tr>
-                <td>4. (ก) ดอกเบี้ย ฯลฯ ตามมาตรา 40 (4) (ก)</td>
-                <td>{dateCol("4a")}</td>
-                <td className="text-right num">{amt("4a")}</td>
-                <td className="text-right num">{tax("4a")}</td>
-              </tr>
-              {/* Section 4(b) — เงินปันผล */}
-              <tr>
-                <td>
-                  &nbsp;&nbsp;&nbsp;(ข) เงินปันผล เงินส่วนแบ่งกำไร ฯลฯ ตามมาตรา 40 (4) (ข)
-                  <div className="sub-hint">(กรณีผู้ได้รับเงินปันผลได้รับ/ไม่ได้รับเครดิตภาษี — ดูรายละเอียดในฟอร์มทางการ)</div>
-                </td>
-                <td>{dateCol("4b")}</td>
-                <td className="text-right num">{amt("4b")}</td>
-                <td className="text-right num">{tax("4b")}</td>
-              </tr>
-              {/* Section 5 — ตามคำสั่ง 3 เตรส */}
-              <tr>
-                <td>
-                  5. การจ่ายเงินได้ที่ต้องหักภาษี ณ ที่จ่าย ตามคำสั่งกรมสรรพากรที่ออกตามมาตรา 3 เตรส
-                  {incomeSection === "5" && (
-                    <div className="sub-hint">
-                      → {incomeLabel}
-                      {payment.description ? ` • ${payment.description}` : ""}
-                      {payment.eventName ? ` • ${payment.eventName}` : ""}
-                    </div>
-                  )}
-                  <div className="sub-hint" style={{ opacity: 0.75 }}>
-                    เช่น รางวัล ส่วนลด ค่าแสดง ค่าจ้างทำของ ค่าโฆษณา ค่าเช่า ค่าขนส่ง ค่าบริการ ฯลฯ
-                  </div>
-                </td>
-                <td>{dateCol("5")}</td>
-                <td className="text-right num">{amt("5")}</td>
-                <td className="text-right num">{tax("5")}</td>
-              </tr>
-              {/* Section 6 — อื่น ๆ */}
-              <tr>
-                <td>
-                  6. อื่น ๆ (ระบุ)
-                  {incomeSection === "6" && (
-                    <span className="ul" style={{ marginLeft: "0.5rem" }}>
-                      {incomeLabel}
-                      {payment.description ? ` — ${payment.description}` : ""}
-                    </span>
-                  )}
-                </td>
-                <td>{dateCol("6")}</td>
-                <td className="text-right num">{amt("6")}</td>
-                <td className="text-right num">{tax("6")}</td>
-              </tr>
-              {/* รวม */}
-              <tr className="wth-total-row">
-                <td colSpan={2} className="text-right"><strong>รวมเงินที่จ่ายและภาษีที่หักนำส่ง</strong></td>
-                <td className="text-right num"><strong>{formatMoney(payment.totalBeforeTax)}</strong></td>
-                <td className="text-right num"><strong>{formatMoney(payment.wthAmount)}</strong></td>
-              </tr>
-            </tbody>
-          </table>
+        {/* ลำดับที่ + แบบ ภ.ง.ด. */}
+        <F x={322} y={1002} w={250} h={59} align="center" mono middle>{seqInForm}</F>
+        {pndForm === "3" && <Tick x={1968} y={950} />}
+        {pndForm === "53" && <Tick x={1647} y={1027} />}
 
-          {/* รวมเงินภาษีที่หักนำส่ง (ตัวอักษร) */}
-          <div className="wth-words">
-            <span>รวมเงินภาษีที่หักนำส่ง (ตัวอักษร)</span>
-            <span className="ul flex-fill">{bahtText(payment.wthAmount)}</span>
-          </div>
+        {/* ประเภทเงินได้ — ลงเฉพาะบรรทัดที่ตรงกับประเภท */}
+        <MoneyRow
+          y={ROW_Y[incomeSection]}
+          date={formatThaiDate(payment.paymentDate)}
+          amount={payment.totalBeforeTax}
+          tax={payment.wthAmount}
+        />
+        {incomeSection === "6" && (
+          <F x={420} y={2675} w={720} h={48} size={11.5}>
+            {incomeLabel}
+            {payment.description ? ` — ${payment.description}` : ""}
+          </F>
+        )}
 
-          {/* เงินที่จ่ายเข้ากองทุนต่าง ๆ */}
-          <div className="wth-funds">
-            <span>เงินที่จ่ายเข้า กบข./กสจ./กองทุนสงเคราะห์ครูโรงเรียนเอกชน</span>
-            <span className="ul mono" style={{ minWidth: 60 }}>—</span>
-            <span>บาท กองทุนประกันสังคม</span>
-            <span className="ul mono" style={{ minWidth: 60 }}>—</span>
-            <span>บาท กองทุนสำรองเลี้ยงชีพ</span>
-            <span className="ul mono" style={{ minWidth: 60 }}>—</span>
-            <span>บาท</span>
-          </div>
+        {/* รวม */}
+        <MoneyRow y={2756} amount={payment.totalBeforeTax} tax={payment.wthAmount} bold />
+        <F x={785} y={2845} w={1525} h={66} middle>{bahtText(payment.wthAmount)}</F>
 
-          {/* ผู้จ่ายเงิน */}
-          <div className="wth-payer">
-            <div className="field-label">ผู้จ่ายเงิน</div>
-            <div className="form-checks">
-              <CheckBox checked={true}>(1) หัก ณ ที่จ่าย</CheckBox>
-              <CheckBox checked={false}>(2) ออกให้ตลอดไป</CheckBox>
-              <CheckBox checked={false}>(3) ออกให้ครั้งเดียว</CheckBox>
-              <CheckBox checked={false}>(4) อื่น ๆ (ระบุ) ...................</CheckBox>
-            </div>
-          </div>
+        {/* ผู้จ่ายเงิน: (1) หัก ณ ที่จ่าย */}
+        <Tick x={345} y={2960} />
 
-          {/* คำเตือน + ลงชื่อ */}
-          <div className="wth-bottom">
-            <div className="wth-warning">
-              <div className="warn-title">คำเตือน</div>
-              <div>ผู้มีหน้าที่ออกหนังสือรับรองการหักภาษี ณ ที่จ่าย</div>
-              <div>ฝ่าฝืนไม่ปฏิบัติตามมาตรา 50 ทวิ แห่งประมวลรัษฎากร</div>
-              <div>ต้องรับโทษทางอาญาตามมาตรา 35 แห่งประมวลรัษฎากร</div>
-            </div>
-            <div className="wth-confirm">
-              <div className="confirm-text">ขอรับรองว่าข้อความและตัวเลขดังกล่าวข้างต้นถูกต้องตรงกับความจริงทุกประการ</div>
-              <div className="sig-row">
-                <div className="sig-line">ลงชื่อ .................................................................</div>
-                <div className="sig-label">ผู้จ่ายเงิน</div>
-              </div>
-              <div className="sig-date">
-                วันที่ {formatThaiDate(payment.paymentDate)}
-                <span style={{ fontSize: "0.7rem", color: "#64748b", marginLeft: "0.5rem" }}>(วัน เดือน ปีที่ออกหนังสือรับรองฯ)</span>
-              </div>
-              <div className="stamp-placeholder">
-                <div>ประทับตรา<br />นิติบุคคล<br />(ถ้ามี)</div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* หมายเหตุ */}
-        <div className="wth-note">
-          <strong>หมายเหตุ</strong> เลขประจำตัวผู้เสียภาษีอากร (13 หลัก)* หมายถึง
-          <div>1. กรณีบุคคลธรรมดาไทย ให้ใช้เลขประจำตัวประชาชนของกรมการปกครอง</div>
-          <div>2. กรณีนิติบุคคล ให้ใช้เลขทะเบียนนิติบุคคลของกรมพัฒนาธุรกิจการค้า</div>
-          <div>3. กรณีอื่น ๆ นอกเหนือจาก 1. และ 2. ให้ใช้เลขประจำตัวผู้เสียภาษีอากร (13 หลัก) ของกรมสรรพากร</div>
-        </div>
-
-        {/* Footer */}
-        <div className="wth-footer" suppressHydrationWarning>
-          ออกโดยระบบ Aim Expense{printedAt ? ` • ${printedAt}` : ""} • Payment ID: {payment.paymentId}
-        </div>
+        {/* ลงชื่อ + วันที่ออกหนังสือรับรอง */}
+        {payer.signatureUrl && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={payer.signatureUrl}
+            alt=""
+            style={{
+              position: "absolute",
+              left: 1560 * K,
+              top: (3152 - 120) * K,
+              height: 120 * K,
+              maxWidth: 420 * K,
+              objectFit: "contain",
+            }}
+          />
+        )}
+        <F x={1388} y={3194} w={144} h={46} align="center" size={12}>{issued.day}</F>
+        <F x={1543} y={3194} w={219} h={46} align="center" size={12}>{issued.month}</F>
+        <F x={1773} y={3194} w={213} h={46} align="center" size={12}>{issued.year}</F>
       </div>
 
-      <style jsx>{`
+      <div className="wth-footer no-print" suppressHydrationWarning>
+        ออกโดยระบบ Aim Expense{printedAt ? ` • ${printedAt}` : ""} • Payment ID: {payment.paymentId}
+      </div>
+
+      <style jsx global>{`
         .wth-doc {
-          max-width: 210mm;
-          margin: 1.5rem auto;
-          background: white;
-          padding: 1.5rem;
-          box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
-          font-family: "IBM Plex Sans Thai", "Sarabun", sans-serif;
-          color: #0f172a;
-          font-size: 0.8125rem;
-          line-height: 1.5;
-        }
-
-        .wth-top {
-          display: grid;
-          grid-template-columns: 1fr auto 1fr;
-          gap: 1rem;
-          align-items: start;
-          margin-bottom: 1rem;
-        }
-
-        .wth-copies {
-          font-size: 0.6875rem;
-          color: #475569;
-          line-height: 1.5;
-        }
-
-        .wth-title-wrap {
-          text-align: center;
-          white-space: nowrap;
-        }
-
-        .wth-title {
-          font-size: 1.25rem;
-          font-weight: 700;
-        }
-
-        .wth-subtitle {
-          font-size: 0.75rem;
-          color: #475569;
-        }
-
-        .wth-bn {
-          text-align: right;
-          font-size: 0.8125rem;
-          display: grid;
-          gap: 0.25rem;
-        }
-
-        .ul {
-          text-decoration: underline;
-          font-weight: 500;
-          padding: 0 0.25rem;
-        }
-
-        .flex-fill {
-          flex: 1;
-        }
-
-        .mono {
-          font-family: ui-monospace, "Courier New", monospace;
-        }
-
-        .wth-box {
-          border: 1.5px solid #0f172a;
-          padding: 0.75rem;
-        }
-
-        .wth-party {
-          border-bottom: 1px solid #cbd5e1;
-          padding-bottom: 0.5rem;
-          margin-bottom: 0.75rem;
-        }
-
-        .party-row {
-          display: flex;
-          gap: 0.5rem;
-          align-items: baseline;
-          margin-bottom: 0.25rem;
-          flex-wrap: wrap;
-        }
-
-        .party-label {
-          font-weight: 700;
-          font-size: 0.875rem;
-        }
-
-        .field-label {
-          font-weight: 500;
-          min-width: 44px;
-        }
-
-        .field-value {
-          flex: 1;
-          border-bottom: 1px dotted #94a3b8;
-          padding: 0 0.25rem;
-        }
-
-        .party-hint {
-          font-size: 0.6875rem;
-          color: #64748b;
-          font-style: italic;
-          margin: 0.125rem 0 0.375rem 44px;
-        }
-
-        .tax-boxes {
-          display: flex;
-          gap: 0.375rem;
-          align-items: center;
-          margin-left: auto;
-        }
-
-        .tax-boxes-label {
-          font-size: 0.6875rem;
-          color: #475569;
-        }
-
-        .wth-form-row {
-          display: flex;
-          gap: 0.5rem;
-          align-items: center;
-          margin: 0.75rem 0;
-          flex-wrap: wrap;
-        }
-
-        .form-checks {
-          display: flex;
-          gap: 0.875rem;
-          flex-wrap: wrap;
-        }
-
-        .cb {
-          display: inline-flex;
-          gap: 0.3125rem;
-          align-items: center;
-          font-size: 0.8125rem;
-        }
-
-        .cb-box {
-          display: inline-block;
-          width: 14px;
-          height: 14px;
-          border: 1.25px solid #0f172a;
-          text-align: center;
-          line-height: 12px;
-          font-size: 11px;
-          font-weight: 700;
-          color: #0f172a;
-        }
-
-        .cb-box.checked {
-          background: #fff;
-        }
-
-        .wth-table {
-          width: 100%;
-          border-collapse: collapse;
-          margin: 0.75rem 0 0.5rem;
-        }
-
-        .wth-table th {
-          background: #f1f5f9;
-          padding: 0.375rem 0.5rem;
-          border: 1px solid #0f172a;
-          font-size: 0.75rem;
-          font-weight: 600;
-          text-align: left;
-          line-height: 1.3;
-        }
-
-        .wth-table th.text-right,
-        .wth-table td.text-right {
-          text-align: right;
-        }
-
-        .wth-table td {
-          padding: 0.375rem 0.5rem;
-          border: 1px solid #0f172a;
-          font-size: 0.75rem;
-          vertical-align: top;
-          line-height: 1.4;
-        }
-
-        .wth-table .num {
-          font-variant-numeric: tabular-nums;
-        }
-
-        .sub-hint {
-          font-size: 0.6875rem;
-          color: #475569;
-          margin-top: 0.125rem;
-        }
-
-        .wth-total-row {
-          background: #f8fafc;
-        }
-
-        .wth-words {
-          padding: 0.375rem 0.5rem;
-          border: 1px solid #0f172a;
-          border-top: 0;
-          display: flex;
-          gap: 0.5rem;
-          font-size: 0.8125rem;
-          align-items: baseline;
-        }
-
-        .wth-funds {
-          padding: 0.375rem 0.5rem;
-          border: 1px solid #0f172a;
-          border-top: 0;
-          font-size: 0.75rem;
-          display: flex;
-          gap: 0.25rem;
-          align-items: baseline;
-          flex-wrap: wrap;
-        }
-
-        .wth-payer {
-          padding: 0.5rem 0.5rem;
-          border: 1px solid #0f172a;
-          border-top: 0;
-          display: flex;
-          gap: 0.75rem;
-          align-items: center;
-          flex-wrap: wrap;
-        }
-
-        .wth-bottom {
-          display: grid;
-          grid-template-columns: 1fr 1.25fr;
-          gap: 0.5rem;
-          border: 1px solid #0f172a;
-          border-top: 0;
-          padding: 0.5rem;
-        }
-
-        .wth-warning {
-          font-size: 0.6875rem;
-          color: #334155;
-          line-height: 1.5;
-        }
-
-        .warn-title {
-          font-weight: 700;
-          margin-bottom: 0.25rem;
-        }
-
-        .wth-confirm {
           position: relative;
+          width: 794px; /* A4 @96dpi */
+          height: 1122px;
+          margin: 1.5rem auto 0.5rem;
+          background: white;
+          box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+          color: #0f172a;
+          overflow: hidden;
         }
-
-        .confirm-text {
-          font-size: 0.75rem;
-          margin-bottom: 1.5rem;
-        }
-
-        .sig-row {
-          display: flex;
-          gap: 0.375rem;
-          align-items: baseline;
-          margin-bottom: 0.25rem;
-        }
-
-        .sig-line {
-          flex: 1;
-          font-size: 0.8125rem;
-        }
-
-        .sig-label {
-          font-size: 0.8125rem;
-        }
-
-        .sig-date {
-          font-size: 0.8125rem;
-          margin-left: 44px;
-        }
-
-        .stamp-placeholder {
+        .wth-doc .wth-bg {
           position: absolute;
-          bottom: 0;
-          right: 0;
-          width: 80px;
-          height: 80px;
-          border: 1px dashed #94a3b8;
-          border-radius: 50%;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          text-align: center;
-          font-size: 0.5625rem;
-          color: #94a3b8;
-          line-height: 1.3;
+          inset: 0;
+          width: 100%;
+          height: 100%;
         }
-
-        .wth-note {
-          font-size: 0.6875rem;
-          color: #334155;
-          margin-top: 0.75rem;
-          padding: 0.5rem;
-          background: #f8fafc;
-          border-radius: 0.25rem;
-          line-height: 1.6;
-        }
-
         .wth-footer {
-          margin-top: 0.75rem;
           font-size: 0.625rem;
           color: #94a3b8;
           text-align: center;
+          margin-bottom: 1.5rem;
         }
-
         @media print {
+          .no-print {
+            display: none !important;
+          }
           .wth-doc {
             box-shadow: none;
             margin: 0;
-            padding: 0;
-            max-width: 100%;
-            font-size: 0.75rem;
           }
           body {
             background: white !important;
           }
           @page {
             size: A4;
-            margin: 10mm 12mm;
+            margin: 0;
           }
         }
       `}</style>
@@ -714,40 +266,137 @@ export function WthCertDocument({
   );
 }
 
-// 13-box grid for tax ID
-function TaxIdBoxes({ taxId }: { taxId: string }) {
-  const digits = (taxId || "").replace(/\D/g, "").slice(0, 13).padEnd(13, " ");
-  const arr = digits.split("");
+// ===== ตำแหน่งบนฟอร์ม (px ของภาพ 2480×3509) =====
+
+/** อัตราส่วน px จอ : px ภาพฟอร์ม */
+const K = 794 / 2480;
+
+/** กึ่งกลางช่องเลขประจำตัวผู้เสียภาษี 13 หลัก (1-4-5-2-1) */
+const PAYER_TAXID_X = [1585, 1660, 1710, 1760, 1810, 1889, 1939, 1989, 2039, 2089, 2165, 2215, 2294];
+const PAYEE_TAXID_X = [1589, 1664, 1714, 1764, 1814, 1890, 1941, 1992, 2043, 2094, 2166, 2218, 2298];
+
+/** เส้นบรรทัดของแต่ละประเภทเงินได้ (4b ลงที่ (1.4) อัตราอื่น ๆ) */
+const ROW_Y: Record<WhtIncomeSection, number> = {
+  "1": 1285,
+  "2": 1347,
+  "3": 1406,
+  "4a": 1468,
+  "4b": 1889,
+  "5": 2614,
+  "6": 2677,
+};
+
+const THAI_MONTHS = [
+  "มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน",
+  "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม",
+];
+
+/** กล่องข้อความวางทับฟอร์ม — (x, y) = มุมซ้ายล่าง (y คือเส้นบรรทัด), w/h เป็น px ของภาพฟอร์ม */
+function F({
+  x,
+  y,
+  w,
+  h,
+  align = "left",
+  size = 13,
+  mono,
+  bold,
+  middle,
+  children,
+}: {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  align?: "left" | "center" | "right";
+  size?: number;
+  mono?: boolean;
+  bold?: boolean;
+  /** จัดกึ่งกลางแนวตั้ง (ใช้กับข้อความในช่องสี่เหลี่ยม) — ปกติชิดเส้นบรรทัดล่าง */
+  middle?: boolean;
+  children?: React.ReactNode;
+}) {
   return (
-    <span style={{ display: "inline-flex", gap: "1px" }}>
-      {arr.map((d, i) => (
-        <span
-          key={i}
-          style={{
-            display: "inline-block",
-            minWidth: "14px",
-            height: "18px",
-            border: "1px solid #0f172a",
-            textAlign: "center",
-            fontSize: "11px",
-            lineHeight: "16px",
-            fontFamily: "ui-monospace, monospace",
-            padding: "0 1px",
-          }}
-        >
-          {d.trim() || "\u00A0"}
-        </span>
-      ))}
-    </span>
+    <div
+      style={{
+        position: "absolute",
+        left: x * K,
+        top: (y - h) * K,
+        width: w * K,
+        height: h * K,
+        display: "flex",
+        alignItems: middle ? "center" : "flex-end",
+        justifyContent:
+          align === "center" ? "center" : align === "right" ? "flex-end" : "flex-start",
+        fontSize: size,
+        lineHeight: 1.15,
+        fontWeight: bold ? 700 : 500,
+        fontFamily: mono ? "ui-monospace, SFMono-Regular, Menlo, monospace" : undefined,
+        whiteSpace: "nowrap",
+        overflow: "hidden",
+      }}
+    >
+      {children}
+    </div>
   );
 }
 
-function formatMoney(n: number): string {
-  if (!n) return "";
-  return new Intl.NumberFormat("th-TH", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(n);
+/** เครื่องหมายถูกในช่องสี่เหลี่ยม 50×50 — (x, y) = มุมซ้ายบนของช่อง */
+function Tick({ x, y }: { x: number; y: number }) {
+  return (
+    <F x={x} y={y + 50} w={50} h={50} align="center" size={15} bold middle>
+      ✓
+    </F>
+  );
+}
+
+function TaxIdDigits({ taxId, centers, y }: { taxId: string; centers: number[]; y: number }) {
+  const digits = (taxId || "").replace(/\D/g, "").slice(0, 13).split("");
+  return (
+    <>
+      {digits.map((d, i) => (
+        <F key={i} x={centers[i] - 25} y={y + 2} w={50} h={58} align="center" size={14} mono middle>
+          {d}
+        </F>
+      ))}
+    </>
+  );
+}
+
+/** แถวตัวเลข: วันที่ | จำนวนเงิน (บาท | สตางค์) | ภาษี (บาท | สตางค์) */
+function MoneyRow({
+  y,
+  date,
+  amount,
+  tax,
+  bold,
+}: {
+  y: number;
+  date?: string;
+  amount: number;
+  tax: number;
+  bold?: boolean;
+}) {
+  const a = splitMoney(amount);
+  const t = splitMoney(tax);
+  const yy = y - 3;
+  return (
+    <>
+      {date && <F x={1364} y={yy} w={325} h={48} align="center" size={11.5}>{date}</F>}
+      <F x={1695} y={yy} w={278} h={48} align="right" size={12} bold={bold}>{a.baht}</F>
+      <F x={1981} y={yy} w={61} h={48} align="center" size={12} bold={bold}>{a.satang}</F>
+      <F x={2048} y={yy} w={221} h={48} align="right" size={12} bold={bold}>{t.baht}</F>
+      <F x={2277} y={yy} w={59} h={48} align="center" size={12} bold={bold}>{t.satang}</F>
+    </>
+  );
+}
+
+function splitMoney(n: number): { baht: string; satang: string } {
+  const cents = Math.round((n || 0) * 100);
+  return {
+    baht: Math.floor(cents / 100).toLocaleString("en-US"),
+    satang: String(cents % 100).padStart(2, "0"),
+  };
 }
 
 function bahtText(n: number): string {
