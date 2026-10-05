@@ -7,6 +7,8 @@
 import { google, sheets_v4 } from "googleapis";
 import {
   SHEETS_TTL_SEC,
+  ttlForTab,
+  setCache,
   getOrFetch,
   invalidateTab,
   mgetCache,
@@ -332,6 +334,58 @@ export const DEFAULT_BANKS = [
  * GoogleSheetsService
  * ทุก method ใช้ owner's OAuth token เพื่อ access Google Sheets
  */
+/**
+ * ค่าที่เก็บใน cache ต่อ 1 แท็บ = แถวดิบจาก Sheets (แถวแรกคือ header)
+ * เดิมเก็บเป็น array ของ object → ชื่อคอลัมน์ซ้ำทุกแถว (Payments มี ~60 คอลัมน์)
+ * ทำให้ payload ที่วิ่งไป-กลับ Redis ใหญ่กว่าที่จำเป็นหลายเท่า
+ * (ยังอ่านรูปแบบเดิมได้ — ค่าที่ค้างใน cache ตอน deploy จะหมดอายุเอง)
+ */
+type CachedTab = string[][] | Record<string, string>[];
+
+function rowsToRecords(cached: CachedTab): Record<string, string>[] {
+  if (!cached || cached.length === 0) return [];
+  if (!Array.isArray(cached[0])) return cached as Record<string, string>[]; // legacy shape
+  const rows = cached as string[][];
+  if (rows.length < 2) return [];
+  const headers = rows[0];
+  return rows.slice(1).map((row) => {
+    const record: Record<string, string> = {};
+    headers.forEach((header, i) => {
+      record[header] = row[i] || "";
+    });
+    return record;
+  });
+}
+
+function isQuotaError(err: unknown): boolean {
+  const e = err as { code?: number; status?: number; message?: string } | null;
+  if (e?.code === 429 || e?.status === 429) return true;
+  return /Quota exceeded|rateLimitExceeded|RESOURCE_EXHAUSTED|Too Many Requests/i.test(
+    e?.message || String(err),
+  );
+}
+
+/**
+ * อ่านซ้ำเมื่อชนโควตา "Read requests per minute" ของ Sheets API (รอ 1.2s แล้ว 4s)
+ * แทนที่จะโยน error ให้ผู้ใช้ทันที — ใช้กับ read เท่านั้น (ปลอดภัยที่จะทำซ้ำ)
+ */
+async function withQuotaRetry<T>(fn: () => Promise<T>): Promise<T> {
+  const delays = [1200, 4000];
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      if (!isQuotaError(err)) throw err;
+      if (attempt >= delays.length) {
+        throw new Error(
+          "Google Sheets รับคำขอถี่เกินไปชั่วคราว — รอสักครู่แล้วลองใหม่อีกครั้ง",
+        );
+      }
+      await new Promise((r) => setTimeout(r, delays[attempt]));
+    }
+  }
+}
+
 export class GoogleSheetsService {
   private sheets: sheets_v4.Sheets;
   private spreadsheetId: string;
@@ -457,6 +511,8 @@ export class GoogleSheetsService {
   async ensureAllTabsExist(): Promise<{ added: string[]; columnsAdded: Record<string, string[]> }> {
     const meta = await this.sheets.spreadsheets.get({
       spreadsheetId: this.spreadsheetId,
+      // เอาเฉพาะที่ใช้ — ไม่ดึง metadata ทั้งไฟล์
+      fields: "sheets.properties(sheetId,title,gridProperties.columnCount)",
     });
     const existingTabs = new Set(
       (meta.data.sheets || []).map((s) => s.properties?.title).filter(Boolean) as string[]
@@ -609,33 +665,24 @@ export class GoogleSheetsService {
    * API; cache backend errors fail open.
    */
   async getAll(tabName: string): Promise<Record<string, string>[]> {
-    return getOrFetch(
+    const raw = await getOrFetch<CachedTab>(
       sheetsTabKey(this.spreadsheetId, tabName),
-      SHEETS_TTL_SEC,
-      () => this.getAllUncached(tabName),
+      ttlForTab(tabName),
+      () => this.getRowsUncached(tabName),
     );
+    return rowsToRecords(raw);
   }
 
-  private async getAllUncached(
-    tabName: string,
-  ): Promise<Record<string, string>[]> {
+  /** อ่านทั้งแท็บจาก Google เป็นแถวดิบ (แถวแรก = header) */
+  private async getRowsUncached(tabName: string): Promise<string[][]> {
     console.log(`[sheets-api] get tab=${tabName}`);
-    const response = await this.sheets.spreadsheets.values.get({
-      spreadsheetId: this.spreadsheetId,
-      range: `${tabName}!A:ZZ`,
-    });
-
-    const rows = response.data.values;
-    if (!rows || rows.length < 2) return [];
-
-    const headers = rows[0];
-    return rows.slice(1).map((row) => {
-      const record: Record<string, string> = {};
-      headers.forEach((header, i) => {
-        record[header] = row[i] || "";
-      });
-      return record;
-    });
+    const response = await withQuotaRetry(() =>
+      this.sheets.spreadsheets.values.get({
+        spreadsheetId: this.spreadsheetId,
+        range: `${tabName}!A:ZZ`,
+      }),
+    );
+    return (response.data.values as string[][] | undefined) || [];
   }
 
   /**
@@ -655,11 +702,11 @@ export class GoogleSheetsService {
 
     // Try cache first — single Redis MGET round-trip
     const keys = tabNames.map((t) => sheetsTabKey(this.spreadsheetId, t));
-    const cached = await mgetCache<Record<string, string>[]>(keys);
+    const cached = await mgetCache<CachedTab>(keys);
     if (cached.every((v) => v !== null)) {
       const out: Record<string, Record<string, string>[]> = {};
       tabNames.forEach((t, i) => {
-        out[t] = cached[i] as Record<string, string>[];
+        out[t] = rowsToRecords(cached[i] as CachedTab);
       });
       return out;
     }
@@ -668,39 +715,27 @@ export class GoogleSheetsService {
     // mixing per-tab calls), then warm the cache for next time
     console.log(`[sheets-api] batchGet tabs=${tabNames.join(",")}`);
     const ranges = tabNames.map((t) => `${t}!A:ZZ`);
-    const response = await this.sheets.spreadsheets.values.batchGet({
-      spreadsheetId: this.spreadsheetId,
-      ranges,
-    });
+    const response = await withQuotaRetry(() =>
+      this.sheets.spreadsheets.values.batchGet({
+        spreadsheetId: this.spreadsheetId,
+        ranges,
+      }),
+    );
 
     const valueRanges = response.data.valueRanges || [];
     const result: Record<string, Record<string, string>[]> = {};
-
+    const rawByTab: Record<string, string[][]> = {};
     for (let i = 0; i < tabNames.length; i++) {
-      const tabName = tabNames[i];
       const rows = (valueRanges[i]?.values as string[][] | undefined) || [];
-      if (rows.length < 2) {
-        result[tabName] = [];
-        continue;
-      }
-      const headers = rows[0];
-      result[tabName] = rows.slice(1).map((row) => {
-        const record: Record<string, string> = {};
-        headers.forEach((header, idx) => {
-          record[header] = row[idx] || "";
-        });
-        return record;
-      });
+      rawByTab[tabNames[i]] = rows;
+      result[tabNames[i]] = rowsToRecords(rows);
     }
 
-    // Warm cache (best-effort, fire-and-forget OK but await for consistency
-    // so a follow-up read in the same request sees the cached value)
-    await msetCache(
-      tabNames.map((t) => ({
-        key: sheetsTabKey(this.spreadsheetId, t),
-        value: result[t],
-      })),
-      SHEETS_TTL_SEC,
+    // Warm cache (แถวดิบ, TTL ต่อแท็บ) — await ให้ read ถัดไปใน request เดียวกันเห็นค่า
+    await Promise.all(
+      tabNames.map((t) =>
+        setCache(sheetsTabKey(this.spreadsheetId, t), rawByTab[t], ttlForTab(t)),
+      ),
     );
 
     return result;

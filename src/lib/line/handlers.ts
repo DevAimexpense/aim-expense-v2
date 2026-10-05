@@ -524,7 +524,7 @@ async function pushProjectPicker(
   const activeAssignedEvents = pickable.slice(0, 12);
 
   if (activeAssignedEvents.length === 0) {
-    const defaults = await ensureLineDefaults(sheets);
+    const defaults = await ensureLineDefaults(sheets, org.orgId);
     await prisma.lineDraft.update({
       where: { id: draftId },
       data: { eventId: defaults.eventId, eventName: "LINE (ไม่ระบุโปรเจกต์)" } as Record<string, unknown>,
@@ -603,7 +603,7 @@ async function processMediaAsync(
     let eventId = opts.eventId || "";
     let eventName = opts.eventName || "LINE (กลุ่ม)";
     if (!eventId) {
-      const defaults = await ensureLineDefaults(sheets);
+      const defaults = await ensureLineDefaults(sheets, ctx.orgId);
       eventId = defaults.eventId;
       eventName = "LINE (กลุ่ม)";
     }
@@ -709,7 +709,7 @@ async function processTextExpenseAsync(
     let eventName = opts.eventName || "LINE (กลุ่ม)";
     if (!eventId) {
       const sheetsForDefault = await getSheetsService(ctx.orgId);
-      const defaults = await ensureLineDefaults(sheetsForDefault);
+      const defaults = await ensureLineDefaults(sheetsForDefault, ctx.orgId);
       eventId = defaults.eventId;
       eventName = "LINE (กลุ่ม)";
     }
@@ -927,11 +927,10 @@ async function confirmDraftAsync(draft: {
 
   // Get services
   const sheets = await getSheetsService(draft.orgId);
-  await sheets.ensureAllTabsExist();
   const { drive, receiptsFolderId, orgName } = await getDriveService(draft.orgId);
 
   // Find or create payee
-  const defaults = await ensureLineDefaults(sheets);
+  const defaults = await ensureLineDefaults(sheets, draft.orgId);
   let payeeId = defaults.payeeId;
   let vendorTaxIdSnapshot = "";
   let vendorBranchInfo = "";

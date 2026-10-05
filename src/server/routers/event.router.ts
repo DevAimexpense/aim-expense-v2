@@ -24,10 +24,14 @@ export const eventRouter = router({
    */
   list: orgProcedure.query(async ({ ctx }) => {
     const sheets = await getSheetsService(ctx.org.orgId);
-    const allEvents = await sheets.getEvents();
-    const payments = await sheets.getPayments();
-    // Income booked into each project (personal: รายรับ → ก้อนเงินที่เบิกใช้).
-    const billings = await sheets.getBillings();
+    // อ่าน 3 แท็บพร้อมกัน (เดิมรอทีละแท็บ — event.list ถูกโหลดเกือบทุกหน้า
+    // และ httpBatchLink ต้องรอ query ที่ช้าที่สุดก่อนคืนทั้ง batch)
+    // billings = income booked into each project (personal: รายรับ → ก้อนเงินที่เบิกใช้)
+    const [allEvents, payments, billings] = await Promise.all([
+      sheets.getEvents(),
+      sheets.getPayments(),
+      sheets.getBillings(),
+    ]);
 
     // Project-scoped roles (e.g. project_manager) only see assigned events.
     const scope = scopedEventIds(ctx.org);

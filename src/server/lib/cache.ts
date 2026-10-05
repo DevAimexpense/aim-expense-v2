@@ -30,7 +30,35 @@ const redis: Redis | null = (() => {
 })();
 
 /** Default TTL for sheet-tab cache entries (seconds). */
-export const SHEETS_TTL_SEC = 30;
+export const SHEETS_TTL_SEC = 60;
+
+/**
+ * TTL ต่อแท็บ (วินาที) — ทุก write ผ่าน GoogleSheetsService ล้าง cache ของแท็บนั้นอยู่แล้ว
+ * TTL จึงเป็นแค่ตาข่ายสำหรับกรณีมีคนแก้ Sheet ตรง ๆ นอกแอป
+ * (เดิม 30s ทุกแท็บ → เปิดหน้าค้างเกินครึ่งนาทีก็ต้องดึงจาก Google ใหม่ทั้งแท็บ)
+ *   - ข้อมูลหลักที่นาน ๆ แก้ที: 5 นาที
+ *   - รายการเคลื่อนไหว: 90 วินาที
+ */
+const TAB_TTL_SEC: Record<string, number> = {
+  Events: 300,
+  Payees: 300,
+  Banks: 300,
+  CompanyBanks: 300,
+  Customers: 300,
+  Config: 300,
+  EventAssignments: 300,
+  Payments: 90,
+  Quotations: 90,
+  QuotationLines: 90,
+  Billings: 90,
+  BillingLines: 90,
+  TaxInvoices: 90,
+  TaxInvoiceLines: 90,
+};
+
+export function ttlForTab(tabName: string): number {
+  return TAB_TTL_SEC[tabName] ?? SHEETS_TTL_SEC;
+}
 
 /** Whether the cache backend is wired up. */
 export function isCacheEnabled(): boolean {
@@ -124,12 +152,27 @@ export async function getOrFetch<T>(
   ttlSec: number,
   fetcher: () => Promise<T>,
 ): Promise<T> {
-  const cached = await getCache<T>(key);
-  if (cached !== null) return cached;
-  const fresh = await fetcher();
-  await setCache(key, fresh, ttlSec);
-  return fresh;
+  // In-flight dedupe: หลาย query ใน batch เดียวกันที่อ่านแท็บเดียวกันตอน cache miss
+  // (เช่น payment.list + event.list อ่าน Payments ทั้งคู่) ใช้คำขอไป Google ร่วมกัน
+  const pending = inflight.get(key) as Promise<T> | undefined;
+  if (pending) return pending;
+
+  const run = (async () => {
+    const cached = await getCache<T>(key);
+    if (cached !== null) return cached;
+    const fresh = await fetcher();
+    await setCache(key, fresh, ttlSec);
+    return fresh;
+  })();
+  inflight.set(key, run);
+  try {
+    return await run;
+  } finally {
+    inflight.delete(key);
+  }
 }
+
+const inflight = new Map<string, Promise<unknown>>();
 
 // ===== Sheet-tab key helpers =====
 //

@@ -2,6 +2,7 @@
 // Get-or-create default Event + Payee for LINE quick capture
 // ===========================================
 
+import { ensureTabsCached } from "@/server/lib/sheets-context";
 import {
   GoogleSheetsService,
   SHEET_TABS,
@@ -20,9 +21,11 @@ export interface LineDefaults {
  * Creates them if missing.
  */
 export async function ensureLineDefaults(
-  sheets: GoogleSheetsService
+  sheets: GoogleSheetsService,
+  orgId: string
 ): Promise<LineDefaults> {
-  await sheets.ensureAllTabsExist();
+  // ตรวจแท็บ/คอลัมน์แบบ cached (เดิมตรวจเต็มทุกครั้งที่มีข้อความ LINE เข้า)
+  await ensureTabsCached(sheets, orgId);
 
   // Find or create event
   const events = await sheets.getAll(SHEET_TABS.EVENTS);

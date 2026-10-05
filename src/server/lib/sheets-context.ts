@@ -3,6 +3,8 @@
 // Auto-refresh access token if expired
 // ===========================================
 
+import { getCache, setCache } from "@/server/lib/cache";
+import { SHEET_HEADERS } from "../services/google-sheets.service";
 import { prisma } from "@/lib/prisma";
 import { decryptToken, encryptToken } from "@/lib/google/token-encryption";
 import { refreshAccessToken } from "@/lib/google/oauth";
@@ -132,9 +134,41 @@ export async function ensureTabsCached(
 ): Promise<void> {
   const last = ensuredOrgs.get(orgId);
   if (last && Date.now() - last < TAB_CACHE_MS) return;
-  await sheets.ensureAllTabsExist();
-  ensuredOrgs.set(orgId, Date.now());
+
+  // หลาย query ใน batch เดียวกันบน instance ใหม่ → ตรวจครั้งเดียวร่วมกัน
+  const pending = ensuring.get(orgId);
+  if (pending) return pending;
+
+  const run = (async () => {
+    // ผลตรวจเก็บใน Redis (ข้าม instance) ผูกกับ "รุ่นของ schema" —
+    // instance ใหม่/cold start ไม่ต้องยิง Google ซ้ำ ถ้า schema รุ่นนี้เคยตรวจ org นี้แล้ว
+    // deploy ที่เพิ่มคอลัมน์/แท็บ = hash เปลี่ยน → ตรวจใหม่อัตโนมัติ
+    const key = `sheets:schema-ok:${orgId}:${SCHEMA_VERSION}`;
+    const known = await getCache<number>(key);
+    if (!known) {
+      await sheets.ensureAllTabsExist();
+      await setCache(key, Date.now(), SCHEMA_OK_TTL_SEC);
+    }
+    ensuredOrgs.set(orgId, Date.now());
+  })();
+  ensuring.set(orgId, run);
+  try {
+    await run;
+  } finally {
+    ensuring.delete(orgId);
+  }
 }
+
+const ensuring = new Map<string, Promise<void>>();
+const SCHEMA_OK_TTL_SEC = 6 * 60 * 60; // 6 ชม.
+
+/** hash ของชื่อแท็บ + header ทั้งหมด — เปลี่ยนเมื่อ schema ในโค้ดเปลี่ยน */
+const SCHEMA_VERSION = (() => {
+  const text = JSON.stringify(SHEET_HEADERS);
+  let h = 5381;
+  for (let i = 0; i < text.length; i++) h = ((h << 5) + h + text.charCodeAt(i)) | 0;
+  return (h >>> 0).toString(36);
+})();
 
 /**
  * Get GoogleDriveService instance for an org

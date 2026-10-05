@@ -19,6 +19,8 @@ export function TRPCProvider({ children }: { children: React.ReactNode }) {
           queries: {
             staleTime: 5 * 60 * 1000, // 5 minutes
             refetchOnWindowFocus: false,
+            // default = 3 ครั้ง (รอ 1s+2s+4s) — query ที่พลาดจะค้างหมุน ~7 วินาทีก่อนแสดง error
+            retry: 1,
           },
         },
       })
