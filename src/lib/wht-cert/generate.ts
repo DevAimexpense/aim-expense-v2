@@ -88,6 +88,23 @@ function fit(font: PDFFont, text: string, size: number, maxWidth: number): strin
   return t + "…";
 }
 
+/**
+ * ย่อขนาดตัวอักษรอัตโนมัติให้ข้อความพอดีช่อง (ลดทีละ 0.25pt จนถึง minSize)
+ * ถ้าย่อสุดแล้วยังยาวเกิน จึงตัดท้ายด้วย … — ไม่ล้นออกนอกกรอบแน่นอน
+ */
+function shrink(
+  font: PDFFont,
+  text: string,
+  size: number,
+  maxWidth: number,
+  minSize = 5.5
+): { text: string; size: number } {
+  const t = (text || "").replace(/\s+/g, " ").trim();
+  let sz = size;
+  while (sz > minSize && font.widthOfTextAtSize(t, sz) > maxWidth) sz -= 0.25;
+  return { text: fit(font, t, sz, maxWidth), size: sz };
+}
+
 // ===== จำนวนเงินเป็นตัวอักษร =====
 
 function numberToThai(n: number): string {
@@ -143,6 +160,11 @@ export async function generateWhtCertPdf(data: WhtCertPdfData): Promise<Uint8Arr
   const right = (t: string, rxPx: number, yPx: number, size = 10, f: PDFFont = font) =>
     page.drawText(t, { x: X(rxPx) - f.widthOfTextAtSize(t, size), y: Y(yPx), size, font: f, color: INK });
   const pxw = (px: number) => (px * 595) / 2480;
+  /** ข้อความชิดซ้ายที่ต้องจบก่อน endPx — ยาวเกินจะย่อตัวอักษรลงอัตโนมัติ */
+  const leftFit = (t: string, xPx: number, yPx: number, endPx: number, size = 10) => {
+    const r = shrink(font, t, size, pxw(endPx - xPx));
+    left(r.text, xPx, yPx, r.size);
+  };
 
   const drawId = (id: string, centers: number[], baselinePx: number) => {
     (id || "").replace(/\D/g, "").slice(0, 13).split("").forEach((ch, i) => {
@@ -172,13 +194,13 @@ export async function generateWhtCertPdf(data: WhtCertPdfData): Promise<Uint8Arr
 
   // ผู้มีหน้าที่หักภาษี ณ ที่จ่าย
   drawId(data.payer.taxId, PAYER_ID_X, 392);
-  left(fit(font, data.payer.name, 10, pxw(1080)), 215, 462);
-  left(fit(font, data.payer.address, 9, pxw(2030)), 245, 559, 9);
+  leftFit(data.payer.name, 215, 462, 1290);
+  leftFit(data.payer.address, 245, 559, 2270, 9);
 
   // ผู้ถูกหักภาษี ณ ที่จ่าย
   drawId(data.payee.taxId, PAYEE_ID_X, 680);
-  left(fit(font, data.payee.name, 10, pxw(1085)), 215, 766);
-  left(fit(font, data.payee.address, 9, pxw(2025)), 250, 875, 9);
+  leftFit(data.payee.name, 215, 766, 1295);
+  leftFit(data.payee.address, 250, 875, 2270, 9);
 
   // ลำดับที่ + แบบ ภ.ง.ด.
   center(data.sequenceNo, 447, 987, 11, bold);
@@ -190,12 +212,12 @@ export async function generateWhtCertPdf(data: WhtCertPdfData): Promise<Uint8Arr
   center(thaiDate(data.paidDate), 1526, rowBase, 9.5);
   moneyRow(rowBase, data.amount, data.tax, font);
   if (data.incomeSection === "6" && data.incomeNote) {
-    left(fit(font, data.incomeNote, 9.5, pxw(720)), 420, 2667, 9.5);
+    leftFit(data.incomeNote, 420, 2667, 1140, 9.5);
   }
 
   // รวม + ตัวอักษร
   moneyRow(2742, data.amount, data.tax, bold);
-  left(fit(font, bahtText(data.tax), 10, pxw(1520)), 785, 2826);
+  leftFit(bahtText(data.tax), 785, 2826, 2300);
 
   // ผู้จ่ายเงิน: (1) หัก ณ ที่จ่าย
   tick(369, 2985);
