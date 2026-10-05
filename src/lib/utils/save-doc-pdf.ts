@@ -43,11 +43,23 @@ async function waitForElement(selector: string, maxWaitMs = 10000): Promise<HTML
  */
 export async function saveDocumentPdf(options: {
   selector: string;
+  /** ถ้าระบุ: ใช้ PDF ที่ server สร้าง (vector) แทนการ capture หน้าจอด้วย html2canvas */
+  pdfUrl?: string;
   paymentId: string;
   docType: "wht-cert" | "substitute-receipt" | "receipt-voucher";
   docDate: string;
   onStage?: (stage: "waiting" | "capturing" | "uploading" | "done") => void;
 }): Promise<{ fileUrl: string; fileName: string; folderPath: string }> {
+  if (options.pdfUrl) {
+    options.onStage?.("capturing");
+    const pdfRes = await fetch(options.pdfUrl, { cache: "no-store" });
+    if (!pdfRes.ok) {
+      const d = await pdfRes.json().catch(() => ({}));
+      throw new Error(d.error || "สร้าง PDF ไม่สำเร็จ");
+    }
+    return uploadDocumentPdf(await pdfRes.blob(), options);
+  }
+
   options.onStage?.("waiting");
   await waitForDomReady();
   const element = await waitForElement(options.selector, 10000);
@@ -98,8 +110,19 @@ export async function saveDocumentPdf(options: {
     }
   }
 
-  // Blob → FormData → POST
-  const blob = pdf.output("blob");
+  return uploadDocumentPdf(pdf.output("blob"), options);
+}
+
+/** Blob → FormData → POST /api/documents/save-pdf */
+async function uploadDocumentPdf(
+  blob: Blob,
+  options: {
+    paymentId: string;
+    docType: "wht-cert" | "substitute-receipt" | "receipt-voucher";
+    docDate: string;
+    onStage?: (stage: "waiting" | "capturing" | "uploading" | "done") => void;
+  }
+): Promise<{ fileUrl: string; fileName: string; folderPath: string }> {
   const fd = new FormData();
   fd.append("file", new File([blob], `${options.docType}.pdf`, { type: "application/pdf" }));
   fd.append("paymentId", options.paymentId);
@@ -129,6 +152,7 @@ const __autoSaveStarted = new Set<string>();
  */
 export async function runAutoSaveIfRequested(params: {
   selector: string;
+  pdfUrl?: string;
   paymentId: string;
   docType: "wht-cert" | "substitute-receipt" | "receipt-voucher";
   docDate: string;
@@ -176,6 +200,7 @@ export async function runAutoSaveIfRequested(params: {
   try {
     const result = await saveDocumentPdf({
       selector: params.selector,
+      pdfUrl: params.pdfUrl,
       paymentId: params.paymentId,
       docType: params.docType,
       docDate: params.docDate,

@@ -5,6 +5,10 @@ const nextConfig = {
   reactStrictMode: true,
   experimental: {
     serverComponentsExternalPackages: ["pdf-parse", "pdfjs-dist", "unpdf", "sharp", "tesseract.js"],
+    // ฟอร์ม 50 ทวิ + ฟอนต์ Sarabun ถูกอ่านด้วย fs ตอน runtime (src/lib/wht-cert/generate.ts)
+    outputFileTracingIncludes: {
+      "/api/documents/wht-cert/[paymentId]": ["./public/forms/**", "./public/fonts/**"],
+    },
   },
 };
 
