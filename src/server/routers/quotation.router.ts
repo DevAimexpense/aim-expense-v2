@@ -292,9 +292,9 @@ export const quotationRouter = router({
         });
 
         // 3. Lines
-        for (let i = 0; i < input.lines.length; i++) {
-          const l = input.lines[i];
-          await sheets.appendRowByHeaders(SHEET_TABS.QUOTATION_LINES, {
+        await sheets.appendRowsByHeaders(
+          SHEET_TABS.QUOTATION_LINES,
+          input.lines.map((l, i) => ({
             LineID: GoogleSheetsService.generateId("QTL"),
             QuotationID: quotationId,
             LineNumber: i + 1,
@@ -304,8 +304,8 @@ export const quotationRouter = router({
             DiscountPercent: l.discountPercent,
             LineTotal: totals.lineTotals[i],
             Notes: l.notes || "",
-          });
-        }
+          }))
+        );
       } catch (e) {
         // Cleanup: try to delete header to avoid orphan
         try {
@@ -315,14 +315,11 @@ export const quotationRouter = router({
             quotationId
           );
           // Best-effort delete of any lines that were written
-          const orphanLines = await sheets.getQuotationLines(quotationId);
-          for (const ol of orphanLines) {
-            await sheets.deleteById(
-              SHEET_TABS.QUOTATION_LINES,
-              "LineID",
-              ol.LineID
-            );
-          }
+          await sheets.deleteRowsWhere(
+            SHEET_TABS.QUOTATION_LINES,
+            "QuotationID",
+            quotationId
+          );
         } catch {
           /* ignore cleanup errors */
         }
@@ -405,17 +402,14 @@ export const quotationRouter = router({
       );
 
       // Delete existing lines + reinsert
-      const oldLines = await sheets.getQuotationLines(input.quotationId);
-      for (const ol of oldLines) {
-        await sheets.deleteById(
+      await sheets.deleteRowsWhere(
+            SHEET_TABS.QUOTATION_LINES,
+            "QuotationID",
+            input.quotationId
+          );
+      await sheets.appendRowsByHeaders(
           SHEET_TABS.QUOTATION_LINES,
-          "LineID",
-          ol.LineID
-        );
-      }
-      for (let i = 0; i < input.lines.length; i++) {
-        const l = input.lines[i];
-        await sheets.appendRowByHeaders(SHEET_TABS.QUOTATION_LINES, {
+          input.lines.map((l, i) => ({
           LineID: GoogleSheetsService.generateId("QTL"),
           QuotationID: input.quotationId,
           LineNumber: i + 1,
@@ -425,8 +419,8 @@ export const quotationRouter = router({
           DiscountPercent: l.discountPercent,
           LineTotal: totals.lineTotals[i],
           Notes: l.notes || "",
-        });
-      }
+        }))
+        );
 
       await prisma.auditLog.create({
         data: {
@@ -634,9 +628,9 @@ export const quotationRouter = router({
           PdfUrl: "",
         });
 
-        for (let i = 0; i < qLines.length; i++) {
-          const ql = qLines[i];
-          await sheets.appendRowByHeaders(SHEET_TABS.BILLING_LINES, {
+        await sheets.appendRowsByHeaders(
+          SHEET_TABS.BILLING_LINES,
+          qLines.map((ql, i) => ({
             LineID: GoogleSheetsService.generateId("BILL"),
             BillingID: billingId,
             LineNumber: i + 1,
@@ -646,20 +640,17 @@ export const quotationRouter = router({
             DiscountPercent: parseFloat(ql.DiscountPercent) || 0,
             LineTotal: parseFloat(ql.LineTotal) || 0,
             Notes: ql.Notes || "",
-          });
-        }
+          }))
+        );
       } catch (e) {
         // Cleanup orphan billing
         try {
           await sheets.deleteById(SHEET_TABS.BILLINGS, "BillingID", billingId);
-          const orphans = await sheets.getBillingLines(billingId);
-          for (const ol of orphans) {
-            await sheets.deleteById(
-              SHEET_TABS.BILLING_LINES,
-              "LineID",
-              ol.LineID
-            );
-          }
+          await sheets.deleteRowsWhere(
+            SHEET_TABS.BILLING_LINES,
+            "BillingID",
+            billingId
+          );
         } catch {
           /* ignore */
         }

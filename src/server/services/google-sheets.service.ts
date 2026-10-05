@@ -791,6 +791,95 @@ export class GoogleSheetsService {
   }
 
   /**
+   * เพิ่มหลายแถวในคำขอเดียว โดยแมปตาม header จริงของ Sheet
+   * (อ่าน header 1 ครั้ง + append 1 ครั้ง — เดิม appendRowByHeaders ทีละแถว = 2 requests ต่อแถว)
+   * ใช้กับรายการสินค้า/บริการของเอกสาร (lines)
+   */
+  async appendRowsByHeaders(
+    tabName: string,
+    rows: Record<string, string | number | boolean>[]
+  ): Promise<void> {
+    if (rows.length === 0) return;
+    const headerResponse = await this.sheets.spreadsheets.values.get({
+      spreadsheetId: this.spreadsheetId,
+      range: `${tabName}!1:1`,
+    });
+    const sheetHeaders = headerResponse.data.values?.[0] as string[] | undefined;
+    if (!sheetHeaders || sheetHeaders.length === 0) {
+      throw new Error(
+        `Sheet "${tabName}" ไม่มี header row — โปรดเรียก ensureAllTabsExist() ก่อน`
+      );
+    }
+    const values = rows.map((data) =>
+      sheetHeaders.map((header) => {
+        const value = data[header];
+        if (value === undefined || value === null) return "";
+        if (typeof value === "boolean") return value ? "TRUE" : "FALSE";
+        return preserveLeadingZeros(value);
+      })
+    );
+    await this.appendRows(tabName, values);
+  }
+
+  /**
+   * ลบทุกแถวที่ column == value ในคำขอเดียว (เช่น ลบ lines ทั้งหมดของเอกสารหนึ่งใบ)
+   * อ่านแท็บ 1 ครั้ง + batchUpdate 1 ครั้ง — เดิม deleteById ทีละแถว = 3 requests ต่อแถว
+   * @returns จำนวนแถวที่ลบ
+   */
+  async deleteRowsWhere(
+    tabName: string,
+    column: string,
+    value: string
+  ): Promise<number> {
+    if (!value) return 0;
+    const response = await this.sheets.spreadsheets.values.get({
+      spreadsheetId: this.spreadsheetId,
+      range: `${tabName}!A:ZZ`,
+    });
+    const rows = response.data.values;
+    if (!rows || rows.length < 2) return 0;
+    const colIndex = rows[0].indexOf(column);
+    if (colIndex === -1) return 0;
+
+    const indexes: number[] = [];
+    rows.forEach((row, i) => {
+      if (i > 0 && row[colIndex] === value) indexes.push(i);
+    });
+    if (indexes.length === 0) return 0;
+
+    const spreadsheet = await this.sheets.spreadsheets.get({
+      spreadsheetId: this.spreadsheetId,
+      fields: "sheets.properties(sheetId,title)",
+    });
+    const sheet = spreadsheet.data.sheets?.find(
+      (sh) => sh.properties?.title === tabName
+    );
+    const sheetId = sheet?.properties?.sheetId;
+    if (sheetId === undefined || sheetId === null) return 0;
+
+    // ลบจากล่างขึ้นบน — index ของแถวที่เหลือจะไม่เลื่อน
+    await this.sheets.spreadsheets.batchUpdate({
+      spreadsheetId: this.spreadsheetId,
+      requestBody: {
+        requests: indexes
+          .sort((a, b) => b - a)
+          .map((rowIndex) => ({
+            deleteDimension: {
+              range: {
+                sheetId,
+                dimension: "ROWS",
+                startIndex: rowIndex,
+                endIndex: rowIndex + 1,
+              },
+            },
+          })),
+      },
+    });
+    await invalidateTab(this.spreadsheetId, tabName);
+    return indexes.length;
+  }
+
+  /**
    * อัปเดตข้อมูล โดยหา row จาก ID column
    */
   async updateById(

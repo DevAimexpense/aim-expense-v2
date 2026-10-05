@@ -313,9 +313,9 @@ export const taxInvoiceRouter = router({
           PdfUrl: "",
         });
 
-        for (let i = 0; i < input.lines.length; i++) {
-          const l = input.lines[i];
-          await sheets.appendRowByHeaders(SHEET_TABS.TAX_INVOICE_LINES, {
+        await sheets.appendRowsByHeaders(
+          SHEET_TABS.TAX_INVOICE_LINES,
+          input.lines.map((l, i) => ({
             LineID: GoogleSheetsService.generateId("TIL"),
             TaxInvoiceID: taxInvoiceId,
             LineNumber: i + 1,
@@ -326,8 +326,8 @@ export const taxInvoiceRouter = router({
             DiscountPercent: l.discountPercent,
             LineTotal: totals.lineTotals[i],
             Notes: l.notes || "",
-          });
-        }
+          }))
+        );
       } catch (e) {
         try {
           await sheets.deleteById(
@@ -335,14 +335,11 @@ export const taxInvoiceRouter = router({
             "TaxInvoiceID",
             taxInvoiceId,
           );
-          const orphans = await sheets.getTaxInvoiceLines(taxInvoiceId);
-          for (const ol of orphans) {
-            await sheets.deleteById(
-              SHEET_TABS.TAX_INVOICE_LINES,
-              "LineID",
-              ol.LineID,
-            );
-          }
+          await sheets.deleteRowsWhere(
+            SHEET_TABS.TAX_INVOICE_LINES,
+            "TaxInvoiceID",
+            taxInvoiceId
+          );
         } catch {
           /* ignore */
         }
@@ -421,17 +418,14 @@ export const taxInvoiceRouter = router({
         },
       );
 
-      const oldLines = await sheets.getTaxInvoiceLines(input.taxInvoiceId);
-      for (const ol of oldLines) {
-        await sheets.deleteById(
+      await sheets.deleteRowsWhere(
+            SHEET_TABS.TAX_INVOICE_LINES,
+            "TaxInvoiceID",
+            input.taxInvoiceId
+          );
+      await sheets.appendRowsByHeaders(
           SHEET_TABS.TAX_INVOICE_LINES,
-          "LineID",
-          ol.LineID,
-        );
-      }
-      for (let i = 0; i < input.lines.length; i++) {
-        const l = input.lines[i];
-        await sheets.appendRowByHeaders(SHEET_TABS.TAX_INVOICE_LINES, {
+          input.lines.map((l, i) => ({
           LineID: GoogleSheetsService.generateId("TIL"),
           TaxInvoiceID: input.taxInvoiceId,
           LineNumber: i + 1,
@@ -442,8 +436,8 @@ export const taxInvoiceRouter = router({
           DiscountPercent: l.discountPercent,
           LineTotal: totals.lineTotals[i],
           Notes: l.notes || "",
-        });
-      }
+        }))
+        );
 
       await prisma.auditLog.create({
         data: {
@@ -617,14 +611,11 @@ export const taxInvoiceRouter = router({
         "TaxInvoiceID",
         input.taxInvoiceId,
       );
-      const lines = await sheets.getTaxInvoiceLines(input.taxInvoiceId);
-      for (const l of lines) {
-        await sheets.deleteById(
-          SHEET_TABS.TAX_INVOICE_LINES,
-          "LineID",
-          l.LineID,
-        );
-      }
+      await sheets.deleteRowsWhere(
+            SHEET_TABS.TAX_INVOICE_LINES,
+            "TaxInvoiceID",
+            input.taxInvoiceId
+          );
 
       await prisma.auditLog.create({
         data: {
@@ -729,9 +720,9 @@ export const taxInvoiceRouter = router({
           PdfUrl: "",
         });
 
-        for (let i = 0; i < billingLines.length; i++) {
-          const bl = billingLines[i];
-          await sheets.appendRowByHeaders(SHEET_TABS.TAX_INVOICE_LINES, {
+        await sheets.appendRowsByHeaders(
+          SHEET_TABS.TAX_INVOICE_LINES,
+          billingLines.map((bl, i) => ({
             LineID: GoogleSheetsService.generateId("TIL"),
             TaxInvoiceID: taxInvoiceId,
             LineNumber: i + 1,
@@ -742,8 +733,8 @@ export const taxInvoiceRouter = router({
             DiscountPercent: parseFloat(bl.DiscountPercent) || 0,
             LineTotal: parseFloat(bl.LineTotal) || 0,
             Notes: bl.Notes || "",
-          });
-        }
+          }))
+        );
       } catch (e) {
         try {
           await sheets.deleteById(
@@ -751,14 +742,11 @@ export const taxInvoiceRouter = router({
             "TaxInvoiceID",
             taxInvoiceId,
           );
-          const orphans = await sheets.getTaxInvoiceLines(taxInvoiceId);
-          for (const ol of orphans) {
-            await sheets.deleteById(
-              SHEET_TABS.TAX_INVOICE_LINES,
-              "LineID",
-              ol.LineID,
-            );
-          }
+          await sheets.deleteRowsWhere(
+            SHEET_TABS.TAX_INVOICE_LINES,
+            "TaxInvoiceID",
+            taxInvoiceId
+          );
         } catch {
           /* ignore */
         }
@@ -871,9 +859,9 @@ export const taxInvoiceRouter = router({
           PdfUrl: "",
         });
 
-        for (let i = 0; i < qLines.length; i++) {
-          const ql = qLines[i];
-          await sheets.appendRowByHeaders(SHEET_TABS.TAX_INVOICE_LINES, {
+        await sheets.appendRowsByHeaders(
+          SHEET_TABS.TAX_INVOICE_LINES,
+          qLines.map((ql, i) => ({
             LineID: GoogleSheetsService.generateId("TIL"),
             TaxInvoiceID: taxInvoiceId,
             LineNumber: i + 1,
@@ -884,8 +872,8 @@ export const taxInvoiceRouter = router({
             DiscountPercent: parseFloat(ql.DiscountPercent) || 0,
             LineTotal: parseFloat(ql.LineTotal) || 0,
             Notes: ql.Notes || "",
-          });
-        }
+          }))
+        );
       } catch (e) {
         try {
           await sheets.deleteById(
@@ -893,14 +881,11 @@ export const taxInvoiceRouter = router({
             "TaxInvoiceID",
             taxInvoiceId,
           );
-          const orphans = await sheets.getTaxInvoiceLines(taxInvoiceId);
-          for (const ol of orphans) {
-            await sheets.deleteById(
-              SHEET_TABS.TAX_INVOICE_LINES,
-              "LineID",
-              ol.LineID,
-            );
-          }
+          await sheets.deleteRowsWhere(
+            SHEET_TABS.TAX_INVOICE_LINES,
+            "TaxInvoiceID",
+            taxInvoiceId
+          );
         } catch {
           /* ignore */
         }
