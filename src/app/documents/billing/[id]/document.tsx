@@ -250,8 +250,14 @@ export function BillingDocument({ billingId, org, header, lines, banks }: Props)
           position: relative;
         }
         .copy-stamp {
-          display: inline-block;
-          padding: 0.25rem 1rem;
+          /* จัดกึ่งกลางด้วย flex + ความสูงคงที่ — ฟอนต์ไทยมี ascent สูง ทำให้ inline-block
+             + padding เท่ากันแล้วตัวหนังสือดูจมลงล่างตอนพิมพ์ */
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          height: 2rem;
+          padding: 0 1rem;
+          line-height: 1;
           font-size: 0.875rem;
           font-weight: 700;
           letter-spacing: 0.15em;

@@ -48,7 +48,9 @@ export function FitLine({ children, className, minScale = 0.7 }: Props) {
     <div
       ref={ref}
       className={className}
-      style={{ whiteSpace: "nowrap", overflow: "hidden", minWidth: 0 }}
+      // ไม่ใช้ overflow:hidden — สระบน/ล่างของฟอนต์ไทยสูงเกินกล่องบรรทัดจะถูกตัดตอนพิมพ์
+      // (ความกว้างคุมด้วยการย่อ font-size แทน)
+      style={{ whiteSpace: "nowrap", minWidth: 0, lineHeight: 1.6 }}
     >
       {children}
     </div>
