@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { formatDate as formatThaiDate } from "@/lib/utils/date";
+import { FitLine } from "@/components/shared/fit-line";
 
 interface DocData {
   org: {
@@ -280,8 +281,8 @@ export function TaxInvoiceDocument({
         }
         .doc-header {
           display: grid;
-          grid-template-columns: 1fr auto;
-          gap: 2rem;
+          grid-template-columns: minmax(0, 1fr) auto;
+          gap: 1.25rem;
           align-items: start;
           margin-bottom: 1.5rem;
           padding-bottom: 1rem;
@@ -559,7 +560,10 @@ function DocPage({
           <div className="company-line">
             เลขประจำตัวผู้เสียภาษี: {formatTaxId(org.taxId)} • {org.branchInfo}
           </div>
-          {org.address && <div className="company-line">{org.address}</div>}
+          {org.address && (
+            // ที่อยู่ยาว → ย่อตัวอักษรให้อยู่บรรทัดเดียว (รหัสไปรษณีย์ไม่ตกบรรทัด)
+            <FitLine className="company-line">{org.address}</FitLine>
+          )}
           {org.phone && <div className="company-line">โทร: {org.phone}</div>}
         </div>
         <div className="doc-meta">
