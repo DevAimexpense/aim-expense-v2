@@ -255,8 +255,21 @@ function CompanyBankModal({
                 onChange={(val) => setForm({ ...form, bankName: val })}
                 className="app-select"
                 placeholder="เลือกธนาคาร"
-                emptyLabel="— เลือกธนาคาร —"
+                emptyLabel={
+                  banksQuery.isLoading ? "กำลังโหลดรายชื่อธนาคาร…" : "— เลือกธนาคาร —"
+                }
               />
+              {banksQuery.error && (
+                <p className="app-hint" style={{ color: "#dc2626" }}>
+                  โหลดรายชื่อธนาคารไม่สำเร็จ: {banksQuery.error.message}
+                </p>
+              )}
+              {!banksQuery.isLoading && !banksQuery.error && banks.length === 0 && (
+                <p className="app-hint" style={{ color: "#b45309" }}>
+                  ไม่พบรายชื่อธนาคารใน Sheet ของบริษัทนี้ — ลองรีเฟรชหน้า
+                  หรือเพิ่มธนาคารในหน้าผู้รับเงินก่อน
+                </p>
+              )}
             </div>
 
             <div className="app-form-grid cols-2">

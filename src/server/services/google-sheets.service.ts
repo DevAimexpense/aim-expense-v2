@@ -492,16 +492,25 @@ export class GoogleSheetsService {
    * Seed default banks (master list) ลง Banks tab
    * Use 6-column schema for backward compat (other fields empty)
    */
-  async seedDefaultBanks(): Promise<void> {
-    const rows = DEFAULT_BANKS.map((bank) => [
-      bank.bankId,
-      bank.bankName,
-      "", // AccountNumber (unused in master list mode)
-      "", // AccountName (unused)
-      "", // Branch (unused)
-      "FALSE", // IsDefault (unused)
-    ]);
-    await this.appendRows(SHEET_TABS.BANKS, rows);
+  async seedDefaultBanks(): Promise<number> {
+    // idempotent: เติมเฉพาะธนาคารมาตรฐานที่ยังไม่มี (เรียกซ้ำได้ / org เก่าที่แท็บ Banks
+    // ถูกสร้างทีหลังโดย ensureAllTabsExist แล้วว่างเปล่า → เติมให้ตอนเปิดใช้)
+    const existing = await this.getAll(SHEET_TABS.BANKS);
+    const have = new Set(existing.map((b) => b.BankID));
+    const missing = DEFAULT_BANKS.filter((bank) => !have.has(bank.bankId));
+    if (missing.length === 0) return 0;
+    await this.appendRowsByHeaders(
+      SHEET_TABS.BANKS,
+      missing.map((bank) => ({
+        BankID: bank.bankId,
+        BankName: bank.bankName,
+        AccountNumber: "",
+        AccountName: "",
+        Branch: "",
+        IsDefault: "FALSE",
+      }))
+    );
+    return missing.length;
   }
 
   /**

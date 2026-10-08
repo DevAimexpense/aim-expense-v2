@@ -5,7 +5,7 @@
 
 import { z } from "zod";
 import { router, orgProcedure, permissionProcedure } from "../trpc";
-import { getSheetsService } from "../lib/sheets-context";
+import { getSheetsService, ensureTabsCached } from "../lib/sheets-context";
 import { GoogleSheetsService, SHEET_TABS } from "../services/google-sheets.service";
 import { prisma } from "@/lib/prisma";
 
@@ -15,8 +15,15 @@ export const bankRouter = router({
    */
   list: orgProcedure.query(async ({ ctx }) => {
     const sheets = await getSheetsService(ctx.org.orgId);
-    const banks = await sheets.getBanks();
-    return banks.map((b) => ({
+    let banks = await sheets.getBanks();
+    // Self-heal: org ที่แท็บ Banks ว่าง (สร้างก่อนมี master list / seed ตอนสร้าง org ล้มเหลว)
+    // → เติมธนาคารมาตรฐานให้ ไม่งั้นฟอร์มบัญชีบริษัท/ผู้รับเงินไม่มีธนาคารให้เลือก
+    if (!banks.some((b) => (b.BankID || "").startsWith("BANK0"))) {
+      await ensureTabsCached(sheets, ctx.org.orgId);
+      const added = await sheets.seedDefaultBanks();
+      if (added > 0) banks = await sheets.getBanks();
+    }
+    return banks.filter((b) => b.BankName).map((b) => ({
       bankId: b.BankID,
       bankName: b.BankName,
       // isCustom: รู้จาก BankID prefix (BANK = built-in, CUSTOM = user-added)

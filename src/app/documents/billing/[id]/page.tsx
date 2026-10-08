@@ -32,7 +32,7 @@ export default async function BillingDocumentPage({
 
   // batchGet (header + lines in 1 HTTP call) parallel with prisma org lookup
   const [batch, org] = await Promise.all([
-    sheets.getAllBatch([SHEET_TABS.BILLINGS, SHEET_TABS.BILLING_LINES]),
+    sheets.getAllBatch([SHEET_TABS.BILLINGS, SHEET_TABS.BILLING_LINES, SHEET_TABS.COMPANY_BANKS]),
     prisma.organization.findUnique({
       where: { id: orgCtx.orgId },
       select: {
@@ -111,6 +111,20 @@ export default async function BillingDocumentPage({
         terms: header.Terms || "",
         preparedBy: header.PreparedBy || "",
       }}
+      banks={(batch[SHEET_TABS.COMPANY_BANKS] || [])
+        .filter(
+          (b) =>
+            b.AccountNumber &&
+            b.UseForBilling !== "FALSE" &&
+            b.UseForBilling !== "false"
+        )
+        .sort((a, b) => (b.IsDefault === "TRUE" ? 1 : 0) - (a.IsDefault === "TRUE" ? 1 : 0))
+        .map((b) => ({
+          bankName: b.BankName || "",
+          accountNumber: b.AccountNumber || "",
+          accountName: b.AccountName || "",
+          branch: b.Branch || "",
+        }))}
       lines={lines.map((l) => ({
         lineNumber: parseInt(l.LineNumber, 10) || 0,
         description: l.Description || "",

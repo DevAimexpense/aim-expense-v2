@@ -39,6 +39,8 @@ interface DocData {
     terms: string;
     preparedBy: string;
   };
+  /** บัญชีบริษัทที่ตั้งค่าให้แสดงในเอกสารนี้ (จาก CompanyBanks) — ข้อมูลการโอนเงิน */
+  banks?: { bankName: string; accountNumber: string; accountName: string; branch: string }[];
   lines: {
     lineNumber: number;
     description: string;
@@ -119,7 +121,7 @@ async function generateAndDownloadPdf(
   }
 }
 
-export function BillingDocument({ billingId, org, header, lines }: Props) {
+export function BillingDocument({ billingId, org, header, lines, banks }: Props) {
   const [downloadState, setDownloadState] = useState<
     "idle" | "downloading" | "done" | "error"
   >("idle");
@@ -231,8 +233,8 @@ export function BillingDocument({ billingId, org, header, lines }: Props) {
 
       <input type="hidden" data-billing-id={billingId} />
 
-      <DocPage copyType="original" org={org} header={header} lines={lines} />
-      <DocPage copyType="copy" org={org} header={header} lines={lines} />
+      <DocPage copyType="original" org={org} header={header} lines={lines} banks={banks} />
+      <DocPage copyType="copy" org={org} header={header} lines={lines} banks={banks} />
 
       <style jsx global>{`
         .doc-page {
@@ -375,6 +377,17 @@ export function BillingDocument({ billingId, org, header, lines }: Props) {
           grid-template-columns: 1fr auto;
           gap: 2rem;
           margin-bottom: 2rem;
+        }
+        .bank-block {
+          margin-bottom: 0.75rem;
+          padding: 0.5rem 0.75rem;
+          border: 1px solid #e2e8f0;
+          border-radius: 0.375rem;
+          background: #f8fafc;
+        }
+        .bank-line {
+          font-size: 0.8125rem;
+          line-height: 1.6;
         }
         .terms-block {
           font-size: 0.8125rem;
@@ -520,6 +533,7 @@ function DocPage({
   org,
   header,
   lines,
+  banks,
 }: {
   copyType: "original" | "copy";
 } & DocData) {
@@ -670,6 +684,19 @@ function DocPage({
 
       <div className="totals-row">
         <div className="terms-block">
+          {!!banks?.length && !receipt && (
+            <div className="bank-block">
+              <div className="terms-title">ชำระเงินโดยโอนเข้าบัญชี</div>
+              {banks.map((b, i) => (
+                <div key={i} className="bank-line">
+                  <strong>{b.bankName}</strong>
+                  {b.branch ? ` สาขา${b.branch}` : ""} · เลขที่บัญชี{" "}
+                  <span className="mono">{b.accountNumber}</span>
+                  {b.accountName ? ` · ชื่อบัญชี ${b.accountName}` : ""}
+                </div>
+              ))}
+            </div>
+          )}
           {header.terms && !receipt && (
             <>
               <div className="terms-title">เงื่อนไขการชำระ</div>

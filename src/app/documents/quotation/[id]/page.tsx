@@ -32,7 +32,7 @@ export default async function QuotationDocumentPage({
 
   // batchGet (header + lines in 1 HTTP call) parallel with prisma org lookup
   const [batch, org] = await Promise.all([
-    sheets.getAllBatch([SHEET_TABS.QUOTATIONS, SHEET_TABS.QUOTATION_LINES]),
+    sheets.getAllBatch([SHEET_TABS.QUOTATIONS, SHEET_TABS.QUOTATION_LINES, SHEET_TABS.COMPANY_BANKS]),
     prisma.organization.findUnique({
       where: { id: orgCtx.orgId },
       select: {
@@ -107,6 +107,20 @@ export default async function QuotationDocumentPage({
         terms: header.Terms || "",
         preparedBy: header.PreparedBy || "",
       }}
+      banks={(batch[SHEET_TABS.COMPANY_BANKS] || [])
+        .filter(
+          (b) =>
+            b.AccountNumber &&
+            b.UseForQuotation !== "FALSE" &&
+            b.UseForQuotation !== "false"
+        )
+        .sort((a, b) => (b.IsDefault === "TRUE" ? 1 : 0) - (a.IsDefault === "TRUE" ? 1 : 0))
+        .map((b) => ({
+          bankName: b.BankName || "",
+          accountNumber: b.AccountNumber || "",
+          accountName: b.AccountName || "",
+          branch: b.Branch || "",
+        }))}
       lines={lines.map((l) => ({
         lineNumber: parseInt(l.LineNumber, 10) || 0,
         description: l.Description || "",
