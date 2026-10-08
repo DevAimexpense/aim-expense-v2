@@ -387,7 +387,18 @@ export function QuotationDocument({ quotationId, org, header, lines, banks }: Pr
         }
         .bank-line {
           font-size: 0.8125rem;
-          line-height: 1.6;
+          line-height: 1.5;
+        }
+        .bank-line + .bank-line {
+          margin-top: 0.375rem;
+          padding-top: 0.375rem;
+          border-top: 1px dashed #e2e8f0;
+        }
+        .bank-line-main {
+          white-space: nowrap;
+        }
+        .bank-line-name {
+          color: #475569;
         }
         .terms-block {
           font-size: 0.8125rem;
@@ -640,10 +651,15 @@ function DocPage({
               <div className="terms-title">ชำระเงินโดยโอนเข้าบัญชี</div>
               {banks.map((b, i) => (
                 <div key={i} className="bank-line">
-                  <strong>{b.bankName}</strong>
-                  {b.branch ? ` สาขา${b.branch}` : ""} · เลขที่บัญชี{" "}
-                  <span className="mono">{b.accountNumber}</span>
-                  {b.accountName ? ` · ชื่อบัญชี ${b.accountName}` : ""}
+                  {/* บรรทัด 1: ธนาคาร + สาขา + เลขที่บัญชี · บรรทัด 2: ชื่อบัญชี */}
+                  <div className="bank-line-main">
+                    <strong>{b.bankName}</strong>
+                    {b.branch ? ` สาขา${b.branch}` : ""} · เลขที่บัญชี{" "}
+                    <span className="mono">{b.accountNumber}</span>
+                  </div>
+                  {b.accountName && (
+                    <div className="bank-line-name">ชื่อบัญชี {b.accountName}</div>
+                  )}
                 </div>
               ))}
             </div>
