@@ -257,7 +257,7 @@ export function QuotationDocument({ quotationId, org, header, lines, banks }: Pr
           height: 2rem;
           /* ฟอนต์ไทยเผื่อที่สระ/วรรณยุกต์ด้านบนไว้ใน ascent → ตัวอักษรดูจมลงล่าง: ดันขึ้นด้วย padding-bottom
              letter-spacing ทิ้งช่องว่างท้ายตัวสุดท้าย → ชดเชยด้วย text-indent ให้กึ่งกลางจริง */
-          padding: 0 1rem 0.3em;
+          padding: 0 1rem 0.12em;
           text-indent: 0.15em;
           line-height: 1;
           font-size: 0.875rem;
