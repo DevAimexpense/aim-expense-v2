@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { trpc } from "@/lib/trpc/client";
+import DateInput from "@/components/shared/date-input";
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -277,10 +278,9 @@ export function RecordTaxInvoicePaymentModal({
                 <label className="app-label app-label-required">
                   วันที่รับชำระ
                 </label>
-                <input
-                  type="date"
+                <DateInput
                   value={paidDate}
-                  onChange={(e) => setPaidDate(e.target.value)}
+                  onChange={(v) => setPaidDate(v)}
                   max={todayISO()}
                   className="app-input"
                 />

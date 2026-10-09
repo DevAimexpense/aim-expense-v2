@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { trpc } from "@/lib/trpc/client";
 import { TaxInvoiceStatusBadge } from "../tax-invoices-client";
 import { RecordTaxInvoicePaymentModal } from "./payment-modal";
-import { formatDateTime } from "@/lib/utils/date";
+import { formatDate, formatDateTime } from "@/lib/utils/date";
 
 const formatTHB = (n: number) =>
   n.toLocaleString("th-TH", {
@@ -123,7 +123,7 @@ export function TaxInvoiceDetailClient({
             <TaxInvoiceStatusBadge status={header.status} />
           </h1>
           <p className="app-page-subtitle">
-            วันที่เอกสาร {header.docDate}
+            วันที่เอกสาร {formatDate(header.docDate)}
             {header.sourceBillingId && (
               <>
                 {" • "}
@@ -315,7 +315,7 @@ export function TaxInvoiceDetailClient({
               <strong>โครงการ:</strong> {header.projectName || "-"}
             </div>
             <div>
-              <strong>วันที่ส่งมอบ/ให้บริการ:</strong> {header.docDate}
+              <strong>วันที่ส่งมอบ/ให้บริการ:</strong> {formatDate(header.docDate)}
             </div>
             <div>
               <strong>ผู้จัดทำ:</strong> {header.preparedBy || "-"}

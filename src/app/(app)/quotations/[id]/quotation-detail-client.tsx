@@ -5,6 +5,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { trpc } from "@/lib/trpc/client";
 import { StatusBadge } from "../quotations-client";
+import DateInput from "@/components/shared/date-input";
+import { formatDate } from "@/lib/utils/date";
 
 const PLUS_30_DAYS = () => {
   const d = new Date();
@@ -95,7 +97,7 @@ export function QuotationDetailClient({
             <StatusBadge status={header.status} />
           </h1>
           <p className="app-page-subtitle">
-            ออกเมื่อ {header.docDate} • ใช้ได้ถึง {header.validUntil}
+            ออกเมื่อ {formatDate(header.docDate)} • ใช้ได้ถึง {formatDate(header.validUntil)}
           </p>
         </div>
         <Link href="/quotations" className="app-btn app-btn-secondary">
@@ -254,10 +256,10 @@ export function QuotationDetailClient({
               <strong>โครงการ:</strong> {header.projectName || "-"}
             </div>
             <div>
-              <strong>วันที่ออก:</strong> {header.docDate}
+              <strong>วันที่ออก:</strong> {formatDate(header.docDate)}
             </div>
             <div>
-              <strong>ใช้ได้ถึง:</strong> {header.validUntil}
+              <strong>ใช้ได้ถึง:</strong> {formatDate(header.validUntil)}
             </div>
             <div>
               <strong>ผู้จัดทำ:</strong> {header.preparedBy || "-"}
@@ -489,10 +491,9 @@ function ConvertToBillingModal({
                 <label className="app-label app-label-required">
                   วันที่ออก
                 </label>
-                <input
-                  type="date"
+                <DateInput
                   value={docDate}
-                  onChange={(e) => setDocDate(e.target.value)}
+                  onChange={(v) => setDocDate(v)}
                   className="app-input"
                 />
               </div>
@@ -500,10 +501,9 @@ function ConvertToBillingModal({
                 <label className="app-label app-label-required">
                   วันครบกำหนด
                 </label>
-                <input
-                  type="date"
+                <DateInput
                   value={dueDate}
-                  onChange={(e) => setDueDate(e.target.value)}
+                  onChange={(v) => setDueDate(v)}
                   className="app-input"
                 />
               </div>

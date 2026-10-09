@@ -1,80 +1,116 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 
-// แปลง ISO (yyyy-mm-dd) → แสดงผล (dd/mm/yyyy)
+// ===========================================
+// DateInput — ช่องกรอกวันที่ที่แสดง/รับค่าเป็น วว/ดด/ปปปป (พ.ศ.) เสมอ
+//
+// native <input type="date"> แสดงตาม locale ของ browser (เครื่องภาษาอังกฤษ = เดือน/วัน/ปี)
+// บังคับไม่ได้ → ใช้ช่องข้อความของเราเอง + ปุ่ม 📅 เปิดปฏิทิน native ซ่อนไว้
+// - ค่าที่ส่งออก/รับเข้าเป็น ISO (yyyy-mm-dd, ค.ศ.) เหมือน type=date เดิม → API/logic ไม่ต้องแก้
+// - แสดงปี พ.ศ. ให้ตรงกับทุกหน้าในระบบ (formatDate) · พิมพ์ปี ค.ศ. ก็รับได้ (ปี < 2400 = ค.ศ.)
+// ===========================================
+
+const BE_OFFSET = 543;
+
+// ISO (yyyy-mm-dd) → แสดงผล dd/mm/yyyy (พ.ศ.)
 function isoToDisplay(iso: string): string {
   if (!iso) return "";
   const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})/);
   if (!m) return "";
-  return `${m[3]}/${m[2]}/${m[1]}`;
+  return `${m[3]}/${m[2]}/${Number(m[1]) + BE_OFFSET}`;
 }
 
-// แปลง dd/mm/yyyy → ISO (yyyy-mm-dd) ถ้าถูกต้อง, ไม่งั้น null
+// dd/mm/yyyy (พ.ศ. หรือ ค.ศ.) → ISO ถ้าถูกต้อง, ไม่งั้น null
 function displayToIso(s: string): string | null {
   const m = s.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
   if (!m) return null;
   const d = m[1].padStart(2, "0");
   const mo = m[2].padStart(2, "0");
-  const y = m[3];
+  let y = Number(m[3]);
+  if (y >= 2400) y -= BE_OFFSET; // พ.ศ. → ค.ศ.
   const dt = new Date(`${y}-${mo}-${d}T00:00:00`);
   if (
     isNaN(dt.getTime()) ||
-    dt.getUTCMonth() + 1 !== Number(mo) ||
-    dt.getUTCDate() !== Number(d)
+    dt.getMonth() + 1 !== Number(mo) ||
+    dt.getDate() !== Number(d)
   ) {
-    return null; // เช่น 31/02/2026
+    return null; // เช่น 31/02/2569
   }
   return `${y}-${mo}-${d}`;
 }
 
-/**
- * Date input ที่แสดง/รับค่าเป็น วว/ดด/ปปปป (DD/MM/YYYY) เสมอ ไม่ขึ้นกับ locale ของ browser
- * (native <input type="date"> แสดง format ตาม locale บังคับไม่ได้)
- * - เก็บค่าเป็น ISO (yyyy-mm-dd) เหมือน type=date เดิม → API/logic ไม่ต้องแก้
- * - มีปุ่ม 📅 เปิดปฏิทิน native ไว้เลือกสะดวก
- */
+interface Props {
+  value: string; // ISO yyyy-mm-dd
+  onChange: (iso: string) => void;
+  className?: string;
+  disabled?: boolean;
+  required?: boolean;
+  /** ISO — ใช้กับปฏิทิน native */
+  min?: string;
+  max?: string;
+  placeholder?: string;
+  id?: string;
+  name?: string;
+  /** style ของกล่องทั้งชุด (เช่น maxWidth) */
+  style?: CSSProperties;
+}
+
 export default function DateInput({
   value,
   onChange,
   className,
   disabled,
-}: {
-  value: string; // ISO yyyy-mm-dd
-  onChange: (iso: string) => void;
-  className?: string;
-  disabled?: boolean;
-}) {
+  required,
+  min,
+  max,
+  placeholder,
+  id,
+  name,
+  style,
+}: Props) {
   const [textValue, setTextValue] = useState(isoToDisplay(value));
   const pickerRef = useRef<HTMLInputElement>(null);
 
-  // sync เมื่อ value ภายนอกเปลี่ยน (เช่น เปิดฟอร์มแก้ไข)
+  // sync เมื่อ value ภายนอกเปลี่ยน (เช่น เปิดฟอร์มแก้ไข / ปุ่มล้างตัวกรอง)
   useEffect(() => {
     setTextValue(isoToDisplay(value));
   }, [value]);
 
   return (
-    <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
+    <div
+      style={{ position: "relative", display: "flex", alignItems: "center", ...style }}
+    >
       <input
         type="text"
         inputMode="numeric"
-        placeholder="วว/ดด/ปปปป"
+        placeholder={placeholder || "วว/ดด/ปปปป"}
         value={textValue}
         disabled={disabled}
+        required={required}
+        id={id}
+        name={name}
         onChange={(e) => {
-          setTextValue(e.target.value);
-          const iso = displayToIso(e.target.value);
+          const raw = e.target.value;
+          setTextValue(raw);
+          if (raw.trim() === "") {
+            onChange(""); // ล้างค่า (เช่น ตัวกรอง ตั้งแต่/ถึง)
+            return;
+          }
+          const iso = displayToIso(raw);
           if (iso) onChange(iso);
         }}
         onBlur={() => setTextValue(isoToDisplay(value))}
         className={className}
-        style={{ flex: 1, paddingRight: "2rem" }}
+        style={{ flex: 1, width: "100%", paddingRight: "2rem" }}
       />
       {/* native picker ซ่อนไว้ ใช้ปุ่มปฏิทินเรียก */}
       <input
         ref={pickerRef}
         type="date"
         value={value}
+        min={min}
+        max={max}
         disabled={disabled}
         tabIndex={-1}
         aria-hidden="true"

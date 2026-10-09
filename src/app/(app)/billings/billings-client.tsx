@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { trpc } from "@/lib/trpc/client";
+import DateInput from "@/components/shared/date-input";
+import { formatDate } from "@/lib/utils/date";
 
 type Status = "draft" | "sent" | "partial" | "paid" | "void";
 
@@ -190,17 +192,15 @@ export function BillingsClient({ entityType = "company" }: { entityType?: string
             </option>
           ))}
         </select>
-        <input
-          type="date"
+        <DateInput
           value={from}
-          onChange={(e) => setFrom(e.target.value)}
+          onChange={(v) => setFrom(v)}
           className="app-input"
           style={{ maxWidth: "180px" }}
         />
-        <input
-          type="date"
+        <DateInput
           value={to}
-          onChange={(e) => setTo(e.target.value)}
+          onChange={(v) => setTo(v)}
           className="app-input"
           style={{ maxWidth: "180px" }}
         />
@@ -314,9 +314,9 @@ export function BillingsClient({ entityType = "company" }: { entityType?: string
                       {b.docNumber}
                     </td>
                     <td>
-                      <div>{b.docDate}</div>
+                      <div>{formatDate(b.docDate)}</div>
                       <div style={{ fontSize: "0.75rem", color: "#64748b" }}>
-                        ครบ {b.dueDate}
+                        ครบ {formatDate(b.dueDate)}
                       </div>
                     </td>
                     <td>
@@ -630,10 +630,9 @@ function QuickIncomeModal({
             <div className="app-form-grid cols-2">
               <div className="app-form-group">
                 <label className="app-label app-label-required">วันที่รับเงิน</label>
-                <input
-                  type="date"
+                <DateInput
                   value={form.docDate}
-                  onChange={(e) => setForm({ ...form, docDate: e.target.value })}
+                  onChange={(v) => setForm({ ...form, docDate: v })}
                   className="app-input"
                 />
               </div>

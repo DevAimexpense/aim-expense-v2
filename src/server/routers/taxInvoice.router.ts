@@ -492,12 +492,11 @@ export const taxInvoiceRouter = router({
       }
 
       const docDate = existing.DocDate || new Date().toISOString().slice(0, 10);
-      const year = new Date(docDate).getFullYear() || new Date().getFullYear();
       // Sequential numbering — only count issued docs (skip draft/void)
       const docNumber = await computeNextDocNumber(
         sheets,
         "TI",
-        year,
+        docDate,
         SHEET_TABS.TAX_INVOICES,
         (status) => status === "issued",
       );

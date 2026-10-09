@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { trpc } from "@/lib/trpc/client";
+import DateInput from "@/components/shared/date-input";
 import {
   VatModePicker,
   vatModeOf,
@@ -475,10 +476,9 @@ export function NewBillingClient({
               <label className="app-label app-label-required">
                 {isReceipt ? "วันที่รับเงิน" : "วันที่ออก"}
               </label>
-              <input
-                type="date"
+              <DateInput
                 value={form.docDate}
-                onChange={(e) => setForm({ ...form, docDate: e.target.value })}
+                onChange={(v) => setForm({ ...form, docDate: v })}
                 className="app-input"
               />
             </div>
@@ -508,10 +508,9 @@ export function NewBillingClient({
                 <label className="app-label app-label-required">
                   วันครบกำหนดชำระ
                 </label>
-                <input
-                  type="date"
+                <DateInput
                   value={form.dueDate}
-                  onChange={(e) => setForm({ ...form, dueDate: e.target.value })}
+                  onChange={(v) => setForm({ ...form, dueDate: v })}
                   className="app-input"
                 />
               </div>

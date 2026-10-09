@@ -278,12 +278,10 @@ export const billingRouter = router({
       }
 
       const billingId = GoogleSheetsService.generateId("BIL");
-      const year =
-        new Date(input.docDate).getFullYear() || new Date().getFullYear();
       const docNumber = await computeNextDocNumber(
         sheets,
         "BIL",
-        year,
+        input.docDate,
         SHEET_TABS.BILLINGS
       );
 
@@ -414,12 +412,10 @@ export const billingRouter = router({
       await ensureTabsCached(sheets, ctx.org.orgId);
 
       const billingId = GoogleSheetsService.generateId("BIL");
-      const year =
-        new Date(input.docDate).getFullYear() || new Date().getFullYear();
       const docNumber = await computeNextDocNumber(
         sheets,
         "BIL",
-        year,
+        input.docDate,
         SHEET_TABS.BILLINGS
       );
 
@@ -740,12 +736,10 @@ export const billingRouter = router({
       }
 
       const billingId = GoogleSheetsService.generateId("RC");
-      const year =
-        new Date(input.docDate).getFullYear() || new Date().getFullYear();
       const receiptNumber = await computeNextDocNumber(
         sheets,
         "RC",
-        year,
+        input.docDate,
         SHEET_TABS.BILLINGS,
         undefined,
         "ReceiptNumber"
@@ -1007,12 +1001,10 @@ export const billingRouter = router({
         input.receiptDate ||
         existing.PaidDate ||
         new Date().toISOString().slice(0, 10);
-      const year =
-        new Date(receiptDate).getFullYear() || new Date().getFullYear();
       const receiptNumber = await computeNextDocNumber(
         sheets,
         "RC",
-        year,
+        receiptDate,
         SHEET_TABS.BILLINGS,
         undefined,
         "ReceiptNumber"

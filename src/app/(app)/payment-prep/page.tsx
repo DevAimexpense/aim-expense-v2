@@ -7,6 +7,7 @@ import { PaymentModal } from "../payments/payment-modal";
 import SearchableSelect, { type SearchableSelectOption } from "@/components/searchable-select";
 import { fireAutoGenDoc, resolveDocTypeForPayment } from "@/lib/utils/auto-gen-doc";
 import { formatDate } from "@/lib/utils/date";
+import DateInput from "@/components/shared/date-input";
 
 type PaymentRow = {
   paymentId: string;
@@ -704,7 +705,7 @@ function DateField({ label, value, onChange }: { label: string; value: string; o
   return (
     <div>
       <label className="app-label" style={{ fontSize: "0.75rem" }}>{label}</label>
-      <input type="date" value={value} onChange={(e) => onChange(e.target.value)} className="app-input" />
+      <DateInput value={value} onChange={(v) => onChange(v)} className="app-input" />
     </div>
   );
 }

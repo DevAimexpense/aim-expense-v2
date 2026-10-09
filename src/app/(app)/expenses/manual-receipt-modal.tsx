@@ -10,6 +10,7 @@ import {
 import { pdfFirstPageToImage, isPdfFile } from "@/lib/utils/pdf-to-image";
 import SearchableSelect, { type SearchableSelectOption } from "@/components/searchable-select";
 import { fireAutoGenDoc, resolveDocTypeForPayment } from "@/lib/utils/auto-gen-doc";
+import DateInput from "@/components/shared/date-input";
 
 // ===== Types =====
 interface Event { eventId: string; eventName: string; status: string }
@@ -477,7 +478,7 @@ export function ManualReceiptModal({ events, payees, onClose, onSuccess, attachT
 
                   <div className="app-form-grid cols-2" style={{ gap: "0.5rem" }}>
                     <FG label="วันที่เอกสาร *">
-                      <input type="date" value={form.documentDate} onChange={(e) => setForm({ ...form, documentDate: e.target.value })} className="app-input" />
+                      <DateInput value={form.documentDate} onChange={(v) => setForm({ ...form, documentDate: v })} className="app-input" />
                     </FG>
                     <FG label="ค่าใช้จ่ายเป็น">
                       <SearchableSelect
@@ -767,7 +768,7 @@ export function ManualReceiptModal({ events, payees, onClose, onSuccess, attachT
                 </FG>
 
                 <div className="app-form-grid cols-2" style={{ gap: "0.5rem", marginBottom: "0.75rem" }}>
-                  <FG label="วันที่จ่าย / Due Date"><input type="date" value={form.dueDate} onChange={(e) => setForm({ ...form, dueDate: e.target.value })} className="app-input" /></FG>
+                  <FG label="วันที่จ่าย / Due Date"><DateInput value={form.dueDate} onChange={(v) => setForm({ ...form, dueDate: v })} className="app-input" /></FG>
                   <FG label="ผู้ขออนุญาตเบิกจ่าย"><input type="text" value={form.requesterName} onChange={(e) => setForm({ ...form, requesterName: e.target.value })} className="app-input" maxLength={100} /></FG>
                 </div>
               </div>

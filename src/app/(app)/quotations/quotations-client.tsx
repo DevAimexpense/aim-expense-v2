@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { trpc } from "@/lib/trpc/client";
+import DateInput from "@/components/shared/date-input";
+import { formatDate } from "@/lib/utils/date";
 
 type Status = "draft" | "sent" | "accepted" | "rejected" | "void" | "converted";
 
@@ -177,18 +179,16 @@ export function QuotationsClient() {
             </option>
           ))}
         </select>
-        <input
-          type="date"
+        <DateInput
           value={from}
-          onChange={(e) => setFrom(e.target.value)}
+          onChange={(v) => setFrom(v)}
           className="app-input"
           style={{ maxWidth: "180px" }}
           placeholder="ตั้งแต่"
         />
-        <input
-          type="date"
+        <DateInput
           value={to}
-          onChange={(e) => setTo(e.target.value)}
+          onChange={(v) => setTo(v)}
           className="app-input"
           style={{ maxWidth: "180px" }}
           placeholder="ถึง"
@@ -288,9 +288,9 @@ export function QuotationsClient() {
                       {q.docNumber}
                     </td>
                     <td>
-                      <div>{q.docDate}</div>
+                      <div>{formatDate(q.docDate)}</div>
                       <div style={{ fontSize: "0.75rem", color: "#64748b" }}>
-                        ใช้ได้ถึง {q.validUntil}
+                        ใช้ได้ถึง {formatDate(q.validUntil)}
                       </div>
                     </td>
                     <td>

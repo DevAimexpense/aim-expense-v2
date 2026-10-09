@@ -7,6 +7,7 @@ import { formatDate } from "@/lib/utils/date";
 import { UploadReceiptModal } from "./upload-receipt-modal";
 import { ManualReceiptModal } from "./manual-receipt-modal";
 import SearchableSelect, { type SearchableSelectOption } from "@/components/searchable-select";
+import DateInput from "@/components/shared/date-input";
 
 // ===== Status / Type labels =====
 const STATUS_LABEL: Record<string, { label: string; cls: string }> = {
@@ -250,11 +251,11 @@ export default function ExpensesPage() {
           </div>
           <div>
             <label className="app-label" style={{ fontSize: "0.75rem" }}>⏰ Due ตั้งแต่</label>
-            <input type="date" value={dueDateFrom} onChange={(e) => setDueDateFrom(e.target.value)} className="app-input" />
+            <DateInput value={dueDateFrom} onChange={(v) => setDueDateFrom(v)} className="app-input" />
           </div>
           <div>
             <label className="app-label" style={{ fontSize: "0.75rem" }}>⏰ Due ถึง</label>
-            <input type="date" value={dueDateTo} onChange={(e) => setDueDateTo(e.target.value)} className="app-input" />
+            <DateInput value={dueDateTo} onChange={(v) => setDueDateTo(v)} className="app-input" />
           </div>
         </div>
       </div>

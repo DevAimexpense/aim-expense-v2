@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { trpc } from "@/lib/trpc/client";
+import DateInput from "@/components/shared/date-input";
 
 interface ExtractedReceipt {
   vendorName: string | null;
@@ -338,10 +339,9 @@ export function ReceiptReviewModal({
                 </div>
                 <div className="app-form-group">
                   <label className="app-label app-label-required">วันที่ออกใบเสร็จ</label>
-                  <input
-                    type="date"
+                  <DateInput
                     value={receiptDate}
-                    onChange={(e) => setReceiptDate(e.target.value)}
+                    onChange={(v) => setReceiptDate(v)}
                     className="app-input"
                   />
                 </div>

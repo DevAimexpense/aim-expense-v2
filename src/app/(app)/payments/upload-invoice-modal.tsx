@@ -11,6 +11,7 @@ import {
 } from "@/lib/constants/expense-categories";
 import { pdfFirstPageToImage, isPdfFile } from "@/lib/utils/pdf-to-image";
 import { formatDate } from "@/lib/utils/date";
+import DateInput from "@/components/shared/date-input";
 
 interface Event {
   eventId: string;
@@ -925,10 +926,9 @@ export function UploadInvoiceModal({
               </div>
               <div className="app-form-group">
                 <label className="app-label app-label-required">📅 Due Date</label>
-                <input
-                  type="date"
+                <DateInput
                   value={form.dueDate}
-                  onChange={(e) => setForm({ ...form, dueDate: e.target.value })}
+                  onChange={(v) => setForm({ ...form, dueDate: v })}
                   className="app-input"
                 />
               </div>

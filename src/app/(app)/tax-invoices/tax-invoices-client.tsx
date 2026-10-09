@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { trpc } from "@/lib/trpc/client";
+import DateInput from "@/components/shared/date-input";
 
 type Status = "draft" | "issued" | "void";
 
@@ -161,17 +162,15 @@ export function TaxInvoicesClient() {
             </option>
           ))}
         </select>
-        <input
-          type="date"
+        <DateInput
           value={from}
-          onChange={(e) => setFrom(e.target.value)}
+          onChange={(v) => setFrom(v)}
           className="app-input"
           style={{ maxWidth: "180px" }}
         />
-        <input
-          type="date"
+        <DateInput
           value={to}
-          onChange={(e) => setTo(e.target.value)}
+          onChange={(v) => setTo(v)}
           className="app-input"
           style={{ maxWidth: "180px" }}
         />

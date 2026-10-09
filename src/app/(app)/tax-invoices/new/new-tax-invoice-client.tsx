@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { trpc } from "@/lib/trpc/client";
+import DateInput from "@/components/shared/date-input";
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -421,10 +422,9 @@ export function NewTaxInvoiceClient({
               <label className="app-label app-label-required">
                 วันที่ส่งมอบ/วันให้บริการเสร็จสิ้น
               </label>
-              <input
-                type="date"
+              <DateInput
                 value={form.docDate}
-                onChange={(e) => setForm({ ...form, docDate: e.target.value })}
+                onChange={(v) => setForm({ ...form, docDate: v })}
                 max={todayISO()}
                 className="app-input"
               />

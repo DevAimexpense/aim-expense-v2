@@ -240,11 +240,10 @@ export const quotationRouter = router({
       }
 
       const quotationId = GoogleSheetsService.generateId("QT");
-      const year = new Date(input.docDate).getFullYear() || new Date().getFullYear();
       const docNumber = await computeNextDocNumber(
         sheets,
         "QT",
-        year,
+        input.docDate,
         SHEET_TABS.QUOTATIONS
       );
 
@@ -577,11 +576,10 @@ export const quotationRouter = router({
 
       const billingId = GoogleSheetsService.generateId("BIL");
       const docDate = input.docDate || new Date().toISOString().slice(0, 10);
-      const year = new Date(docDate).getFullYear() || new Date().getFullYear();
       const docNumber = await computeNextDocNumber(
         sheets,
         "BIL",
-        year,
+        docDate,
         SHEET_TABS.BILLINGS
       );
 

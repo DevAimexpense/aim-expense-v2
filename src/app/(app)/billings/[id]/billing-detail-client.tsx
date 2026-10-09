@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { trpc } from "@/lib/trpc/client";
 import { BillingStatusBadge } from "../billings-client";
+import { formatDate } from "@/lib/utils/date";
 
 const formatTHB = (n: number) =>
   n.toLocaleString("th-TH", {
@@ -92,7 +93,7 @@ export function BillingDetailClient({ billingId }: { billingId: string }) {
             <BillingStatusBadge status={header.status} />
           </h1>
           <p className="app-page-subtitle">
-            ออก {header.docDate} • ครบกำหนด {header.dueDate}
+            ออก {formatDate(header.docDate)} • ครบกำหนด {formatDate(header.dueDate)}
             {header.sourceQuotationId && (
               <>
                 {" • "}
@@ -253,10 +254,10 @@ export function BillingDetailClient({ billingId }: { billingId: string }) {
               <strong>โครงการ:</strong> {header.projectName || "-"}
             </div>
             <div>
-              <strong>วันที่ออก:</strong> {header.docDate}
+              <strong>วันที่ออก:</strong> {formatDate(header.docDate)}
             </div>
             <div>
-              <strong>วันครบกำหนด:</strong> {header.dueDate}
+              <strong>วันครบกำหนด:</strong> {formatDate(header.dueDate)}
             </div>
             <div>
               <strong>ผู้จัดทำ:</strong> {header.preparedBy || "-"}

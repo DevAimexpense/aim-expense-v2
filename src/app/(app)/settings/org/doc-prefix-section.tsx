@@ -65,7 +65,7 @@ export function DocPrefixSection({ isAdmin }: Props) {
         <div>
           <h2 className="app-card-title">🔢 เลขที่เอกสาร</h2>
           <p className="app-card-subtitle">
-            กำหนด prefix สำหรับเลขเอกสาร — รูปแบบ {`{PREFIX}-{YEAR}-{0001}`}
+            กำหนด prefix สำหรับเลขเอกสาร — รูปแบบ {`{PREFIX}-{ปี}-{เดือน}-{001}`} (เลขรันเริ่มใหม่ทุกเดือน)
           </p>
         </div>
       </div>
@@ -95,7 +95,7 @@ export function DocPrefixSection({ isAdmin }: Props) {
 
           <PrefixField
             label="ใบเสนอราคา (Quotation)"
-            preview={`${form.QT}-${new Date().getFullYear()}-0001`}
+            preview={`${form.QT}-${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}-001`}
             value={form.QT}
             onChange={(v) => setForm({ ...form, QT: v.toUpperCase() })}
             error={errQT}
@@ -103,7 +103,7 @@ export function DocPrefixSection({ isAdmin }: Props) {
           />
           <PrefixField
             label="ใบวางบิล (Billing)"
-            preview={`${form.BIL}-${new Date().getFullYear()}-0001`}
+            preview={`${form.BIL}-${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}-001`}
             value={form.BIL}
             onChange={(v) => setForm({ ...form, BIL: v.toUpperCase() })}
             error={errBIL}
@@ -111,7 +111,7 @@ export function DocPrefixSection({ isAdmin }: Props) {
           />
           <PrefixField
             label="ใบกำกับภาษี (Tax Invoice)"
-            preview={`${form.TI}-${new Date().getFullYear()}-0001`}
+            preview={`${form.TI}-${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}-001`}
             value={form.TI}
             onChange={(v) => setForm({ ...form, TI: v.toUpperCase() })}
             error={errTI}
@@ -119,7 +119,7 @@ export function DocPrefixSection({ isAdmin }: Props) {
           />
           <PrefixField
             label="ใบเสร็จรับเงิน (Receipt)"
-            preview={`${form.RC}-${new Date().getFullYear()}-0001`}
+            preview={`${form.RC}-${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}-001`}
             value={form.RC}
             onChange={(v) => setForm({ ...form, RC: v.toUpperCase() })}
             error={errRC}

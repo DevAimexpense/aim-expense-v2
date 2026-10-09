@@ -5,6 +5,7 @@ import { trpc } from "@/lib/trpc/client";
 import { PaymentModal } from "../payments/payment-modal";
 import SearchableSelect, { type SearchableSelectOption } from "@/components/searchable-select";
 import { formatDate } from "@/lib/utils/date";
+import DateInput from "@/components/shared/date-input";
 
 export default function ApprovalsPage() {
   const utils = trpc.useUtils();
@@ -223,11 +224,11 @@ export default function ApprovalsPage() {
           </div>
           <div>
             <label className="app-label" style={{ fontSize: "0.75rem" }}>⏰ Due Date ตั้งแต่</label>
-            <input type="date" value={dueDateFrom} onChange={(e) => setDueDateFrom(e.target.value)} className="app-input" />
+            <DateInput value={dueDateFrom} onChange={(v) => setDueDateFrom(v)} className="app-input" />
           </div>
           <div>
             <label className="app-label" style={{ fontSize: "0.75rem" }}>⏰ Due Date ถึง</label>
-            <input type="date" value={dueDateTo} onChange={(e) => setDueDateTo(e.target.value)} className="app-input" />
+            <DateInput value={dueDateTo} onChange={(v) => setDueDateTo(v)} className="app-input" />
           </div>
         </div>
       </div>
@@ -397,10 +398,9 @@ export default function ApprovalsPage() {
                 <label className="app-label app-label-required">
                   วันที่จ่ายเงิน (Scheduled)
                 </label>
-                <input
-                  type="date"
+                <DateInput
                   value={paymentDate}
-                  onChange={(e) => setPaymentDate(e.target.value)}
+                  onChange={(v) => setPaymentDate(v)}
                   className="app-input"
                 />
                 <p className="app-hint">

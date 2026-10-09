@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { trpc } from "@/lib/trpc/client";
+import DateInput from "@/components/shared/date-input";
 
 const formatTHB = (n: number) =>
   n.toLocaleString("th-TH", {
@@ -44,17 +45,15 @@ export function Vat30Client({ orgName }: { orgName: string }) {
         className="app-filter-row"
         style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}
       >
-        <input
-          type="date"
+        <DateInput
           value={from}
-          onChange={(e) => setFrom(e.target.value)}
+          onChange={(v) => setFrom(v)}
           className="app-input"
           style={{ maxWidth: "180px" }}
         />
-        <input
-          type="date"
+        <DateInput
           value={to}
-          onChange={(e) => setTo(e.target.value)}
+          onChange={(v) => setTo(v)}
           className="app-input"
           style={{ maxWidth: "180px" }}
         />

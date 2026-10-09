@@ -5,6 +5,7 @@ import { trpc } from "@/lib/trpc/client";
 import { calculatePayment } from "@/lib/calculations";
 import { WTH_TYPES, findWthTypeByRate } from "@/lib/wth-types";
 import SearchableSelect, { type SearchableSelectOption } from "@/components/searchable-select";
+import DateInput from "@/components/shared/date-input";
 import {
   EXPENSE_CATEGORIES_MAIN,
   DOCUMENT_TYPE_OPTIONS,
@@ -906,10 +907,9 @@ export function PaymentModal({
               </div>
               <div className="app-form-group">
                 <label className="app-label app-label-required">วันครบกำหนด</label>
-                <input
-                  type="date"
+                <DateInput
                   value={form.dueDate}
-                  onChange={(e) => setForm({ ...form, dueDate: e.target.value })}
+                  onChange={(v) => setForm({ ...form, dueDate: v })}
                   className="app-input"
                   disabled={isReadOnly}
                 />

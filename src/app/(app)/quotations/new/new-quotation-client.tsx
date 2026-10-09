@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { trpc } from "@/lib/trpc/client";
+import DateInput from "@/components/shared/date-input";
 import {
   VatModePicker,
   vatModeOf,
@@ -404,20 +405,18 @@ export function NewQuotationClient({ mode, initial }: Props) {
           <div className="app-form-grid cols-2">
             <div className="app-form-group">
               <label className="app-label app-label-required">วันที่ออก</label>
-              <input
-                type="date"
+              <DateInput
                 value={form.docDate}
-                onChange={(e) => setForm({ ...form, docDate: e.target.value })}
+                onChange={(v) => setForm({ ...form, docDate: v })}
                 className="app-input"
               />
             </div>
             <div className="app-form-group">
               <label className="app-label app-label-required">ใช้ได้ถึง</label>
-              <input
-                type="date"
+              <DateInput
                 value={form.validUntil}
-                onChange={(e) =>
-                  setForm({ ...form, validUntil: e.target.value })
+                onChange={(v) =>
+                  setForm({ ...form, validUntil: v })
                 }
                 className="app-input"
               />

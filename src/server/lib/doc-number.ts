@@ -44,38 +44,51 @@ export async function getAllDocPrefixes(
   };
 }
 
+/** ปี-เดือน (ค.ศ.) ของวันที่เอกสาร — ใช้เป็นงวดของเลขรัน */
+export function docPeriod(docDate: string | Date | undefined | null): {
+  yyyy: string;
+  mm: string;
+} {
+  const d = docDate ? new Date(docDate) : new Date();
+  const safe = isNaN(d.getTime()) ? new Date() : d;
+  return {
+    yyyy: String(safe.getFullYear()),
+    mm: String(safe.getMonth() + 1).padStart(2, "0"),
+  };
+}
+
 /**
- * คำนวณเลขเอกสารถัดไป — `{PREFIX}-{YEAR}-{4-digit-seq}`
+ * คำนวณเลขเอกสารถัดไป — `{PREFIX}-{YYYY}-{MM}-{3-digit-seq}` (เลขรันเริ่มใหม่ทุกเดือน)
  *
- * ตัวอย่าง: `QT-2026-0001`, `BIL-2026-0042`, `B/2026/0099` ถ้า user ตั้ง prefix `B/`
+ * ตัวอย่าง: `QT-2026-08-001`, `BIL-2026-08-042`
+ * (รูปแบบเดิม `QT-2026-0001` ที่ออกไปแล้วคงเดิม — ไม่ถูกนับรวมในเลขรันของเดือน)
  *
+ * @param docDate      วันที่เอกสาร (ISO) — กำหนดปี/เดือนของเลขรัน
  * @param tab          ชื่อ sheet ที่อ่าน (SHEET_TABS.QUOTATIONS / BILLINGS / TAX_INVOICES)
  * @param statusFilter optional — filter row ตาม Status field (เช่น TI: นับเฉพาะ "issued")
- *
  * @param numberColumn คอลัมน์ที่เก็บเลข (default DocNumber) — ใบเสร็จรับเงินใช้ ReceiptNumber
- *
- * Reset index ทุกปี (filter ตาม year prefix แล้ว max+1)
  */
 export async function computeNextDocNumber(
   sheets: GoogleSheetsService,
   type: DocPrefixType,
-  year: number,
+  docDate: string,
   tab: string,
   statusFilter?: (status: string) => boolean,
   numberColumn: string = "DocNumber"
 ): Promise<string> {
   const prefix = await getDocPrefix(sheets, type);
   const all = await sheets.getAll(tab);
-  const yearPrefix = `${prefix}-${year}-`;
+  const { yyyy, mm } = docPeriod(docDate);
+  const periodPrefix = `${prefix}-${yyyy}-${mm}-`;
   const seqs = all
     .filter((r) => {
       if (statusFilter && !statusFilter(r.Status || "")) return false;
-      return (r[numberColumn] || "").startsWith(yearPrefix);
+      return (r[numberColumn] || "").startsWith(periodPrefix);
     })
-    .map((r) => parseInt((r[numberColumn] || "").slice(yearPrefix.length), 10))
+    .map((r) => parseInt((r[numberColumn] || "").slice(periodPrefix.length), 10))
     .filter((n) => !isNaN(n));
   const next = (seqs.length > 0 ? Math.max(...seqs) : 0) + 1;
-  return `${prefix}-${year}-${String(next).padStart(4, "0")}`;
+  return `${prefix}-${yyyy}-${mm}-${String(next).padStart(3, "0")}`;
 }
 
 /**
