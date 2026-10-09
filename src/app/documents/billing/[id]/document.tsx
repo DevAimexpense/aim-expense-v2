@@ -256,7 +256,10 @@ export function BillingDocument({ billingId, org, header, lines, banks }: Props)
           align-items: center;
           justify-content: center;
           height: 2rem;
-          padding: 0 1rem;
+          /* ฟอนต์ไทยเผื่อที่สระ/วรรณยุกต์ด้านบนไว้ใน ascent → ตัวอักษรดูจมลงล่าง: ดันขึ้นด้วย padding-bottom
+             letter-spacing ทิ้งช่องว่างท้ายตัวสุดท้าย → ชดเชยด้วย text-indent ให้กึ่งกลางจริง */
+          padding: 0 1rem 0.3em;
+          text-indent: 0.15em;
           line-height: 1;
           font-size: 0.875rem;
           font-weight: 700;
