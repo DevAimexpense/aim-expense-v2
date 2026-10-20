@@ -9,6 +9,7 @@
 import { useEffect, useState } from "react";
 import type { PlanTier } from "@/lib/plans";
 import { BILLING_ENABLED } from "@/lib/billing-flag";
+import { COMPANY } from "@/lib/company";
 
 type Interval = "monthly" | "yearly";
 
@@ -172,7 +173,7 @@ export function TierUpgradeButton({
 export function ContactSalesButton() {
   return (
     <a
-      href="mailto:sales@aimexpense.com?subject=Enterprise%20inquiry"
+      href={`mailto:${COMPANY.email}?subject=Enterprise%20inquiry`}
       className="app-btn app-btn-secondary"
       style={{ width: "100%", fontWeight: 700 }}
     >

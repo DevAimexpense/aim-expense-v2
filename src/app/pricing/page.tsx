@@ -7,22 +7,24 @@
 // ===========================================
 
 import Link from "next/link";
-import type { Metadata } from "next";
 import {
   PLAN_LABELS,
   PLAN_LIMITS,
   PLAN_PRICING_THB,
   type PlanTier,
 } from "@/lib/plans";
-import { COMPANY_NAME } from "@/lib/legal/version";
-import { getSession } from "@/lib/auth/session";
+import { COMPANY } from "@/lib/company";
+import { pageMeta } from "@/lib/site-lang";
+import { SiteHeader } from "@/components/site/site-header";
+import { SiteFooter } from "@/components/site/site-footer";
 import { PricingCardsClient } from "./pricing-actions";
 
-export const metadata: Metadata = {
-  title: `ราคา · ${COMPANY_NAME}`,
+export const metadata = pageMeta("th", "/pricing", {
+  title: "ราคาและแพ็กเกจ — Aim Expense",
   description:
-    "ราคา Aim Expense — Free Forever ไปจนถึง Enterprise พร้อม 30-day Pro trial ไม่ต้องใช้บัตรเครดิต",
-};
+    "แพ็กเกจ Aim Expense: Free Forever ฿0 · Basic ฿189 · Pro ฿399 · Business ฿699 · Max ฿1,499 ต่อเดือน ทดลอง Pro ฟรี 30 วัน ไม่ต้องใช้บัตร ยกเลิกได้ตลอดเวลา",
+  thOnly: true,
+});
 
 const TIERS: PlanTier[] = [
   "free",
@@ -67,7 +69,7 @@ const FEATURE_TOGGLES: { label: string; enabledOn: PlanTier[] }[] = [
     enabledOn: ["pro", "business", "max", "enterprise"],
   },
   { label: "P&L per Project", enabledOn: ["pro", "business", "max", "enterprise"] },
-  { label: "ภ.พ.30 + WHT Report", enabledOn: ["pro", "business", "max", "enterprise"] },
+  { label: "รายงานภาษีหัก ณ ที่จ่าย (ภ.ง.ด.3 / ภ.ง.ด.53)", enabledOn: ["pro", "business", "max", "enterprise"] },
   { label: "Custom branding บน PDF", enabledOn: ["max", "enterprise"] },
   { label: "API access", enabledOn: ["max", "enterprise"] },
   { label: "Audit Log Export", enabledOn: ["max", "enterprise"] },
@@ -75,11 +77,6 @@ const FEATURE_TOGGLES: { label: string; enabledOn: PlanTier[] }[] = [
 ];
 
 export default async function PricingPage() {
-  // Session-aware header: if the user is already logged in, the top-right
-  // button must go to the app (not /login), otherwise clicking it just bounces
-  // through login → select-org and lands back here still looking "logged out".
-  const session = await getSession();
-
   // Bundle prices for client component (avoids re-importing PLAN_PRICING_THB there)
   const prices = {
     basic: PLAN_PRICING_THB.basic!,
@@ -90,61 +87,7 @@ export default async function PricingPage() {
 
   return (
     <main style={{ minHeight: "100vh", background: "var(--bg-secondary)" }}>
-      {/* Top nav — /pricing is public, so it carries its own header */}
-      <header
-        style={{
-          borderBottom: "1px solid var(--border-color)",
-          background: "white",
-        }}
-      >
-        <div
-          style={{
-            maxWidth: "1400px",
-            margin: "0 auto",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            padding: "0.75rem 1.5rem",
-          }}
-        >
-          <Link
-            href="/"
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "0.5rem",
-              textDecoration: "none",
-            }}
-          >
-            <div
-              style={{
-                display: "flex",
-                height: "32px",
-                width: "32px",
-                alignItems: "center",
-                justifyContent: "center",
-                borderRadius: "0.5rem",
-                background:
-                  "linear-gradient(135deg, var(--color-brand-500), var(--color-brand-700))",
-                fontSize: "0.875rem",
-                fontWeight: 700,
-                color: "white",
-              }}
-            >
-              A
-            </div>
-            <span style={{ fontWeight: 600, color: "#0f172a" }}>
-              {COMPANY_NAME}
-            </span>
-          </Link>
-          <Link
-            href={session ? "/dashboard" : "/login"}
-            className="app-btn app-btn-primary"
-          >
-            {session ? "ไปที่แดชบอร์ด" : "เข้าสู่ระบบ"}
-          </Link>
-        </div>
-      </header>
+      <SiteHeader lang="th" path="/pricing" />
 
       <div className="app-page">
         {/* Hero */}
@@ -374,10 +317,10 @@ export default async function PricingPage() {
           <p>
             มีคำถามเรื่องราคา?{" "}
             <a
-              href="mailto:support@aimexpense.com"
+              href={`mailto:${COMPANY.email}`}
               style={{ color: "var(--color-brand-600)" }}
             >
-              support@aimexpense.com
+              {COMPANY.email}
             </a>
           </p>
           <p
@@ -392,6 +335,7 @@ export default async function PricingPage() {
           </p>
         </div>
       </div>
+      <SiteFooter lang="th" />
     </main>
   );
 }

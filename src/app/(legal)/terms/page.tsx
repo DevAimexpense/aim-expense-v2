@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { COMPANY_NAME, CONTACT_EMAIL, LEGAL_VERSION } from "@/lib/legal/version";
+import { COMPANY } from "@/lib/company";
 
 export const metadata: Metadata = {
   title: `ข้อกำหนดการใช้งาน · ${COMPANY_NAME}`,
@@ -104,6 +105,13 @@ export default function TermsPage() {
       </p>
 
       <h2>11. ติดต่อเรา</h2>
+      <p>
+        ผู้ให้บริการ: <strong>{COMPANY.nameTh}</strong> ({COMPANY.nameEn}) เลขทะเบียนนิติบุคคล {COMPANY.registrationNo}
+        <br />
+        {COMPANY.address}
+        <br />
+        โทร {COMPANY.phone} · LINE OA {COMPANY.lineOaId}
+      </p>
       <p>
         คำถามเกี่ยวกับข้อกำหนดนี้ ติดต่อ:
         <br />

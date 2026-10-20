@@ -8,6 +8,8 @@ const nextConfig = {
     // ฟอร์ม 50 ทวิ + ฟอนต์ Sarabun ถูกอ่านด้วย fs ตอน runtime (src/lib/wht-cert/generate.ts)
     outputFileTracingIncludes: {
       "/api/documents/wht-cert/[paymentId]": ["./public/forms/**", "./public/fonts/**"],
+      "/opengraph-image": ["./public/fonts/**", "./public/aim-expense-logo.png"],
+      "/en/opengraph-image": ["./public/fonts/**", "./public/aim-expense-logo.png"],
     },
   },
 };

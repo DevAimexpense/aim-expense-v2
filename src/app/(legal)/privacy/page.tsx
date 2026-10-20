@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { COMPANY_NAME, CONTACT_EMAIL, DPO_EMAIL, LEGAL_VERSION } from "@/lib/legal/version";
+import { COMPANY } from "@/lib/company";
 
 export const metadata: Metadata = {
   title: `นโยบายความเป็นส่วนตัว · ${COMPANY_NAME}`,
@@ -177,6 +178,13 @@ export default function PrivacyPage() {
       </p>
 
       <h2>12. ติดต่อเจ้าหน้าที่คุ้มครองข้อมูล (DPO)</h2>
+      <p>
+        ผู้ให้บริการ: <strong>{COMPANY.nameTh}</strong> ({COMPANY.nameEn}) เลขทะเบียนนิติบุคคล {COMPANY.registrationNo}
+        <br />
+        {COMPANY.address}
+        <br />
+        โทร {COMPANY.phone} · LINE OA {COMPANY.lineOaId}
+      </p>
       <p>
         หากท่านมีคำถามหรือต้องการใช้สิทธิตาม PDPA โปรดติดต่อ:
         <br />
