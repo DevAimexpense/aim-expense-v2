@@ -1,121 +1,95 @@
 // ===========================================
-// หน้าแรกของเว็บสาธารณะ (/ และ /en) — server component: ข้อความทั้งหมดอยู่ใน HTML แรก
-// ให้ AI/ค้นหาอ่านได้โดยไม่ต้องรอ JS · ไม่มีตัวเลขผู้ใช้/รีวิวปลอม · มี FAQ + JSON-LD
-// สีแบรนด์เดิม (น้ำเงิน + เขียว LINE สำหรับปุ่มเริ่มใช้) · ฟอนต์ IBM Plex Sans Thai เดิม
+// หน้าแรกของเว็บสาธารณะ (/ และ /en) — โครงเดียวกับ aim-hr: Hero น้ำเงินเข้ม + แชต LINE เล่นเป็นลำดับ
+// → 3 เรื่องใหญ่สลับซ้าย-ขวา (มีรูป) → ข้อมูลของคุณ (Google Sheet จำลอง เติมแถวทีละแถว)
+// → 3 ขั้นตอน (ไทม์ไลน์วาดเส้น) → ราคา (toggle) → FAQ ย่อ → CTA + QR → ฟุตเตอร์
+// - server component: ข้อความทั้งหมดอยู่ใน HTML แรก (AEO + LINE OA verification)
+// - animation เป็นของแถม: <Reveal> ซ่อนเฉพาะเมื่อ JS เติม js-reveal · reduced-motion ปิดทั้งหมด
+// - สีแบรนด์: น้ำเงิน + เหลืองโลโก้ (accent) · เขียวเฉพาะ mock แชต LINE และปุ่มเพิ่มเพื่อน · ไม่มีตัวเลขปลอม
 // ===========================================
 
 import Link from "next/link";
+import { ArrowRight, Check, ShieldCheck, Table } from "lucide-react";
 import { SiteHeader } from "./site-header";
 import { SiteFooter } from "./site-footer";
+import { Button } from "./button";
+import { Reveal } from "./reveal";
+import { FeaturePhoto } from "./feature-photo";
+import { PricingCards } from "./pricing-cards";
 import { HOME, FAQ, faqJsonLd } from "./copy";
+import { Logo } from "./logo";
 import { COMPANY } from "@/lib/company";
 import { withLang, type Lang } from "@/lib/site-lang";
+import { JsonLd, websiteJsonLd } from "@/lib/site-jsonld";
 
-const GREEN = "#06C755";
+const LINE_GREEN = "#06C755";
+type Home = (typeof HOME)["th"];
 
 export function Landing({ lang }: { lang: Lang }) {
+  const h = HOME[lang] as Home;
   const faq = FAQ[lang].slice(0, 6);
   return (
-    <div className="min-h-screen bg-white text-slate-900">
+    <div className="site-motion min-h-screen bg-white text-slate-900">
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(faqJsonLd(lang, faq)) }} />
+      <JsonLd data={websiteJsonLd(lang)} />
       <SiteHeader lang={lang} path="/" />
       <main>
-        <Hero lang={lang} />
-        <Stories lang={lang} />
-        <DataOwnership lang={lang} />
-        <HowItWorks lang={lang} />
-        <PricingTeaser lang={lang} />
-        <FaqSection lang={lang} items={faq} />
-        <CtaBand lang={lang} />
+        <Hero h={h} lang={lang} />
+        <Stories h={h} lang={lang} />
+        <YourData h={h} lang={lang} />
+        <HowSteps h={h} />
+        <PricingSection h={h} />
+        <FaqSection h={h} lang={lang} items={faq} />
+        <CtaBand h={h} />
       </main>
       <SiteFooter lang={lang} />
     </div>
   );
 }
 
-// ---------- hero ----------
-function Hero({ lang }: { lang: Lang }) {
-  const t = HOME[lang].hero;
-  const m = HOME[lang].mock;
+// ===================== Hero =====================
+function Hero({ h, lang }: { h: Home; lang: Lang }) {
+  const t = h.hero;
   return (
-    <section className="bg-brand-900 text-white">
-      <div className="mx-auto grid max-w-6xl items-center gap-12 px-4 pb-16 pt-14 sm:px-6 lg:grid-cols-[1.1fr_1fr] lg:py-24">
+    <section className="relative overflow-hidden bg-brand-900 text-white">
+      <div aria-hidden className="pointer-events-none absolute -left-40 -top-40 h-[34rem] w-[34rem] rounded-full bg-brand-600/50 blur-3xl" />
+      <div aria-hidden className="pointer-events-none absolute -bottom-48 right-[-10rem] h-[30rem] w-[30rem] rounded-full bg-accent-500/15 blur-3xl" />
+      <div className="relative mx-auto grid max-w-6xl items-center gap-14 px-4 pb-20 pt-14 sm:px-6 lg:grid-cols-[0.9fr_1.1fr] lg:pb-28 lg:pt-20">
         <div>
-          <h1 className="text-balance text-4xl font-extrabold leading-[1.12] tracking-tight sm:text-5xl lg:text-[3.4rem]">
-            {t.h1a}
-            <br />
-            <span className="text-brand-200">{t.h1b}</span>
+          <h1 className="text-balance text-[2.5rem] font-bold leading-[1.12] tracking-tight sm:text-5xl lg:text-[3.3rem]">
+            {t.title1}
+            <span className="block text-accent-300">{t.title2}</span>
+            <span className="block">{t.title3}</span>
           </h1>
-          <p className="mt-6 max-w-xl text-pretty text-base leading-relaxed text-brand-100 sm:text-lg">{t.sub}</p>
-          <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-            <Link
-              href="/login"
-              className="inline-flex items-center justify-center rounded-full px-6 py-3 text-base font-semibold text-slate-900 shadow-lg transition-transform hover:scale-[1.02] active:scale-95"
-              style={{ background: GREEN }}
-            >
+          <p className="mt-6 max-w-xl text-pretty text-lg leading-relaxed text-brand-100">{t.sub}</p>
+          <div className="mt-9 flex flex-col gap-3 sm:flex-row">
+            <Button href="/login" size="lg" variant="inverse" className="shadow-lg shadow-brand-900/40">
               {t.ctaStart}
-            </Link>
-            <Link
-              href="/pricing"
-              className="inline-flex items-center justify-center rounded-full border border-white/25 bg-white/10 px-6 py-3 text-base font-semibold text-white hover:bg-white/15"
-            >
+            </Button>
+            <Link href="/pricing" className="arrow-link inline-flex items-center justify-center gap-2 rounded-xl border border-white/30 px-6 py-3 text-base font-medium text-white transition hover:border-white/60 hover:bg-white/10">
               {t.ctaPricing}
+              <ArrowRight size={18} aria-hidden />
             </Link>
           </div>
           <ul className="mt-8 flex flex-wrap gap-x-6 gap-y-2 text-sm text-brand-100">
             {t.facts.map((f) => (
               <li key={f} className="flex items-center gap-2">
-                <span className="inline-block h-1.5 w-1.5 rounded-full" style={{ background: GREEN }} />
+                <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-accent-400" />
                 {f}
               </li>
             ))}
           </ul>
         </div>
 
-        {/* product mock: LINE chat + เอกสารที่ออกได้ */}
-        <div className="relative mx-auto w-full max-w-md lg:max-w-none">
-          <div className="relative z-10 overflow-hidden rounded-3xl border border-white/10 bg-white text-slate-900 shadow-2xl">
-            <div className="flex items-center gap-2.5 px-4 py-3 text-white" style={{ background: GREEN }}>
-              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-white/25 text-xs font-bold">A</div>
-              <div className="text-sm font-semibold leading-tight">
-                Aim Expense
-                <div className="text-[11px] font-normal text-white/90">● {m.online}</div>
-              </div>
-            </div>
-            <div className="space-y-3 bg-slate-50 px-4 py-4">
-              <div className="ml-auto w-[62%] rounded-2xl rounded-tr-sm bg-white p-3 shadow-sm">
-                <div className="flex justify-between text-[10px] font-bold tracking-wide text-slate-500">RECEIPT<span>☕</span></div>
-                <div className="mt-1.5 space-y-1.5">
-                  <div className="h-1.5 w-full rounded bg-slate-200" />
-                  <div className="h-1.5 w-3/4 rounded bg-slate-200" />
-                </div>
-                <div className="mt-2 flex justify-between border-t border-dashed border-slate-200 pt-1.5 text-[10px] text-slate-600">
-                  <span>TOTAL</span>
-                  <span className="font-bold text-slate-900">฿120</span>
-                </div>
-              </div>
-              <div className="w-[88%] rounded-2xl rounded-tl-sm border border-slate-200 bg-white p-3.5 shadow-sm">
-                <div className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-bold" style={{ background: `${GREEN}1f`, color: "#03873d" }}>
-                  ✓ {m.receiptRead}
-                </div>
-                <div className="mt-2 space-y-1 text-xs">
-                  <div className="flex justify-between"><span className="text-slate-600">{m.total}</span><span className="font-semibold">฿120.00</span></div>
-                  <div className="flex justify-between"><span className="text-slate-600">{m.vat}</span><span className="font-medium text-slate-800">฿7.85</span></div>
-                  <div className="flex justify-between"><span className="text-slate-600">{m.project}</span><span className="rounded bg-brand-50 px-1.5 font-semibold text-brand-700">Event A</span></div>
-                </div>
-                <div className="mt-3 rounded-lg py-1.5 text-center text-[11px] font-semibold text-white" style={{ background: GREEN }}>{m.save}</div>
-              </div>
-            </div>
+        {/* รูป hero เอียงเล็กน้อย + แชต LINE เล่นเป็นลำดับ (ซ้อนขอบซ้ายของรูปบนจอใหญ่, เรียงใต้รูปบนจอเล็ก) */}
+        <div className="relative min-w-0 lg:flex lg:items-center">
+          <div className="relative z-10 hidden lg:-mr-20 lg:block lg:w-72 lg:shrink-0">
+            <ChatSequence t={t.chat} />
           </div>
-          <div className="relative z-0 -mt-6 ml-auto w-[78%] rounded-2xl border border-white/10 bg-brand-800 p-4 text-sm shadow-xl sm:-mt-8 sm:w-[70%]">
-            <div className="text-xs font-medium text-brand-200">{m.docTitle}</div>
-            <ul className="mt-2 space-y-1.5 font-semibold">
-              {m.docs.map((d) => (
-                <li key={d} className="flex items-center gap-2">
-                  <span style={{ color: GREEN }}>✓</span> {d}
-                </li>
-              ))}
-            </ul>
+          <div className="overflow-hidden rounded-3xl shadow-2xl shadow-brand-900/60 ring-1 ring-white/15 lg:min-w-0 lg:flex-1 lg:rotate-[1.5deg]">
+            <FeaturePhoto kind="hero" lang={lang} priority />
+          </div>
+          <div className="mx-auto mt-5 w-full max-w-sm lg:hidden">
+            <ChatSequence t={t.chat} />
           </div>
         </div>
       </div>
@@ -123,248 +97,257 @@ function Hero({ lang }: { lang: Lang }) {
   );
 }
 
-// ---------- stories (สลับซ้าย-ขวา) ----------
-function Stories({ lang }: { lang: Lang }) {
-  const t = HOME[lang].stories;
-  const visuals = [<ChatVisual key="c" lang={lang} />, <DocVisual key="d" lang={lang} />, <FlowVisual key="f" lang={lang} />];
+/** แชต LINE: รูปใบเสร็จ → กำลังพิมพ์ → การ์ด OCR → บันทึกแล้ว → พิมพ์ข้อความ → บันทึกแล้ว
+ *  โชว์ทั้ง 2 วิธีที่ระบบรับได้ (อ่านจากรูป / พิมพ์ข้อความ) · เล่นครั้งเดียวตอนโหลด, ไม่มี JS ก็เห็นครบ */
+function ChatSequence({ t }: { t: Home["hero"]["chat"] }) {
+  const d = (s: number) => ({ "--delay": `${s}s` }) as React.CSSProperties;
   return (
-    <section id="features" className="mx-auto max-w-6xl scroll-mt-20 px-4 py-16 sm:px-6 sm:py-24">
-      <h2 className="max-w-3xl text-balance text-3xl font-bold leading-tight tracking-tight sm:text-4xl">{t.title}</h2>
-      <div className="mt-12 space-y-16 sm:mt-16 sm:space-y-24">
-        {t.items.map((item, i) => (
-          <article key={item.title} className={`grid items-center gap-8 lg:grid-cols-2 lg:gap-16 ${i % 2 === 1 ? "lg:[&>*:first-child]:order-2" : ""}`}>
-            <div>
-              <h3 className="text-2xl font-bold tracking-tight sm:text-3xl">{item.title}</h3>
-              <p className="mt-4 text-pretty text-base leading-relaxed text-slate-700 sm:text-lg">{item.desc}</p>
-              <ul className="mt-5 space-y-2 text-slate-800">
-                {item.points.map((p) => (
-                  <li key={p} className="flex items-start gap-2.5">
-                    <span className="mt-1 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-white" style={{ background: GREEN }}>✓</span>
-                    {p}
-                  </li>
-                ))}
-              </ul>
+    <div className="overflow-hidden rounded-2xl bg-white text-slate-900 shadow-xl shadow-brand-900/40">
+      <div className="flex items-center gap-2 px-3 py-2 text-white" style={{ background: LINE_GREEN }}>
+        <Logo className="h-6 w-6" rounded="rounded-md" />
+        <span className="text-xs font-semibold">{t.from}</span>
+        <span className="ml-auto text-[11px] tabular-nums text-white/85">{t.time}</span>
+      </div>
+      <div className="space-y-2 bg-slate-50 p-3 text-xs">
+        {/* 1) ผู้ใช้ส่งรูปใบเสร็จ (วาดเป็นกระดาษใบเสร็จย่อ ไม่ใช่ชื่อไฟล์) */}
+        <div className="home-chat-card ml-auto w-fit rounded-2xl rounded-tr-sm bg-brand-600 p-1.5" style={d(0.3)}>
+          <div role="img" aria-label={t.imageAlt} className="flex h-24 w-20 items-center justify-center rounded-xl bg-slate-100">
+            <div className="w-12 space-y-1.5 rounded-sm bg-white px-1.5 py-2 shadow-sm [clip-path:polygon(0_0,100%_0,100%_94%,88%_100%,75%_94%,62%_100%,50%_94%,38%_100%,25%_94%,12%_100%,0_94%)]">
+              <div className="mx-auto h-1 w-6 rounded bg-slate-400" />
+              <div className="h-0.5 w-full rounded bg-slate-200" />
+              <div className="h-0.5 w-5/6 rounded bg-slate-200" />
+              <div className="h-0.5 w-full rounded bg-slate-200" />
+              <div className="h-0.5 w-4/6 rounded bg-slate-200" />
+              <div className="mt-1 h-1 w-7 rounded bg-slate-500" />
             </div>
-            {visuals[i]}
-          </article>
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function ChatVisual({ lang }: { lang: Lang }) {
-  const th = lang === "th";
-  return (
-    <div className="rounded-3xl bg-slate-100 p-5 sm:p-8">
-      <div className="mx-auto max-w-sm space-y-3 text-sm">
-        <div className="ml-auto w-fit max-w-[80%] rounded-2xl rounded-tr-sm bg-brand-600 px-4 py-2.5 text-white">{th ? "ค่าแท็กซี่ไปหาลูกค้า 350 โปรเจกต์ Event A" : "Taxi to client 350 project Event A"}</div>
-        <div className="w-fit max-w-[85%] rounded-2xl rounded-tl-sm bg-white px-4 py-3 shadow-sm">
-          <div className="font-semibold text-slate-900">{th ? "บันทึกแล้ว ✓" : "Logged ✓"}</div>
-          <div className="mt-1 text-slate-700">{th ? "ค่าเดินทาง · ฿350.00 · Event A" : "Travel · ฿350.00 · Event A"}</div>
-          <div className="mt-1 text-xs text-slate-500">{th ? "งบคงเหลือ Event A: ฿11,650" : "Event A budget left: ฿11,650"}</div>
-        </div>
-        <div className="ml-auto w-fit rounded-2xl rounded-tr-sm bg-brand-600 px-4 py-2.5 text-white">📷 {th ? "ใบเสร็จร้านกาแฟ.jpg" : "coffee-receipt.jpg"}</div>
-        <div className="w-fit max-w-[85%] rounded-2xl rounded-tl-sm bg-white px-4 py-3 shadow-sm">
-          <div className="font-semibold text-slate-900">{th ? "อ่านใบเสร็จแล้ว ✓" : "Receipt read ✓"}</div>
-          <div className="mt-1 text-slate-700">Café Co. · ฿120.00 · VAT ฿7.85</div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function DocVisual({ lang }: { lang: Lang }) {
-  const th = lang === "th";
-  const rows = th
-    ? [["ค่าบริการออกแบบ", "8,500.00"], ["ค่าถ่ายภาพ", "12,000.00"]]
-    : [["Design service", "8,500.00"], ["Photography", "12,000.00"]];
-  return (
-    <div className="rounded-3xl bg-slate-100 p-5 sm:p-8">
-      <div className="mx-auto max-w-sm rounded-xl border border-slate-200 bg-white p-5 text-xs shadow-sm">
-        <div className="flex items-start justify-between">
-          <div>
-            <div className="text-sm font-bold text-slate-900">{COMPANY.nameTh}</div>
-            <div className="mt-0.5 text-slate-500">{th ? "เลขประจำตัวผู้เสียภาษี" : "Tax ID"} 0-1055-69117-50-3</div>
-          </div>
-          <div className="text-right">
-            <div className="whitespace-nowrap text-base font-bold text-brand-700">{th ? "ใบกำกับภาษี" : "TAX INVOICE"}</div>
-            <div className="font-mono text-slate-600">TI-2569-10-001</div>
           </div>
         </div>
-        <table className="mt-4 w-full">
-          <tbody>
-            {rows.map(([d, a]) => (
-              <tr key={d} className="border-t border-slate-100">
-                <td className="py-1.5 text-slate-700">{d}</td>
-                <td className="py-1.5 text-right font-medium">{a}</td>
-              </tr>
+        {/* 2) กำลังอ่าน */}
+        <div className="home-typing w-fit rounded-2xl rounded-tl-sm bg-white px-3 py-2 text-slate-600 shadow-sm" style={{ "--delay": "0.9s", "--hide": "2.3s" } as React.CSSProperties}>
+          <span className="sr-only">{t.typing}</span>
+          <span aria-hidden className="inline-block h-1.5 w-1.5 rounded-full bg-slate-400" style={{ "--i": 0 } as React.CSSProperties} />{" "}
+          <span aria-hidden className="inline-block h-1.5 w-1.5 rounded-full bg-slate-400" style={{ "--i": 1 } as React.CSSProperties} />{" "}
+          <span aria-hidden className="inline-block h-1.5 w-1.5 rounded-full bg-slate-400" style={{ "--i": 2 } as React.CSSProperties} />
+        </div>
+        {/* 3) การ์ดผล OCR */}
+        <div className="home-chat-card w-[90%] rounded-2xl rounded-tl-sm border border-slate-200 bg-white p-3 shadow-sm" style={d(2.4)}>
+          <div className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-bold" style={{ background: `${LINE_GREEN}1f`, color: "#03873d" }}>
+            <Check size={12} strokeWidth={3} aria-hidden /> {t.cardTitle}
+          </div>
+          <dl className="mt-2 space-y-1">
+            {t.rows.map(([k, v]) => (
+              <div key={k} className="flex justify-between gap-3">
+                <dt className="text-slate-600">{k}</dt>
+                <dd className="font-semibold tabular-nums">{v}</dd>
+              </div>
             ))}
-            <tr className="border-t border-slate-200">
-              <td className="py-1.5 text-slate-600">VAT 7%</td>
-              <td className="py-1.5 text-right">1,435.00</td>
-            </tr>
-            <tr className="border-t-2 border-slate-800">
-              <td className="py-1.5 font-bold">{th ? "ยอดรวมสุทธิ" : "Total"}</td>
-              <td className="py-1.5 text-right font-bold">21,935.00</td>
-            </tr>
-          </tbody>
-        </table>
-        <div className="mt-4 flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2 text-[11px] text-slate-700">
-          <span>{th ? "หนังสือรับรองหัก ณ ที่จ่าย 3%" : "Withholding certificate 3%"}</span>
-          <span className="font-semibold text-brand-700">{th ? "ออกแล้ว · ฟอร์ม 50 ทวิ" : "Issued · 50 Tawi form"}</span>
+          </dl>
+        </div>
+        <div className="home-chat-card w-fit max-w-[90%] rounded-2xl rounded-tl-sm bg-white px-3 py-2 shadow-sm" style={d(3.4)}>
+          <div className="font-semibold text-slate-900">{t.done}</div>
+          <div className="text-[11px] text-slate-600">{t.doneSub}</div>
+        </div>
+        {/* 4) วิธีที่สอง: พิมพ์ข้อความสั้น ๆ */}
+        <div className="home-chat-card ml-auto w-fit max-w-[85%] rounded-2xl rounded-tr-sm bg-brand-600 px-3 py-2 text-white" style={d(4.4)}>
+          {t.textMsg}
+        </div>
+        <div className="home-chat-card w-fit max-w-[90%] rounded-2xl rounded-tl-sm bg-white px-3 py-2 shadow-sm" style={d(5.2)}>
+          <div className="font-semibold text-slate-900">{t.textDone}</div>
+          <div className="text-[11px] text-slate-600">{t.textDoneSub}</div>
         </div>
       </div>
     </div>
   );
 }
 
-function FlowVisual({ lang }: { lang: Lang }) {
-  const th = lang === "th";
-  const steps = th
-    ? [["ตั้งเบิก", "ค่าเช่าสถานที่ ฿25,000", "done"], ["อนุมัติ", "โดย คุณพิม · 09:12", "done"], ["เตรียมจ่าย", "รอบจ่าย 15 ต.ค.", "now"], ["เคลียร์งบ", "", "next"]]
-    : [["Request", "Venue rental ฿25,000", "done"], ["Approve", "by Pim · 09:12", "done"], ["Prepare payment", "Batch 15 Oct", "now"], ["Reconcile", "", "next"]];
+// ===================== Stories =====================
+function Stories({ h, lang }: { h: Home; lang: Lang }) {
+  const t = h.stories;
   return (
-    <div className="rounded-3xl bg-slate-100 p-5 sm:p-8">
-      <div className="mx-auto max-w-sm rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="flex items-center justify-between text-xs text-slate-500">
-          <span>Event A</span>
-          <span>{th ? "งบ ฿60,000 · ใช้ไป 62%" : "Budget ฿60,000 · 62% used"}</span>
-        </div>
-        <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-100">
-          <div className="h-full w-[62%] rounded-full bg-brand-600" />
-        </div>
-        <ol className="mt-5 space-y-3 text-sm">
-          {steps.map(([title, sub, state]) => (
-            <li key={title} className="flex items-start gap-3">
-              <span
-                className={`mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] font-bold ${state === "done" ? "text-white" : state === "now" ? "border-2 border-brand-600 text-brand-700" : "border border-slate-300 text-slate-400"}`}
-                style={state === "done" ? { background: GREEN } : undefined}
-              >
-                {state === "done" ? "✓" : ""}
-              </span>
-              <div>
-                <div className={`font-semibold ${state === "next" ? "text-slate-400" : "text-slate-900"}`}>{title}</div>
-                {sub && <div className="text-xs text-slate-500">{sub}</div>}
+    <section id="features" className="mx-auto max-w-6xl scroll-mt-20 px-4 py-20 sm:px-6 lg:py-28">
+      <Reveal className="max-w-3xl">
+        <h2 className="text-balance text-3xl font-bold tracking-tight sm:text-4xl">{t.title}</h2>
+        <p className="mt-4 text-lg text-slate-700">{t.sub}</p>
+      </Reveal>
+      <div className="mt-16 space-y-20 lg:mt-24 lg:space-y-28">
+        {t.items.map((s, i) => {
+          const flip = i % 2 === 1;
+          return (
+            <Reveal as="article" key={s.anchor} className="grid items-center gap-10 lg:grid-cols-12 lg:gap-14">
+              <div className={`lg:col-span-7 ${flip ? "lg:order-2" : ""}`}>
+                <div className="lift overflow-hidden rounded-3xl shadow-xl shadow-slate-900/10">
+                  <FeaturePhoto kind={s.photo} lang={lang} />
+                </div>
               </div>
-            </li>
-          ))}
-        </ol>
+              <div className={`lg:col-span-5 ${flip ? "lg:order-1" : ""}`}>
+                <p className="text-sm font-semibold text-brand-700">{s.kicker}</p>
+                <h3 className="mt-2 text-balance text-2xl font-bold tracking-tight sm:text-3xl">{s.title}</h3>
+                <p className="mt-4 leading-relaxed text-slate-700">{s.desc}</p>
+                <ul className="mt-5 space-y-2 text-slate-800">
+                  {s.points.map((p) => (
+                    <li key={p} className="flex items-start gap-2.5">
+                      <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-brand-100 text-brand-700">
+                        <Check size={13} strokeWidth={3} aria-hidden />
+                      </span>
+                      {p}
+                    </li>
+                  ))}
+                </ul>
+                <Link href={`${withLang(lang, "/features")}#${s.anchor}`} className="arrow-link mt-6 inline-flex items-center gap-1.5 text-sm font-semibold text-brand-700 hover:underline">
+                  {t.more}
+                  <ArrowRight size={16} aria-hidden />
+                </Link>
+              </div>
+            </Reveal>
+          );
+        })}
       </div>
-    </div>
+    </section>
   );
 }
 
-// ---------- data ownership ----------
-function DataOwnership({ lang }: { lang: Lang }) {
-  const t = HOME[lang].data;
+// ===================== YourData =====================
+const STATUS_TONE: Record<string, string> = {
+  "จ่ายแล้ว": "bg-brand-600 text-white",
+  "อนุมัติแล้ว": "bg-brand-100 text-brand-800",
+  "รออนุมัติ": "bg-amber-100 text-amber-800",
+  Paid: "bg-brand-600 text-white",
+  Approved: "bg-brand-100 text-brand-800",
+  Pending: "bg-amber-100 text-amber-800",
+};
+
+function YourData({ h, lang }: { h: Home; lang: Lang }) {
+  const t = h.data;
   return (
-    <section className="bg-slate-50">
-      <div className="mx-auto grid max-w-6xl items-center gap-10 px-4 py-16 sm:px-6 sm:py-24 lg:grid-cols-2 lg:gap-16">
-        <div>
-          <h2 className="text-balance text-3xl font-bold leading-tight tracking-tight sm:text-4xl">{t.title}</h2>
-          <p className="mt-4 text-pretty text-base leading-relaxed text-slate-700 sm:text-lg">{t.desc}</p>
-          <ul className="mt-5 space-y-2 text-slate-800">
+    <section id="data" className="border-y border-brand-100 bg-brand-50">
+      <div className="mx-auto grid max-w-6xl items-center gap-12 px-4 py-20 sm:px-6 lg:grid-cols-[0.9fr_1.1fr] lg:gap-16 lg:py-28">
+        <Reveal>
+          <h2 className="text-balance text-3xl font-bold tracking-tight sm:text-4xl">{t.title}</h2>
+          <p className="mt-4 text-pretty leading-relaxed text-slate-700 sm:text-lg">{t.desc}</p>
+          <ul className="mt-6 space-y-3 text-slate-800">
             {t.points.map((p) => (
-              <li key={p} className="flex items-start gap-2.5">
-                <span className="mt-1 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-white" style={{ background: GREEN }}>✓</span>
+              <li key={p} className="flex items-start gap-3">
+                <ShieldCheck size={20} className="mt-0.5 shrink-0 text-brand-700" aria-hidden />
                 {p}
               </li>
             ))}
           </ul>
-        </div>
-        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-          <div className="flex items-center gap-2 border-b border-slate-200 px-4 py-2.5 text-xs text-slate-600">
-            <span className="inline-block h-3 w-3 rounded-sm bg-[#0f9d58]" />
-            <span className="font-semibold text-slate-800">Aim Expense — {COMPANY.nameTh}</span>
-            <span className="ml-auto">Google Sheets</span>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead className="bg-slate-50 text-left text-slate-600">
-                <tr>
-                  {t.sheetHead.map((h) => (
-                    <th key={h} className="whitespace-nowrap px-3 py-2 font-medium">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {t.sheetRows.map((r) => (
-                  <tr key={r[1]} className="border-t border-slate-100">
-                    {r.map((c, i) => (
-                      <td key={i} className={`whitespace-nowrap px-3 py-2 ${i >= 3 ? "text-right tabular-nums" : ""} ${i === 2 ? "text-brand-700" : "text-slate-800"}`}>{c}</td>
+        </Reveal>
+        <Reveal as="figure" className="min-w-0" delay={0.15}>
+          <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl shadow-brand-900/10">
+            <div className="flex items-center gap-2 border-b border-slate-200 px-4 py-2.5 text-sm">
+              <span className="flex h-6 w-6 items-center justify-center rounded-md bg-[#0f9d58] text-white"><Table size={14} aria-hidden /></span>
+              <span className="font-medium text-slate-800">{t.sheetFile}</span>
+              <span className="ml-auto hidden text-xs text-slate-500 sm:block">{t.sheetHint}</span>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[34rem] text-sm">
+                <thead>
+                  <tr className="bg-slate-50 text-xs text-slate-500">
+                    <th className="w-8 border-b border-r border-slate-200 py-1.5" />
+                    {["A", "B", "C", "D", "E"].map((c) => (
+                      <th key={c} className="border-b border-r border-slate-200 py-1.5 font-medium">{c}</th>
                     ))}
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <div className="flex gap-4 border-t border-slate-200 px-4 py-2 text-[11px] text-slate-500">
-            <span className="border-b-2 border-[#0f9d58] pb-0.5 font-medium text-slate-800">{t.sheetTab}</span>
-            <span>Billings</span><span>Quotations</span><span>TaxInvoices</span><span>Customers</span>
-          </div>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-// ---------- how it works (ลำดับจริง 3 ขั้น) ----------
-function HowItWorks({ lang }: { lang: Lang }) {
-  const t = HOME[lang].how;
-  return (
-    <section className="mx-auto max-w-6xl px-4 py-16 sm:px-6 sm:py-24">
-      <h2 className="max-w-2xl text-balance text-3xl font-bold leading-tight tracking-tight sm:text-4xl">{t.title}</h2>
-      <ol className="mt-10 grid gap-6 sm:grid-cols-3">
-        {t.steps.map((s, i) => (
-          <li key={s.title} className="relative rounded-2xl border border-slate-200 p-6">
-            <span className="text-4xl font-extrabold tabular-nums text-brand-600">{i + 1}</span>
-            <h3 className="mt-3 text-lg font-bold">{s.title}</h3>
-            <p className="mt-1.5 text-sm leading-relaxed text-slate-700">{s.desc}</p>
-          </li>
-        ))}
-      </ol>
-    </section>
-  );
-}
-
-// ---------- pricing teaser ----------
-function PricingTeaser({ lang }: { lang: Lang }) {
-  const t = HOME[lang].pricing;
-  return (
-    <section className="bg-brand-50">
-      <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6 sm:py-24">
-        <div className="max-w-2xl">
-          <h2 className="text-balance text-3xl font-bold leading-tight tracking-tight sm:text-4xl">{t.title}</h2>
-          <p className="mt-4 text-pretty text-base leading-relaxed text-slate-700 sm:text-lg">{t.desc}</p>
-        </div>
-        <div className="mt-10 grid gap-4 sm:grid-cols-3">
-          {t.tiers.map((p) => (
-            <div key={p.name} className={`rounded-2xl p-6 ${"hot" in p && p.hot ? "bg-brand-700 text-white shadow-lg" : "border border-slate-200 bg-white"}`}>
-              <div className={`text-sm font-semibold ${"hot" in p && p.hot ? "text-brand-100" : "text-slate-600"}`}>{p.name}</div>
-              <div className="mt-2 text-3xl font-extrabold tracking-tight">
-                {p.price}
-                {"unit" in p && p.unit && <span className={`ml-1 text-base font-medium ${"hot" in p && p.hot ? "text-brand-100" : "text-slate-600"}`}>{p.unit}</span>}
-              </div>
-              <p className={`mt-2 text-sm ${"hot" in p && p.hot ? "text-brand-100" : "text-slate-700"}`}>{p.note}</p>
+                  <tr className="bg-brand-50 text-left text-xs font-semibold text-slate-700">
+                    <td className="border-b border-r border-slate-200 bg-slate-50 py-1.5 text-center text-slate-500">1</td>
+                    {t.sheetHead.map((c) => (
+                      <td key={c} className="whitespace-nowrap border-b border-r border-slate-200 px-3 py-1.5">{c}</td>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="sheet-rows">
+                  {t.sheetRows.map((r, i) => (
+                    <tr key={r[1]} className="sheet-row border-b border-slate-100" style={{ "--delay": `${0.2 + i * 0.22}s` } as React.CSSProperties}>
+                      <td className="border-r border-slate-200 bg-slate-50 py-1.5 text-center text-xs text-slate-500">{i + 2}</td>
+                      {r.map((c, j) => (
+                        <td key={j} className={`whitespace-nowrap border-r border-slate-100 px-3 py-1.5 ${j === 3 ? "text-right tabular-nums" : ""}`}>
+                          {j === 4 ? (
+                            <span className={`inline-block rounded-md px-2 py-0.5 text-xs font-medium ${STATUS_TONE[c] ?? "bg-slate-100 text-slate-700"}`}>{c}</span>
+                          ) : c}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
+            <div className="flex gap-1 overflow-x-auto border-t border-slate-200 bg-slate-50 px-2 pt-1 text-xs">
+              {t.sheetTabs.map((tab, i) => (
+                <span key={tab} className={`rounded-t-md px-3 py-1.5 ${i === 1 ? "border-b-2 border-brand-600 bg-white font-semibold text-brand-700" : "text-slate-600"}`}>{tab}</span>
+              ))}
+            </div>
+          </div>
+          <figcaption className="mt-3 text-center text-xs text-slate-600">{t.sheetCaption}</figcaption>
+        </Reveal>
+      </div>
+      {/* lang ไว้ให้ STATUS_TONE ใช้ในอนาคต */}
+      <span hidden>{lang}</span>
+    </section>
+  );
+}
+
+// ===================== HowSteps =====================
+function HowSteps({ h }: { h: Home }) {
+  const t = h.how;
+  return (
+    <section id="how" className="mx-auto max-w-6xl px-4 py-20 sm:px-6 lg:py-28">
+      <Reveal className="mx-auto max-w-2xl text-center">
+        <h2 className="text-balance text-3xl font-bold tracking-tight sm:text-4xl">{t.title}</h2>
+        <p className="mt-3 text-slate-700">{t.sub}</p>
+      </Reveal>
+      <Reveal className="relative mt-14">
+        <div aria-hidden className="how-line absolute left-6 top-6 hidden h-0.5 w-[calc(100%-3rem)] bg-brand-200 md:block" />
+        <ol className="grid gap-10 md:grid-cols-3 md:gap-8">
+          {t.steps.map((s, i) => (
+            <li key={s.title} className="relative">
+              <span className="how-dot relative z-10 flex h-12 w-12 items-center justify-center rounded-full bg-brand-600 text-lg font-bold text-white ring-8 ring-white" style={{ "--delay": `${0.4 + i * 0.3}s` } as React.CSSProperties}>
+                {i + 1}
+              </span>
+              <h3 className="mt-5 text-xl font-semibold">{s.title}</h3>
+              <p className="mt-2 leading-relaxed text-slate-700">{s.desc}</p>
+            </li>
           ))}
+        </ol>
+      </Reveal>
+    </section>
+  );
+}
+
+// ===================== Pricing =====================
+function PricingSection({ h }: { h: Home }) {
+  const t = h.pricing;
+  return (
+    <section id="pricing" className="border-y border-brand-100 bg-brand-50/60">
+      <div className="mx-auto max-w-6xl px-4 py-20 sm:px-6 lg:py-28">
+        <Reveal className="mx-auto max-w-2xl text-center">
+          <p className="text-sm font-semibold uppercase tracking-wide text-brand-600">{t.eyebrow}</p>
+          <h2 className="mt-2 text-balance text-3xl font-bold tracking-tight sm:text-4xl">{t.title}</h2>
+          <p className="mt-3 text-slate-700">{t.desc}</p>
+        </Reveal>
+        <Reveal className="mt-10" delay={0.1}>
+          <PricingCards t={t} />
+        </Reveal>
+        <div className="mt-8 text-center">
+          <Link href="/pricing" className="arrow-link inline-flex items-center gap-1.5 text-sm font-semibold text-brand-700 hover:underline">
+            {t.cta}
+            <ArrowRight size={16} aria-hidden />
+          </Link>
         </div>
-        <Link href="/pricing" className="mt-8 inline-flex items-center rounded-full bg-slate-900 px-6 py-3 text-sm font-semibold text-white hover:bg-slate-800">
-          {t.cta} →
-        </Link>
       </div>
     </section>
   );
 }
 
-// ---------- FAQ ----------
-function FaqSection({ lang, items }: { lang: Lang; items: Array<{ q: string; a: string }> }) {
-  const t = HOME[lang].faq;
+// ===================== FAQ =====================
+function FaqSection({ h, lang, items }: { h: Home; lang: Lang; items: Array<{ q: string; a: string }> }) {
+  const t = h.faq;
   return (
-    <section className="mx-auto max-w-3xl px-4 py-16 sm:px-6 sm:py-24">
-      <h2 className="text-balance text-3xl font-bold leading-tight tracking-tight sm:text-4xl">{t.title}</h2>
-      <div className="mt-8 divide-y divide-slate-200 rounded-2xl border border-slate-200">
+    <section className="mx-auto max-w-3xl px-4 py-20 sm:px-6 lg:py-28">
+      <Reveal>
+        <h2 className="text-balance text-3xl font-bold tracking-tight sm:text-4xl">{t.title}</h2>
+      </Reveal>
+      <Reveal className="mt-8 divide-y divide-slate-200 rounded-2xl border border-slate-200 bg-white" delay={0.1}>
         {items.map((f) => (
           <details key={f.q} className="group px-5 py-4">
             <summary className="flex cursor-pointer list-none items-center justify-between gap-4 font-semibold text-slate-900 [&::-webkit-details-marker]:hidden">
@@ -374,40 +357,39 @@ function FaqSection({ lang, items }: { lang: Lang; items: Array<{ q: string; a: 
             <p className="mt-2 leading-relaxed text-slate-700">{f.a}</p>
           </details>
         ))}
-      </div>
-      <Link href={withLang(lang, "/faq")} className="mt-6 inline-block text-sm font-semibold text-brand-700 hover:underline">
-        {t.more} →
+      </Reveal>
+      <Link href={withLang(lang, "/faq")} className="arrow-link mt-6 inline-flex items-center gap-1.5 text-sm font-semibold text-brand-700 hover:underline">
+        {t.more}
+        <ArrowRight size={16} aria-hidden />
       </Link>
     </section>
   );
 }
 
-// ---------- CTA band ----------
-function CtaBand({ lang }: { lang: Lang }) {
-  const t = HOME[lang].cta;
+// ===================== CTA band =====================
+function CtaBand({ h }: { h: Home }) {
+  const t = h.cta;
   return (
-    <section className="mx-auto max-w-6xl px-4 pb-16 sm:px-6 sm:pb-24">
-      <div className="grid items-center gap-8 rounded-3xl bg-brand-900 px-6 py-10 text-white sm:px-10 lg:grid-cols-[1fr_auto]">
-        <div>
+    <section className="px-4 pb-20 pt-6 sm:px-6">
+      <Reveal className="relative mx-auto grid max-w-6xl items-center gap-10 overflow-hidden rounded-3xl bg-brand-600 px-6 py-12 text-white sm:px-12 lg:grid-cols-[1fr_auto] lg:py-14">
+        <div aria-hidden className="pointer-events-none absolute -right-24 -top-24 h-72 w-72 rounded-full bg-accent-500/25 blur-3xl" />
+        <div className="relative">
           <h2 className="text-balance text-2xl font-bold tracking-tight sm:text-3xl">{t.title}</h2>
           <p className="mt-3 max-w-xl text-pretty text-brand-100">{t.desc}</p>
-          <Link
-            href="/login"
-            className="mt-6 inline-flex items-center rounded-full px-6 py-3 text-base font-semibold text-slate-900 shadow-lg transition-transform hover:scale-[1.02] active:scale-95"
-            style={{ background: GREEN }}
-          >
-            {t.btn}
-          </Link>
+          <div className="mt-6">
+            <Button href="/login" size="lg" variant="inverse">{t.btn}</Button>
+          </div>
         </div>
-        <div className="flex flex-col items-center rounded-2xl bg-white p-4 text-slate-900">
+        <div className="relative flex items-center gap-4 rounded-2xl bg-white p-4 text-slate-900 shadow-lg lg:flex-col lg:text-center">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={COMPANY.lineOaQr} alt={`QR LINE Official Account ${COMPANY.lineOaId}`} width={160} height={160} className="h-40 w-40 rounded-lg" />
-          <div className="mt-2 text-xs text-slate-600">{t.qrLabel}</div>
-          <a href={COMPANY.lineOaUrl} target="_blank" rel="noreferrer" className="mt-1 text-sm font-bold text-[#03873d] hover:underline">
-            {COMPANY.lineOaId}
-          </a>
+          <img src={COMPANY.lineOaQr} alt={`QR code LINE Official Account ${COMPANY.lineOaId}`} width={132} height={132} className="h-[132px] w-[132px] shrink-0 rounded-lg" />
+          <div>
+            <div className="text-sm font-semibold">{t.qrLabel}</div>
+            <a href={COMPANY.lineOaUrl} target="_blank" rel="noreferrer" className="text-lg font-bold text-brand-700 hover:underline">{COMPANY.lineOaId}</a>
+            <div className="text-xs text-slate-600">{t.qrSub}</div>
+          </div>
         </div>
-      </div>
+      </Reveal>
     </section>
   );
 }

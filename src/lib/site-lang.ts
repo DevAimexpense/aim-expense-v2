@@ -40,5 +40,6 @@ export function pageMeta(
       type: "website",
       siteName: COMPANY.productName,
     },
+    twitter: { card: "summary_large_image", title: m.title, description: m.description },
   };
 }

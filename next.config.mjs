@@ -3,6 +3,9 @@ import { withSentryConfig } from "@sentry/nextjs";
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  // ESLint เพิ่งถูกเพิ่มเข้าโปรเจกต์ (20/10/2569) — โค้ดแอปเดิมมี error ด้านสไตล์ (เช่น react/no-unescaped-entities)
+  // ที่ยังไม่ได้ไล่แก้ จึงไม่ให้ lint ทำให้ build ล้ม · รัน `npm run lint` เองเพื่อดูรายการ
+  eslint: { ignoreDuringBuilds: true },
   experimental: {
     serverComponentsExternalPackages: ["pdf-parse", "pdfjs-dist", "unpdf", "sharp", "tesseract.js"],
     // ฟอร์ม 50 ทวิ + ฟอนต์ Sarabun ถูกอ่านด้วย fs ตอน runtime (src/lib/wht-cert/generate.ts)

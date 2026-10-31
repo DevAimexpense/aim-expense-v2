@@ -22,17 +22,23 @@
   --color-brand-800: #1e40af;
   --color-brand-900: #1e3a8a;
 
-  /* Accent Colors */
-  --color-accent-50: #fefce8;
-  --color-accent-100: #fef9c3;
-  --color-accent-200: #fef08a;
-  --color-accent-300: #fde047;
-  --color-accent-400: #facc15;
-  --color-accent-500: #eab308;
-  --color-accent-600: #ca8a04;
-  --color-accent-700: #a16207;
-  --color-accent-800: #854d0e;
-  --color-accent-900: #713f12;
+  /* Accent = เหลืองโลโก้ Aim Expense #FFD93D (anchor 500) — ใช้เน้นคำ/จุด/ป้ายอย่างประหยัด
+     ตัวหนังสือบนพื้นเหลืองต้องเป็นสีเข้มเสมอ (accent-800/900) · เหลืองบนขาวใช้เป็นข้อความไม่ได้ (contrast ไม่ผ่าน) */
+  --color-accent-50: #fffbea;
+  --color-accent-100: #fff4c2;
+  --color-accent-200: #ffeb94;
+  --color-accent-300: #ffe266;
+  --color-accent-400: #ffdc4a;
+  --color-accent-500: #ffd93d;
+  --color-accent-600: #e6bf1a;
+  --color-accent-700: #b8960f;
+  --color-accent-800: #8a700b;
+  --color-accent-900: #5c4a07;
+
+  /* Brand-tinted neutrals (แบบ aim-hr): พื้นหน้าเว็บอมน้ำเงินจาง ๆ ไม่ใช่เทาล้วน */
+  --color-canvas: oklch(98.5% 0.005 256);
+  --color-surface: #ffffff;
+  --color-ink: #0f172a;
 
   /* Font */
   --font-sans: "IBM Plex Sans Thai", sans-serif;
@@ -1960,4 +1966,85 @@ body {
 .app-tab-active .app-tab-count {
   background: #dbeafe;
   color: #1e40af;
+}
+
+/* ===========================================
+   เว็บสาธารณะ (หน้าแรก /features /pricing ...) — motion
+   หลัก: เนื้อหามองเห็นครบแม้ JS ไม่ทำงาน · animation เป็นของแถม · ใช้ transform/opacity เท่านั้น
+   easing เดียวทั้งเว็บ cubic-bezier(0.22,1,0.36,1) · reduced-motion ปิดทั้งหมด
+   =========================================== */
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .site-motion *, .site-motion *::before, .site-motion *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* การ์ดแชต LINE ใน hero เล่นเป็นลำดับครั้งเดียวตอนโหลด (stagger ด้วย --delay) */
+@keyframes home-chat-in {
+  from { opacity: 0; transform: translateY(18px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.home-chat-card {
+  animation: home-chat-in 0.9s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: var(--delay, 0s);
+}
+/* จุด "กำลังพิมพ์…" — วนจนการ์ดถัดไปขึ้น แล้วซ่อนตัวเอง (ไม่วนไม่รู้จบ) */
+@keyframes home-typing-dot {
+  0%, 60%, 100% { opacity: 0.25; transform: translateY(0); }
+  30% { opacity: 1; transform: translateY(-3px); }
+}
+@keyframes home-typing-hide {
+  to { opacity: 0; visibility: hidden; height: 0; margin: 0; padding: 0; }
+}
+.home-typing {
+  animation: home-chat-in 0.5s cubic-bezier(0.22, 1, 0.36, 1) both, home-typing-hide 0.3s ease-out forwards;
+  animation-delay: var(--delay, 0s), var(--hide, 2s);
+}
+.home-typing span {
+  animation: home-typing-dot 1.1s ease-in-out infinite;
+  animation-delay: calc(var(--delay, 0s) + var(--i, 0) * 0.18s);
+}
+
+/* Scroll reveal: ซ่อนเฉพาะเมื่อ JS เติม class js-reveal ให้ <html> แล้ว (บอท/ปิด JS เห็นครบ) */
+html.js-reveal .reveal {
+  opacity: 0;
+  transform: translateY(16px);
+  transition: opacity 0.7s cubic-bezier(0.22, 1, 0.36, 1), transform 0.7s cubic-bezier(0.22, 1, 0.36, 1);
+  transition-delay: var(--delay, 0s);
+}
+html.js-reveal .reveal.is-visible {
+  opacity: 1;
+  transform: none;
+}
+/* Google Sheet จำลอง: แถวเติมทีละแถวเมื่อเลื่อนมาถึง + ไฮไลต์จางหาย */
+@keyframes sheet-row-in {
+  0% { opacity: 0; transform: translateX(-6px); background-color: var(--color-accent-100); }
+  40% { opacity: 1; transform: none; background-color: var(--color-accent-100); }
+  100% { opacity: 1; transform: none; background-color: transparent; }
+}
+html.js-reveal .sheet-rows .sheet-row { opacity: 0; }
+html.js-reveal .is-visible .sheet-row {
+  animation: sheet-row-in 1.1s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: var(--delay, 0s);
+}
+/* ไทม์ไลน์ 3 ขั้น: เส้นวาดจากซ้ายไปขวา แล้ววงเลขขึ้นทีละวง */
+html.js-reveal .how-line { transform: scaleX(0); transform-origin: left; transition: transform 1.2s cubic-bezier(0.22, 1, 0.36, 1); }
+html.js-reveal .is-visible .how-line { transform: scaleX(1); }
+html.js-reveal .how-dot { opacity: 0; transform: scale(0.6); transition: opacity 0.5s cubic-bezier(0.22, 1, 0.36, 1), transform 0.5s cubic-bezier(0.22, 1, 0.36, 1); transition-delay: var(--delay, 0s); }
+html.js-reveal .is-visible .how-dot { opacity: 1; transform: none; }
+/* hover: การ์ดยก 2px, ลูกศรเลื่อนขวา */
+.lift { transition: transform 0.3s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.3s cubic-bezier(0.22, 1, 0.36, 1); }
+.lift:hover { transform: translateY(-2px); }
+.arrow-link svg { transition: transform 0.3s cubic-bezier(0.22, 1, 0.36, 1); }
+.arrow-link:hover svg { transform: translateX(2px); }
+@media (prefers-reduced-motion: reduce) {
+  .home-chat-card, .home-typing, .home-typing span, html.js-reveal .is-visible .sheet-row { animation: none !important; opacity: 1; }
+  .home-typing { display: none; }
+  html.js-reveal .reveal, html.js-reveal .how-dot { opacity: 1; transform: none; transition: none; }
+  html.js-reveal .how-line { transform: none; transition: none; }
+  html.js-reveal .sheet-rows .sheet-row { opacity: 1; }
+  .lift:hover { transform: none; }
 }

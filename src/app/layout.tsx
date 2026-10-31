@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Analytics } from "@vercel/analytics/react";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import { COMPANY } from "@/lib/company";
+import { PLAN_LABELS, PLAN_PRICING_THB, SELF_SERVE_PLANS } from "@/lib/plans";
 import "./globals.css";
 
 // JSON-LD — ให้ Google/LINE/AI อ่านตัวตนบริษัท ช่องทางติดต่อ และตัวสินค้าได้จาก HTML โดยตรง (ทุกหน้า)
@@ -52,19 +53,20 @@ const SOFTWARE_JSON_LD = {
     "ขั้นตอนอนุมัติและงบรายโปรเจกต์",
     "ข้อมูลเก็บใน Google Sheet และ Google Drive ของผู้ใช้",
   ],
-  offers: [
-    { "@type": "Offer", name: "Free Forever", price: "0", priceCurrency: "THB" },
-    { "@type": "Offer", name: "Basic", price: "189", priceCurrency: "THB", billingIncrement: "P1M" },
-    { "@type": "Offer", name: "Pro", price: "399", priceCurrency: "THB", billingIncrement: "P1M" },
-    { "@type": "Offer", name: "Business", price: "699", priceCurrency: "THB", billingIncrement: "P1M" },
-    { "@type": "Offer", name: "Max", price: "1499", priceCurrency: "THB", billingIncrement: "P1M" },
-  ],
+  // ราคาจาก src/lib/plans.ts ชุดเดียวกับหน้า /pricing — รายเดือน (P1M) และรายปี (P1Y)
+  offers: SELF_SERVE_PLANS.flatMap((tier) => {
+    const p = PLAN_PRICING_THB[tier]!;
+    return [
+      { "@type": "Offer", name: `${PLAN_LABELS[tier]} (monthly)`, price: String(p.monthly), priceCurrency: "THB", billingIncrement: "P1M", url: `${COMPANY.siteUrl}/pricing` },
+      { "@type": "Offer", name: `${PLAN_LABELS[tier]} (yearly)`, price: String(p.yearly), priceCurrency: "THB", billingIncrement: "P1Y", url: `${COMPANY.siteUrl}/pricing` },
+    ];
+  }),
   provider: { "@type": "Organization", name: COMPANY.nameEn, url: COMPANY.siteUrl },
 };
 
 const SITE_TITLE = "Aim Expense — บัญชีและภาษีของ SME ไทย จบได้ในแชต LINE";
 const SITE_DESCRIPTION =
-  "ถ่ายใบเสร็จส่งใน LINE ระบบบันทึกค่าใช้จ่ายให้ทันที ออกใบเสนอราคา ใบวางบิล ใบเสร็จรับเงิน ใบกำกับภาษี และหนังสือรับรองหัก ณ ที่จ่ายบนฟอร์มกรมสรรพากร ข้อมูลทั้งหมดอยู่ใน Google Sheet ของคุณเอง";
+  "ถ่ายใบเสร็จส่งใน LINE ระบบบันทึกค่าใช้จ่ายให้ทันที ออกใบกำกับภาษีและหนังสือรับรองหัก ณ ที่จ่ายบนฟอร์มกรมสรรพากร ข้อมูลทั้งหมดอยู่ใน Google Sheet ของคุณเอง";
 
 // metadataBase ทำให้ og:image / canonical เป็น URL เต็ม · รูป OG มาจาก src/app/opengraph-image.tsx (และ /en)
 export const metadata: Metadata = {
@@ -79,7 +81,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="th">
+    <html lang="th" suppressHydrationWarning>
       <head>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />

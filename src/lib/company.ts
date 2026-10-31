@@ -18,12 +18,13 @@ export const COMPANY = {
   phone: "065-3287888",
   /** รูปแบบสากลสำหรับ tel: และ JSON-LD */
   phoneIntl: "+66653287888",
-  lineOaId: "@064qycfu",
-  lineOaUrl: "https://line.me/R/ti/p/@064qycfu",
+  /** Premium ID ของ OA (พี่พิม 2026-10-20) — basic ID คือ @064qycfu ยังใช้ใน env LINE_OA_BASIC_ID ของ onboarding */
+  lineOaId: "@aimexpense",
+  lineOaUrl: "https://line.me/R/ti/p/@aimexpense",
   /** QR เพิ่มเพื่อน (สร้างจากลิงก์ OA — แบบเดียวกับหน้า onboarding) */
   lineOaQr:
     "https://api.qrserver.com/v1/create-qr-code/?size=440x440&data=" +
-    encodeURIComponent("https://line.me/R/ti/p/@064qycfu"),
+    encodeURIComponent("https://line.me/R/ti/p/@aimexpense"),
   siteUrl: "https://aimexpense.com",
   productName: "Aim Expense",
   /** ผลิตภัณฑ์พี่น้อง (นิติบุคคลเดียวกัน) */

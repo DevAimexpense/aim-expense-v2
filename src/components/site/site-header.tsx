@@ -7,32 +7,36 @@
 import Link from "next/link";
 import { Logo } from "./logo";
 import { withLang, LANGS, type Lang } from "@/lib/site-lang";
+import { Button } from "./button";
+import { RevealScript } from "./reveal";
 
 const LABEL = {
-  th: { features: "ฟีเจอร์", pricing: "ราคา", faq: "คำถามที่พบบ่อย", about: "เกี่ยวกับเรา", contact: "ติดต่อ", login: "เข้าสู่ระบบ", menu: "เมนู" },
-  en: { features: "Features", pricing: "Pricing", faq: "FAQ", about: "About", contact: "Contact", login: "Sign in", menu: "Menu" },
+  th: { features: "ฟีเจอร์", pricing: "ราคา", security: "ความปลอดภัย", faq: "คำถามที่พบบ่อย", about: "เกี่ยวกับเรา", contact: "ติดต่อ", login: "เข้าสู่ระบบ", menu: "เมนู" },
+  en: { features: "Features", pricing: "Pricing", security: "Security", faq: "FAQ", about: "About", contact: "Contact", login: "Sign in", menu: "Menu" },
 } as const;
 
 /** หน้าที่มีเฉพาะภาษาไทย — ลิงก์ EN ชี้ไปหน้าเดิม */
-const TH_ONLY = new Set(["/pricing", "/privacy", "/terms"]);
+const TH_ONLY = new Set(["/privacy", "/terms"]);
 
 export function SiteHeader({ lang = "th", path = "/" }: { lang?: Lang; path?: string }) {
   const t = LABEL[lang];
   const links = [
-    { label: t.features, href: `${withLang(lang, "/")}#features` },
-    { label: t.pricing, href: "/pricing" },
+    { label: t.features, href: withLang(lang, "/features") },
+    { label: t.pricing, href: withLang(lang, "/pricing") },
+    { label: t.security, href: withLang(lang, "/security") },
     { label: t.faq, href: withLang(lang, "/faq") },
     { label: t.about, href: withLang(lang, "/about") },
     { label: t.contact, href: withLang(lang, "/contact") },
   ];
   return (
-    <header className="sticky top-0 z-30 border-b border-slate-200/80 bg-white/85 backdrop-blur">
+    <header className="sticky top-0 z-30 border-b border-slate-100 bg-white/80 backdrop-blur">
+      <RevealScript />
       <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3 sm:px-6">
         <Link href={withLang(lang, "/")} className="flex items-center gap-2.5">
           <Logo className="h-8 w-8" rounded="rounded-lg" />
           <span className="whitespace-nowrap text-base font-bold tracking-tight text-slate-900 sm:text-lg">Aim Expense</span>
         </Link>
-        <nav className="hidden items-center gap-6 text-sm font-medium text-slate-600 md:flex">
+        <nav className="hidden items-center gap-5 text-sm font-medium text-slate-600 md:flex lg:gap-6">
           {links.map((l) => (
             <Link key={l.href} href={l.href} className="hover:text-slate-900">
               {l.label}
@@ -53,12 +57,12 @@ export function SiteHeader({ lang = "th", path = "/" }: { lang?: Lang; path?: st
               </Link>
             ))}
           </div>
-          <Link
-            href="/login"
-            className="hidden rounded-full bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 sm:inline-flex"
-          >
-            {t.login}
-          </Link>
+          {/* ซ่อนบนจอแคบ (อยู่ในเมนูมือถือแทน) */}
+          <div className="hidden sm:block">
+            <Button href="/login" size="sm">
+              {t.login}
+            </Button>
+          </div>
           <details className="relative md:hidden">
             <summary
               aria-label={t.menu}
@@ -74,7 +78,7 @@ export function SiteHeader({ lang = "th", path = "/" }: { lang?: Lang; path?: st
                   {l.label}
                 </Link>
               ))}
-              <Link href="/login" className="mt-1 block rounded-lg bg-brand-600 px-3 py-2 text-center text-white">
+              <Link href="/login" className="mt-1 block rounded-xl bg-brand-600 px-3 py-2 text-center text-white">
                 {t.login}
               </Link>
             </nav>

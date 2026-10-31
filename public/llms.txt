@@ -1,0 +1,35 @@
+# Aim Expense
+
+> Aim Expense เป็นระบบบัญชีค่าใช้จ่าย รายรับ และเอกสารภาษีสำหรับ SME และฟรีแลนซ์ไทย ใช้งานผ่านแชต LINE และเว็บ ถ่ายใบเสร็จส่งในแชตแล้วระบบอ่านด้วย OCR บันทึกเป็นรายจ่าย ออกใบเสนอราคา ใบวางบิล ใบเสร็จรับเงิน ใบกำกับภาษี หนังสือรับรองหัก ณ ที่จ่าย (50 ทวิ) และ ภ.ง.ด.3 / ภ.ง.ด.53 บนฟอร์มของกรมสรรพากร ข้อมูลธุรกิจทั้งหมดเก็บใน Google Sheet และ Google Drive ของลูกค้าเอง ไม่เก็บบนเซิร์ฟเวอร์ของผู้ให้บริการ
+> Aim Expense is a LINE-based expense, revenue and Thai tax-document system for Thai SMEs and freelancers. Receipts sent in LINE chat are read by OCR and logged; it issues quotations, billing notes, receipts, tax invoices, 50 Tawi withholding certificates and PND.3/53 on Revenue Department forms. All business data lives in the customer's own Google Sheet and Drive.
+
+ผู้ให้บริการ / Provider: Aim Expensys Limited (บริษัท เอม เอ็กเพนส์ซิส จำกัด) เลขทะเบียนนิติบุคคล 0105569117503, กรุงเทพมหานคร ประเทศไทย
+เหมาะกับ / For: เจ้าของกิจการ SME ไทย ทีมที่ทำงานในกลุ่ม LINE นิติบุคคลที่ต้องออกใบกำกับภาษีและหัก ณ ที่จ่าย ฟรีแลนซ์และบุคคลธรรมดาที่ยังไม่จด VAT
+
+## หน้าหลัก / Pages
+
+- [หน้าแรก](https://aimexpense.com/): ภาพรวมระบบ วิธีทำงาน ราคาย่อ และคำถามที่พบบ่อย (EN: https://aimexpense.com/en)
+- [ฟีเจอร์](https://aimexpense.com/features): บันทึกค่าใช้จ่ายใน LINE, ขั้นตอนอนุมัติ, เอกสารรายรับและภาษี, รายงานรายโปรเจกต์, ข้อมูลใน Google Sheet, หลายธุรกิจและบุคคลธรรมดา (EN: https://aimexpense.com/en/features)
+- [ราคา](https://aimexpense.com/pricing): แพ็กเกจ โควตา ตารางเปรียบเทียบ และคำถามเรื่องการชำระเงิน (EN: https://aimexpense.com/en/pricing)
+- [ความปลอดภัยและข้อมูลส่วนบุคคล](https://aimexpense.com/security): ข้อมูลเก็บที่ไหน ระบบเข้าถึงอะไรได้ บทบาทตาม PDPA การเข้ารหัส และสิทธิ์ในบริษัท (EN: https://aimexpense.com/en/security)
+- [คำถามที่พบบ่อย](https://aimexpense.com/faq): คำตอบสั้น ๆ เรื่องการติดตั้ง ข้อมูล VAT เอกสารภาษี ฟรีแลนซ์ และราคา (EN: https://aimexpense.com/en/faq)
+- [เกี่ยวกับเรา](https://aimexpense.com/about): ที่มาของระบบและข้อมูลนิติบุคคล (EN: https://aimexpense.com/en/about)
+- [ติดต่อเรา](https://aimexpense.com/contact): อีเมล โทรศัพท์ ที่อยู่ และ LINE Official Account (EN: https://aimexpense.com/en/contact)
+- [นโยบายความเป็นส่วนตัว](https://aimexpense.com/privacy) · [ข้อกำหนดการใช้งาน](https://aimexpense.com/terms)
+
+## ราคา / Pricing (THB, ต่อเดือน; รายปีคิดเท่ากับ 10 เดือน)
+
+- ทดลองใช้: Pro ครบทุกฟีเจอร์ 30 วัน ไม่ต้องใช้บัตร
+- Basic ฿189 — 2 ผู้ใช้, 1 ธุรกิจ, 100 OCR/เดือน
+- Pro ฿399 — 5 ผู้ใช้, 2 ธุรกิจ, 300 OCR/เดือน, เอกสารรายรับ (ใบเสนอราคา ใบวางบิล ใบเสร็จ ใบกำกับภาษี)
+- Business ฿699 — 10 ผู้ใช้, 3 ธุรกิจ, 600 OCR/เดือน
+- Max ฿1,499 — 20 ผู้ใช้, 5 ธุรกิจ, 1,500 OCR/เดือน
+- Enterprise — ตามตกลง
+- ชำระผ่าน Stripe ด้วยบัตรเครดิต/เดบิต ยกเลิกได้ตลอดเวลา ข้อมูลยังอยู่ใน Google Sheet ของลูกค้าหลังยกเลิก
+
+## ติดต่อ / Contact
+
+- อีเมล: contact@aimexpensys.com
+- โทร: 065-3287888 (+66 65 328 7888)
+- LINE Official Account: @aimexpense (https://line.me/R/ti/p/@aimexpense)
+- ผลิตภัณฑ์พี่น้อง: Aim HR Expert (https://www.aimhrexpert.com) ระบบ HR และลงเวลาผ่าน LINE โดยบริษัทเดียวกัน

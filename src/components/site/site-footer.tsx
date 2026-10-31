@@ -7,17 +7,18 @@ import Link from "next/link";
 import { Logo } from "./logo";
 import { COMPANY } from "@/lib/company";
 import { withLang, type Lang } from "@/lib/site-lang";
+import { Button } from "./button";
 
 const LABEL = {
   th: {
     contact: "ติดต่อ", product: "ผลิตภัณฑ์", legal: "กฎหมาย",
-    features: "ฟีเจอร์", pricing: "ราคา", faq: "คำถามที่พบบ่อย", about: "เกี่ยวกับเรา", contactPage: "ติดต่อเรา", login: "เข้าสู่ระบบ",
+    features: "ฟีเจอร์", pricing: "ราคา", security: "ความปลอดภัย", faq: "คำถามที่พบบ่อย", about: "เกี่ยวกับเรา", contactPage: "ติดต่อเรา", login: "เข้าสู่ระบบ",
     privacy: "นโยบายความเป็นส่วนตัว", terms: "ข้อกำหนดการใช้งาน", addFriend: "เพิ่มเพื่อน", regNo: "เลขทะเบียนนิติบุคคล",
     sister: "ผลิตภัณฑ์พี่น้อง",
   },
   en: {
     contact: "Contact", product: "Product", legal: "Legal",
-    features: "Features", pricing: "Pricing", faq: "FAQ", about: "About", contactPage: "Contact us", login: "Sign in",
+    features: "Features", pricing: "Pricing", security: "Security", faq: "FAQ", about: "About", contactPage: "Contact us", login: "Sign in",
     privacy: "Privacy Policy", terms: "Terms of Service", addFriend: "Add friend", regNo: "Registration No.",
     sister: "Sister product",
   },
@@ -26,7 +27,7 @@ const LABEL = {
 export function SiteFooter({ lang = "th" }: { lang?: Lang }) {
   const t = LABEL[lang];
   return (
-    <footer className="border-t border-slate-200 bg-white">
+    <footer className="border-t border-slate-200 bg-canvas">
       <div className="mx-auto grid max-w-6xl gap-8 px-4 py-12 text-sm sm:px-6 md:grid-cols-4">
         <div className="space-y-2">
           <div className="flex items-center gap-2">
@@ -54,21 +55,17 @@ export function SiteFooter({ lang = "th" }: { lang?: Lang }) {
           <p className="text-slate-700">
             LINE OA: <span className="font-medium">{COMPANY.lineOaId}</span>
           </p>
-          <a
-            href={COMPANY.lineOaUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center rounded-lg bg-[#06C755] px-3 py-1.5 text-sm font-semibold text-white hover:opacity-90"
-          >
+          <Button href={COMPANY.lineOaUrl} external variant="line" size="sm">
             {t.addFriend} {COMPANY.lineOaId}
-          </a>
+          </Button>
         </div>
 
         <div className="space-y-2">
           <p className="font-semibold text-slate-900">{t.product}</p>
           <ul className="space-y-1.5 text-slate-600">
-            <li><Link href={`${withLang(lang, "/")}#features`} className="hover:text-slate-900">{t.features}</Link></li>
-            <li><Link href="/pricing" className="hover:text-slate-900">{t.pricing}</Link></li>
+            <li><Link href={withLang(lang, "/features")} className="hover:text-slate-900">{t.features}</Link></li>
+            <li><Link href={withLang(lang, "/pricing")} className="hover:text-slate-900">{t.pricing}</Link></li>
+            <li><Link href={withLang(lang, "/security")} className="hover:text-slate-900">{t.security}</Link></li>
             <li><Link href={withLang(lang, "/faq")} className="hover:text-slate-900">{t.faq}</Link></li>
             <li><Link href={withLang(lang, "/about")} className="hover:text-slate-900">{t.about}</Link></li>
             <li><Link href={withLang(lang, "/contact")} className="hover:text-slate-900">{t.contactPage}</Link></li>
