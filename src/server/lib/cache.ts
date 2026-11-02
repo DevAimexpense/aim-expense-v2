@@ -29,6 +29,11 @@ const redis: Redis | null = (() => {
   return new Redis({ url, token });
 })();
 
+/** Redis client ดิบ (null เมื่อไม่ได้ตั้งค่า Upstash) — ใช้โดย lock.ts / dedup ของ LINE webhook เท่านั้น */
+export function getRedis(): Redis | null {
+  return redis;
+}
+
 /** Default TTL for sheet-tab cache entries (seconds). */
 export const SHEETS_TTL_SEC = 60;
 
@@ -176,12 +181,55 @@ const inflight = new Map<string, Promise<unknown>>();
 
 // ===== Sheet-tab key helpers =====
 //
-// Key format: `sheets:{spreadsheetId}:tab:{tabName}`
+// Key format: `sheets:{spreadsheetId}:tab:{tabName}:v{epoch}`
 // (spreadsheetId scopes per org — different users' data never collide)
+//
+// CO-04: epoch ต่อแท็บ — `invalidateTab` ทำ INCR ที่ `sheets:{id}:ver:{tab}` แทนการ del
+// key อย่างเดียว  getOrFetch ที่เริ่มอ่าน Google ก่อน write แล้ว setCache ทีหลัง
+// จะเขียนลง key ของ epoch เก่า (ไม่มีใครอ่านอีก หมดอายุเอง) → ค่าเก่าไม่กลับมาหลัง invalidate
+// ไม่มี Redis → epoch = 0 เสมอ (พฤติกรรมเหมือนเดิม: ไม่มี cache)
 
-/** Cache key for a full-tab `getAll()` snapshot. */
-export function sheetsTabKey(spreadsheetId: string, tabName: string): string {
-  return `sheets:${spreadsheetId}:tab:${tabName}`;
+function sheetsVerKey(spreadsheetId: string, tabName: string): string {
+  return `sheets:${spreadsheetId}:ver:${tabName}`;
+}
+
+function tabKeyWithEpoch(spreadsheetId: string, tabName: string, epoch: number): string {
+  return `sheets:${spreadsheetId}:tab:${tabName}:v${epoch}`;
+}
+
+function toEpoch(v: unknown): number {
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+/** Cache key for a full-tab `getAll()` snapshot (อ่าน epoch ปัจจุบันของแท็บ — 1 GET, default 0). */
+export async function sheetsTabKey(spreadsheetId: string, tabName: string): Promise<string> {
+  let epoch = 0;
+  if (redis) {
+    try {
+      epoch = toEpoch(await redis.get(sheetsVerKey(spreadsheetId, tabName)));
+    } catch (err) {
+      stats.errors++;
+      console.warn("[cache] ver get failed:", tabName, err);
+    }
+  }
+  return tabKeyWithEpoch(spreadsheetId, tabName, epoch);
+}
+
+/** เหมือน sheetsTabKey แต่หลายแท็บใน 1 MGET (ใช้กับ getAllBatch). */
+export async function sheetsTabKeys(spreadsheetId: string, tabNames: string[]): Promise<string[]> {
+  if (tabNames.length === 0) return [];
+  let epochs: number[] = tabNames.map(() => 0);
+  if (redis) {
+    try {
+      const raw = await redis.mget<unknown[]>(...tabNames.map((t) => sheetsVerKey(spreadsheetId, t)));
+      epochs = raw.map(toEpoch);
+    } catch (err) {
+      stats.errors++;
+      console.warn("[cache] ver mget failed:", tabNames.length, "tabs", err);
+    }
+  }
+  return tabNames.map((t, i) => tabKeyWithEpoch(spreadsheetId, t, epochs[i]));
 }
 
 /** Cache key for the `getConfigMap()` materialised map. */
@@ -193,15 +241,24 @@ export function sheetsConfigMapKey(spreadsheetId: string): string {
  * Invalidate every cache entry derived from a tab's data.
  *
  * Call this from any write path (append/update/delete/setConfig).
+ * Bumps the tab epoch (INCR) so every key built before this call is orphaned —
+ * including one a slow in-flight read is about to populate.
  * For the `Config` tab we also drop the materialised config-map key.
  */
 export async function invalidateTab(
   spreadsheetId: string,
   tabName: string,
 ): Promise<void> {
-  const keys = [sheetsTabKey(spreadsheetId, tabName)];
-  if (tabName === "Config") {
-    keys.push(sheetsConfigMapKey(spreadsheetId));
+  if (!redis) return;
+  try {
+    await redis.incr(sheetsVerKey(spreadsheetId, tabName));
+  } catch (err) {
+    stats.errors++;
+    console.warn("[cache] ver incr failed:", tabName, err);
+    // INCR ล้ม → อย่างน้อยลบ key ของ epoch ปัจจุบัน (best-effort)
+    await invalidate(await sheetsTabKey(spreadsheetId, tabName));
   }
-  await invalidate(...keys);
+  if (tabName === "Config") {
+    await invalidate(sheetsConfigMapKey(spreadsheetId));
+  }
 }

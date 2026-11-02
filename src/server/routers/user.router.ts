@@ -7,15 +7,67 @@
 import { z } from "zod";
 import { randomBytes } from "crypto";
 import { TRPCError } from "@trpc/server";
+import type { Prisma } from "@prisma/client";
 import { router, orgProcedure, permissionProcedure, publicProcedure, protectedProcedure } from "../trpc";
 import { prisma } from "@/lib/prisma";
 import { DEFAULT_PERMISSIONS } from "@/lib/permissions";
+import { checkQuota, effectivePlan, PLAN_LABELS } from "@/lib/plans";
 import type { OrgRole } from "@/types/permissions";
+import { safeAuditLog } from "@/server/lib/audit";
 
 const RoleEnum = z.enum(["admin", "manager", "accountant", "staff", "project_manager"]);
 
 function generateToken(): string {
   return randomBytes(16).toString("hex"); // 32 chars
+}
+
+/**
+ * CO-08: audit log ต้องไม่ทำให้ mutation ล้ม — ข้อมูลหลักบันทึกไปแล้ว
+ * ถ้า Postgres สะดุดให้แค่รายงาน (ไม่งั้นผู้ใช้กดซ้ำ = แถวซ้ำ)
+ */
+type Db = Prisma.TransactionClient | typeof prisma;
+
+/** เจ้าของ org — ห้ามแก้ role/status/ลบ (ใช้ร่วมกันใน updateMember / removeMember) */
+async function getOrgOwnerId(db: Db, orgId: string): Promise<string | null> {
+  const org = await db.organization.findUnique({
+    where: { id: orgId },
+    select: { ownerId: true },
+  });
+  return org?.ownerId ?? null;
+}
+
+/**
+ * BIL-08: บังคับจำนวนผู้ใช้ตามแพ็กเกจ — นับสมาชิก active + คำเชิญที่ยังค้าง
+ * `excludeInvitationId` = คำเชิญที่กำลัง accept (คนนั้นกำลังกลายเป็นสมาชิก ไม่นับซ้ำ)
+ */
+async function assertUserQuota(
+  db: Db,
+  orgId: string,
+  excludeInvitationId?: string,
+): Promise<void> {
+  const [sub, activeMembers, pendingInvites] = await Promise.all([
+    db.subscription.findUnique({
+      where: { orgId },
+      select: { plan: true, trialPlan: true, trialEndsAt: true },
+    }),
+    db.orgMember.count({ where: { orgId, status: "active" } }),
+    db.invitation.count({
+      where: {
+        orgId,
+        status: "pending",
+        expiresAt: { gt: new Date() },
+        ...(excludeInvitationId ? { id: { not: excludeInvitationId } } : {}),
+      },
+    }),
+  ]);
+  const plan = effectivePlan(sub);
+  const { ok, limit } = checkQuota(plan, "users", activeMembers + pendingInvites);
+  if (!ok) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: `แพ็กเกจ ${PLAN_LABELS[plan]} รองรับผู้ใช้สูงสุด ${limit} คน — อัปเกรดเพื่อเพิ่มสมาชิก`,
+    });
+  }
 }
 
 export const userRouter = router({
@@ -85,30 +137,40 @@ export const userRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      // CO-01: เฉพาะ admin เท่านั้นที่เชิญคนเข้ามาเป็น admin ได้
+      if (input.role === "admin" && ctx.org.role !== "admin") {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "เฉพาะ admin เท่านั้นที่เชิญผู้ใช้เป็น admin ได้",
+        });
+      }
+
       // Expiry 24 hours from now
       const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
-      const invitation = await prisma.invitation.create({
-        data: {
-          orgId: ctx.org.orgId,
-          token: generateToken(),
-          displayName: input.displayName,
-          role: input.role,
-          eventScope: input.eventScope,
-          expiresAt,
-          invitedById: ctx.session.userId,
-        },
+      // BIL-08: นับโควตาและสร้างคำเชิญใน transaction เดียว (กันดับเบิลคลิกเกินแพ็กเกจ)
+      const invitation = await prisma.$transaction(async (tx) => {
+        await assertUserQuota(tx, ctx.org.orgId);
+        return tx.invitation.create({
+          data: {
+            orgId: ctx.org.orgId,
+            token: generateToken(),
+            displayName: input.displayName,
+            role: input.role,
+            eventScope: input.eventScope,
+            expiresAt,
+            invitedById: ctx.session.userId,
+          },
+        });
       });
 
-      await prisma.auditLog.create({
-        data: {
-          orgId: ctx.org.orgId,
-          userId: ctx.session.userId,
-          action: "invite",
-          entityType: "user",
-          entityRef: invitation.id,
-          summary: `ส่งคำเชิญ "${input.displayName}" เป็น ${input.role}`,
-        },
+      await safeAuditLog({
+        orgId: ctx.org.orgId,
+        userId: ctx.session.userId,
+        action: "invite",
+        entityType: "user",
+        entityRef: invitation.id,
+        summary: `ส่งคำเชิญ "${input.displayName}" เป็น ${input.role}`,
       });
 
       return {
@@ -153,12 +215,39 @@ export const userRouter = router({
       });
       if (!member) throw new TRPCError({ code: "NOT_FOUND", message: "ไม่พบสมาชิก" });
 
-      // ป้องกัน admin ลดสิทธิ์ตัวเอง
-      if (member.userId === ctx.session.userId && input.role && input.role !== "admin") {
+      const touchesRoleOrStatus = input.role !== undefined || input.status !== undefined;
+
+      // CO-01: ห้ามเปลี่ยน role/status ของตัวเองทุกกรณี (เดิมกันแค่ "ลดสิทธิ์" → เลื่อนตัวเองเป็น admin ได้)
+      if (member.userId === ctx.session.userId && touchesRoleOrStatus) {
         throw new TRPCError({
           code: "FORBIDDEN",
-          message: "ไม่สามารถเปลี่ยน role ของตัวเองได้",
+          message: "ไม่สามารถเปลี่ยน role หรือสถานะของตัวเองได้",
         });
+      }
+
+      // CO-01: ห้ามแตะ role/status ของเจ้าของ org (เหมือน removeMember)
+      const ownerId = await getOrgOwnerId(prisma, ctx.org.orgId);
+      if (ownerId === member.userId && touchesRoleOrStatus) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "ไม่สามารถเปลี่ยน role หรือสถานะของเจ้าขององค์กรได้",
+        });
+      }
+
+      // CO-01: เฉพาะ admin เท่านั้นที่กำหนด role admin หรือแก้ role/status ของ admin คนอื่นได้
+      if (ctx.org.role !== "admin") {
+        if (input.role === "admin") {
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message: "เฉพาะ admin เท่านั้นที่กำหนด role admin ได้",
+          });
+        }
+        if (member.role === "admin" && touchesRoleOrStatus) {
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message: "เฉพาะ admin เท่านั้นที่แก้ไข role หรือสถานะของ admin ได้",
+          });
+        }
       }
 
       const updated = await prisma.orgMember.update({
@@ -208,14 +297,19 @@ export const userRouter = router({
       }
 
       // ป้องกันลบ owner
-      const org = await prisma.organization.findUnique({
-        where: { id: ctx.org.orgId },
-        select: { ownerId: true },
-      });
-      if (org?.ownerId === member.userId) {
+      const ownerId = await getOrgOwnerId(prisma, ctx.org.orgId);
+      if (ownerId === member.userId) {
         throw new TRPCError({
           code: "FORBIDDEN",
           message: "ไม่สามารถลบเจ้าขององค์กรได้",
+        });
+      }
+
+      // CO-01: non-admin ลบ admin ไม่ได้ (ไม่งั้น manager ที่มี manageUsers ถอด admin ทุกคนได้)
+      if (member.role === "admin" && ctx.org.role !== "admin") {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "เฉพาะ admin เท่านั้นที่ลบ admin ได้",
         });
       }
 
@@ -224,15 +318,13 @@ export const userRouter = router({
         where: { orgId: ctx.org.orgId, userId: member.userId },
       });
 
-      await prisma.auditLog.create({
-        data: {
-          orgId: ctx.org.orgId,
-          userId: ctx.session.userId,
-          action: "remove_member",
-          entityType: "user",
-          entityRef: member.userId,
-          summary: `ลบสมาชิกออกจากองค์กร`,
-        },
+      await safeAuditLog({
+        orgId: ctx.org.orgId,
+        userId: ctx.session.userId,
+        action: "remove_member",
+        entityType: "user",
+        entityRef: member.userId,
+        summary: `ลบสมาชิกออกจากองค์กร`,
       });
 
       return { success: true };
@@ -275,83 +367,78 @@ export const userRouter = router({
       if (inv.expiresAt < new Date())
         throw new TRPCError({ code: "BAD_REQUEST", message: "คำเชิญหมดอายุ" });
 
-      // Check if user already member (handle partial-fail recovery)
-      const existing = await prisma.orgMember.findUnique({
-        where: { orgId_userId: { orgId: inv.orgId, userId: ctx.session.userId } },
-      });
-
       const perms = DEFAULT_PERMISSIONS[inv.role as OrgRole];
+      const userId = ctx.session.userId;
 
-      if (existing) {
-        // Partial fail recovery: ถ้ามี OrgMember แล้ว แต่ invitation ยังไม่ accepted
-        // → แสดงว่าเคย fail ตอน create UserPermission → ให้ upsert ต่อให้เสร็จ
-        await prisma.userPermission.upsert({
-          where: { orgId_userId: { orgId: inv.orgId, userId: ctx.session.userId } },
-          create: { orgId: inv.orgId, userId: ctx.session.userId, ...perms },
-          update: { ...perms, isCustom: false },
-        });
-      } else {
-        // Normal flow: สร้าง OrgMember + UserPermission
-        await prisma.orgMember.create({
+      // CO-05: ทำทั้งหมดใน transaction เดียว — claim คำเชิญแบบ atomic (pending → accepted)
+      // กัน accept ซ้ำ/พร้อมกัน แล้วค่อยสร้างสมาชิก + sync User.activeOrgId (LINE webhook ใช้ค่านี้)
+      const user = await prisma.$transaction(async (tx) => {
+        const claimed = await tx.invitation.updateMany({
+          where: { id: inv.id, status: "pending" },
           data: {
-            orgId: inv.orgId,
-            userId: ctx.session.userId,
-            role: inv.role,
-            status: "active",
-            eventScope: inv.eventScope,
-            joinedAt: new Date(),
-            invitedById: inv.invitedById,
+            status: "accepted",
+            acceptedAt: new Date(),
+            acceptedByUserId: userId,
           },
         });
+        if (claimed.count === 0) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "คำเชิญถูกใช้งานแล้วหรือยกเลิก" });
+        }
 
-        await prisma.userPermission.upsert({
-          where: { orgId_userId: { orgId: inv.orgId, userId: ctx.session.userId } },
-          create: { orgId: inv.orgId, userId: ctx.session.userId, ...perms },
-          update: { ...perms, isCustom: false },
+        // Check if user already member (handle partial-fail recovery from the pre-transaction era)
+        const existing = await tx.orgMember.findUnique({
+          where: { orgId_userId: { orgId: inv.orgId, userId } },
         });
-      }
 
-      // Mark invitation accepted
-      await prisma.invitation.update({
-        where: { id: inv.id },
-        data: {
-          status: "accepted",
-          acceptedAt: new Date(),
-          acceptedByUserId: ctx.session.userId,
-        },
-      });
-
-      // Invited user = ไม่ใช่เจ้าของ org → ข้าม onboarding google/company
-      // Mark onboardingStep = "done" เพื่อ login ครั้งถัดไปจะไม่ถูก redirect กลับ onboarding
-      const user = await prisma.user.findUnique({ where: { id: ctx.session.userId } });
-      if (user) {
-        if (user.onboardingStep !== "done") {
-          await prisma.user.update({
-            where: { id: user.id },
-            data: { onboardingStep: "done" },
+        if (!existing) {
+          // BIL-08: คำเชิญนี้ถูก claim แล้ว (ไม่ pending) จึงไม่ถูกนับซ้ำ — exclude เผื่อ DB ยังเห็นค่าเก่า
+          await assertUserQuota(tx, inv.orgId, inv.id);
+          await tx.orgMember.create({
+            data: {
+              orgId: inv.orgId,
+              userId,
+              role: inv.role,
+              status: "active",
+              eventScope: inv.eventScope,
+              joinedAt: new Date(),
+              invitedById: inv.invitedById,
+            },
           });
         }
-        // Auto-switch active org to the newly joined one (seamless UX)
-        const { setSessionCookie } = await import("@/lib/auth/session");
-        await setSessionCookie({
-          userId: user.id,
-          lineUserId: user.lineUserId,
-          displayName: user.lineDisplayName,
-          avatarUrl: user.avatarUrl,
-          onboardingStep: "done",
-          activeOrgId: inv.orgId,
-        });
-      }
 
-      await prisma.auditLog.create({
-        data: {
-          orgId: inv.orgId,
-          userId: ctx.session.userId,
-          action: "accept_invitation",
-          entityType: "user",
-          entityRef: inv.id,
-          summary: `${ctx.session.displayName} เข้าร่วมองค์กรเป็น ${inv.role}`,
-        },
+        await tx.userPermission.upsert({
+          where: { orgId_userId: { orgId: inv.orgId, userId } },
+          create: { orgId: inv.orgId, userId, ...perms },
+          update: { ...perms, isCustom: false },
+        });
+
+        // Invited user = ไม่ใช่เจ้าของ org → ข้าม onboarding google/company
+        // onboardingStep = "done" เพื่อ login ครั้งถัดไปจะไม่ถูก redirect กลับ onboarding
+        // activeOrgId = org ที่เพิ่งเข้าร่วม ให้ LINE (ไม่มีคุกกี้) ลงรายการถูกบริษัทเดียวกับเว็บ
+        return tx.user.update({
+          where: { id: userId },
+          data: { onboardingStep: "done", activeOrgId: inv.orgId },
+        });
+      });
+
+      // Auto-switch active org to the newly joined one (seamless UX)
+      const { setSessionCookie } = await import("@/lib/auth/session");
+      await setSessionCookie({
+        userId: user.id,
+        lineUserId: user.lineUserId,
+        displayName: user.lineDisplayName,
+        avatarUrl: user.avatarUrl,
+        onboardingStep: "done",
+        activeOrgId: inv.orgId,
+      });
+
+      await safeAuditLog({
+        orgId: inv.orgId,
+        userId,
+        action: "accept_invitation",
+        entityType: "user",
+        entityRef: inv.id,
+        summary: `${ctx.session.displayName} เข้าร่วมองค์กรเป็น ${inv.role}`,
       });
 
       return { success: true, orgId: inv.orgId };
@@ -558,15 +645,13 @@ export const userRouter = router({
         },
       });
 
-      await prisma.auditLog.create({
-        data: {
-          orgId: ctx.org.orgId,
-          userId: ctx.session.userId,
-          action: "update_permission",
-          entityType: "user",
-          entityRef: member.userId,
-          summary: `แก้ไขสิทธิ์ "${input.key}" → ${input.value ? "ON" : "OFF"}`,
-        },
+      await safeAuditLog({
+        orgId: ctx.org.orgId,
+        userId: ctx.session.userId,
+        action: "update_permission",
+        entityType: "user",
+        entityRef: member.userId,
+        summary: `แก้ไขสิทธิ์ "${input.key}" → ${input.value ? "ON" : "OFF"}`,
       });
 
       return { success: true };
@@ -606,15 +691,13 @@ export const userRouter = router({
         update: { ...fallback, isCustom: false },
       });
 
-      await prisma.auditLog.create({
-        data: {
-          orgId: ctx.org.orgId,
-          userId: ctx.session.userId,
-          action: "reset_permissions",
-          entityType: "user",
-          entityRef: member.userId,
-          summary: `รีเซ็ตสิทธิ์เป็น default ของ role ${role}`,
-        },
+      await safeAuditLog({
+        orgId: ctx.org.orgId,
+        userId: ctx.session.userId,
+        action: "reset_permissions",
+        entityType: "user",
+        entityRef: member.userId,
+        summary: `รีเซ็ตสิทธิ์เป็น default ของ role ${role}`,
       });
 
       return { success: true };

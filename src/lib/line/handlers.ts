@@ -19,6 +19,8 @@ import {
   resolveLineContext,
   resolveGroupContext,
   getUserActiveOrgs,
+  type LineUserContext,
+  type GroupResolveError,
 } from "@/lib/line/user-org";
 import { ensureLineDefaults } from "@/lib/line/defaults";
 import {
@@ -27,13 +29,21 @@ import {
 } from "@/lib/line/flex/payment-confirm";
 import { buildProjectPickerCarousel } from "@/lib/line/flex/project-picker";
 import { buildMenuFlex } from "@/lib/line/flex/menu";
-import { parseTextExpense, looksLikeIncome } from "@/lib/line/parse-text-expense";
+import {
+  parseTextExpense,
+  looksLikeIncome,
+  hasDescriptionWord,
+} from "@/lib/line/parse-text-expense";
+import { checkQuotaOnly, incrementAndCheckQuota } from "@/server/lib/usage";
+import { MAX_FILE_SIZES } from "@/lib/security/file-validation";
+import { todayBangkok } from "@/lib/utils/date";
 import {
   GoogleSheetsService,
   SHEET_TABS,
 } from "@/server/services/google-sheets.service";
 import { getSheetsService, getDriveService } from "@/server/lib/sheets-context";
 import { calculatePayment } from "@/lib/calculations";
+import { safeAuditLog } from "@/server/lib/audit";
 
 const APP_BASE_URL =
   process.env.APP_BASE_URL ||
@@ -41,6 +51,9 @@ const APP_BASE_URL =
   "http://localhost:3000";
 
 const DRAFT_TTL_HOURS = 24;
+
+/** ปัดทศนิยม 2 ตำแหน่ง (สูตรเดียวกับ calculations.ts ซึ่งไม่ได้ export) */
+const roundTwo = (v: number): number => Math.round(v * 100) / 100;
 
 // คำที่ถือเป็นคำสั่งเปิดเมนู (case-insensitive — รับ lower มาแล้ว)
 const MENU_WORDS = new Set(["เมนู", "เมนูหลัก", "menu", "/menu", "/เมนู", "mainmenu"]);
@@ -60,6 +73,9 @@ function isMenuTrigger(lower: string): boolean {
 // ---------- LINE Event Types ----------
 export interface LineWebhookEvent {
   type: string;
+  /** Unique per event — LINE reuses it on redelivery (dedupe key, LINE-05). */
+  webhookEventId?: string;
+  deliveryContext?: { isRedelivery?: boolean };
   replyToken?: string;
   source: { userId?: string; type: string; groupId?: string; roomId?: string };
   message?: {
@@ -75,6 +91,8 @@ export interface LineWebhookEvent {
 }
 
 const SUPPORTED_FILE_EXTENSIONS = ["pdf", "jpg", "jpeg", "png", "webp"];
+// ขนาดไฟล์สูงสุดที่รับจาก LINE — ใช้ค่าเดียวกับ upload ทางเว็บ (10 MB)
+const MAX_LINE_FILE_SIZE = Math.max(...Object.values(MAX_FILE_SIZES));
 
 function mimeTypeFromFilename(fileName: string): string {
   const ext = fileName.split(".").pop()?.toLowerCase() || "";
@@ -151,6 +169,35 @@ export async function handleLeave(event: LineWebhookEvent): Promise<void> {
   await prisma.lineGroup.deleteMany({ where: { groupId } });
 }
 
+/**
+ * Resolve the group's bound org; on failure reply with the right Thai note
+ * (bind link, or "re-bind" when the binding admin left the org) and return null.
+ */
+async function resolveGroupOrReply(
+  groupId: string | undefined,
+  replyToken: string,
+): Promise<LineUserContext | null> {
+  const gctx = groupId
+    ? await resolveGroupContext(groupId)
+    : ({ error: "unbound" } as GroupResolveError);
+  if (!("error" in gctx)) return gctx;
+  if (gctx.error === "binder_inactive") {
+    await replyMessage(replyToken, [
+      text(
+        "ผู้ดูแลที่เชื่อมกลุ่มนี้ไม่ได้เป็นสมาชิกบริษัทแล้ว\n" +
+          "ผู้ดูแล (Admin) คนปัจจุบันกรุณาเชื่อมกลุ่มใหม่ที่:\n" +
+          `${APP_BASE_URL}/line-groups`,
+      ),
+    ]);
+    return null;
+  }
+  const bindUrl = `${APP_BASE_URL}/line-groups/bind?g=${encodeURIComponent(groupId || "")}`;
+  await replyMessage(replyToken, [
+    text("กลุ่มนี้ยังไม่ได้เชื่อมกับบริษัท\nผู้ดูแล (Admin) เปิดลิงก์เพื่อเชื่อม:\n" + bindUrl),
+  ]);
+  return null;
+}
+
 // =====================================================
 // TEXT
 // =====================================================
@@ -174,8 +221,10 @@ export async function handleText(event: LineWebhookEvent): Promise<void> {
   // GROUP: only react to expense-like text (with a number) — stay silent on
   // ordinary group chatter so the bot doesn't spam the conversation.
   if (isGroup) {
-    const parsedGroup = parseTextExpense(rawText);
-    if (!parsedGroup) return;
+    // strict: ยอดต้องมีหน่วย (บาท/฿) หรือเป็นเลขท้ายข้อความ + ต้องมีคำอธิบาย
+    // อย่างน้อย 1 คำ — กัน "ประชุม 3 โมง" / "302" ถูกบันทึกเป็นรายจ่ายเงียบ ๆ (LINE-02)
+    const parsedGroup = parseTextExpense(rawText, { strict: true });
+    if (!parsedGroup || !hasDescriptionWord(rawText)) return;
     // Income-looking text must not be booked as an expense.
     if (looksLikeIncome(rawText)) {
       await replyMessage(event.replyToken, [
@@ -188,14 +237,8 @@ export async function handleText(event: LineWebhookEvent): Promise<void> {
       ]);
       return;
     }
-    const gctx = groupId ? await resolveGroupContext(groupId) : null;
-    if (!gctx) {
-      const bindUrl = `${APP_BASE_URL}/line-groups/bind?g=${encodeURIComponent(groupId || "")}`;
-      await replyMessage(event.replyToken, [
-        text("กลุ่มนี้ยังไม่ได้เชื่อมกับบริษัท\nผู้ดูแล (Admin) เปิดลิงก์เพื่อเชื่อม:\n" + bindUrl),
-      ]);
-      return;
-    }
+    const gctx = await resolveGroupOrReply(groupId, event.replyToken);
+    if (!gctx) return;
     await processTextExpenseAsync(groupId!, parsedGroup, gctx, {
       autoSave: true,
       eventId: gctx.groupEventId,
@@ -321,16 +364,18 @@ export async function handleMedia(event: LineWebhookEvent): Promise<void> {
     return;
   }
 
+  // ไฟล์ใหญ่เกินไป → ไม่โหลดเข้า OCR/หน่วยความจำ (LINE ส่ง fileSize มาเฉพาะ message type=file)
+  if ((event.message.fileSize ?? 0) > MAX_LINE_FILE_SIZE) {
+    await replyMessage(event.replyToken, [
+      text(`ไฟล์ใหญ่เกิน ${Math.round(MAX_LINE_FILE_SIZE / 1024 / 1024)} MB กรุณาส่งไฟล์ที่เล็กกว่านี้ค่ะ`),
+    ]);
+    return;
+  }
+
   // ----- GROUP: resolve bound org → auto-save (no picker) -----
   if (isGroup) {
-    const gctx = groupId ? await resolveGroupContext(groupId) : null;
-    if (!gctx) {
-      const bindUrl = `${APP_BASE_URL}/line-groups/bind?g=${encodeURIComponent(groupId || "")}`;
-      await replyMessage(event.replyToken, [
-        text("กลุ่มนี้ยังไม่ได้เชื่อมกับบริษัท\nผู้ดูแล (Admin) เปิดลิงก์เพื่อเชื่อม:\n" + bindUrl),
-      ]);
-      return;
-    }
+    const gctx = await resolveGroupOrReply(groupId, event.replyToken);
+    if (!gctx) return;
     await processMediaAsync(groupId!, messageId, mimeType, gctx, {
       autoSave: true,
       eventId: gctx.groupEventId,
@@ -568,9 +613,35 @@ async function processMediaAsync(
   },
   opts?: { autoSave?: boolean; eventId?: string | null; eventName?: string | null },
 ): Promise<void> {
+  // โควตา OCR รายเดือน — เช็กก่อนดาวน์โหลด (ลำดับเดียวกับ /api/ocr/receipt) (LINE-01)
+  const quota = await checkQuotaOnly(ctx.orgId, "ocr");
+  if (!quota.ok) {
+    await pushMessage(lineUserId, [
+      text(
+        `โควตา OCR เดือนนี้หมดแล้ว (${quota.current}/${quota.limit}) — อัปเกรดได้ที่ ${APP_BASE_URL}/account/billing`,
+      ),
+    ]);
+    return;
+  }
+
   // Download + OCR
   const buffer = await getMessageContent(messageId);
   const ocr = await parseReceipt(buffer, mimeType, "receipt");
+
+  // ตัดเครดิตหลัง OCR สำเร็จเท่านั้น (OCR ล้มเหลวไม่เสียเครดิต)
+  await incrementAndCheckQuota(ctx.orgId, "ocr");
+
+  // กลุ่ม: บันทึกอัตโนมัติเฉพาะใบเสร็จที่อ่านได้ชัด (มีร้าน + ยอด > 0) —
+  // รูปอื่น ๆ (มีม/รูปอาหาร) ต้องไม่กลายเป็นแถวรายจ่าย (LINE-02)
+  if (opts?.autoSave) {
+    const groupTotal = ocr.totalAmount ?? ocr.subtotal ?? 0;
+    if (!ocr.vendorName || !(groupTotal > 0)) {
+      await pushMessage(lineUserId, [
+        text("อ่านใบเสร็จไม่ได้ (ไม่พบชื่อร้านหรือยอดเงิน) — ยังไม่ได้บันทึกรายการค่ะ"),
+      ]);
+      return;
+    }
+  }
 
   // Auto-correct buyer info from Config sheet (graceful — silently skips if no Config rows).
   // OCR mis-reads Thai chars on small fonts (ร↔ซ, ด↔อ); the Config-stored
@@ -661,7 +732,7 @@ async function processTextExpenseAsync(
 ): Promise<void> {
   // Build a minimal OcrParsedReceipt from the user's typed text. Vendor info
   // is intentionally left blank — user edits in web app if needed.
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayBangkok();
   const ocr: OcrParsedReceipt = {
     vendorName: null,
     vendorAddress: null,
@@ -763,13 +834,16 @@ export async function handlePostback(event: LineWebhookEvent): Promise<void> {
     return;
   }
   if (draft.status !== "pending") {
-    await replyMessage(event.replyToken, [
-      text(`รายการนี้ ${draft.status === "confirmed" ? "บันทึกไปแล้ว" : "ถูกยกเลิกแล้ว"}`),
-    ]);
+    const statusLabel =
+      draft.status === "saving" ? "กำลังบันทึก"
+      : draft.status === "confirmed" ? "บันทึกไปแล้ว"
+      : "ถูกยกเลิกแล้ว";
+    await replyMessage(event.replyToken, [text(`รายการนี้ ${statusLabel}`)]);
     return;
   }
   if (draft.expiresAt < new Date()) {
-    await prisma.lineDraft.update({ where: { id: draftId }, data: { status: "expired" } });
+    // ลบทิ้งเลย — draft เก็บ ocrJson ไว้ชั่วคราวเท่านั้น (LINE-06)
+    await prisma.lineDraft.deleteMany({ where: { id: draftId } });
     await replyMessage(event.replyToken, [text("รายการหมดอายุแล้ว กรุณาส่งรูปใหม่")]);
     return;
   }
@@ -817,7 +891,8 @@ export async function handlePostback(event: LineWebhookEvent): Promise<void> {
   // --- SELECT PROJECT ---
   if (action === "select_project") {
     const eventId = params.get("eventId") || "";
-    const eventName = decodeURIComponent(params.get("eventName") || "");
+    // URLSearchParams ถอด encode ให้แล้ว — ถอดซ้ำทำให้ชื่อที่มี "%" พัง (LINE-07)
+    const eventName = params.get("eventName") || "";
 
     try {
       await prisma.lineDraft.update({
@@ -889,7 +964,8 @@ export async function handlePostback(event: LineWebhookEvent): Promise<void> {
 
   // --- CANCEL ---
   if (action === "cancel") {
-    await prisma.lineDraft.update({ where: { id: draftId }, data: { status: "cancelled" } });
+    // ยกเลิก = ไม่ต้องเก็บ draft ต่อ (LINE-06)
+    await prisma.lineDraft.deleteMany({ where: { id: draftId, status: "pending" } });
     await replyMessage(event.replyToken, [text("ยกเลิกแล้วค่ะ")]);
     return;
   }
@@ -897,18 +973,30 @@ export async function handlePostback(event: LineWebhookEvent): Promise<void> {
   // --- CONFIRM ---
   if (action === "confirm") {
     await replyMessage(event.replyToken, [text("กำลังบันทึก...")]);
-    await confirmDraftAsync(draft).catch(async (err) => {
+    try {
+      const claimed = await confirmDraftAsync(draft);
+      if (!claimed) {
+        // กดซ้ำ — อีก request กำลังบันทึก/บันทึกไปแล้ว (LINE-04)
+        await pushMessage(event.source.userId, [text("รายการนี้กำลังบันทึก/บันทึกแล้ว")]).catch(() => {});
+      }
+    } catch (err) {
       console.error("[LINE webhook] confirm failed:", err);
-      await pushMessage(event.source.userId!, [
+      await pushMessage(event.source.userId, [
         text("บันทึกไม่สำเร็จ\n" + (err instanceof Error ? err.message : "เกิดข้อผิดพลาด")),
       ]).catch(() => {});
-    });
+    }
   }
 }
 
 // =====================================================
 // CONFIRM — Save expense (เหมือน browser upload receipt)
 // =====================================================
+/**
+ * Claims the draft (pending → saving) before any Sheets/Drive write so a
+ * double "บันทึก" cannot append twice (LINE-04). Returns false when the draft
+ * was already claimed/confirmed. On success the draft row is deleted (LINE-06);
+ * on failure it is reverted to pending so the user can retry.
+ */
 async function confirmDraftAsync(draft: {
   id: string;
   lineUserId: string;
@@ -917,13 +1005,44 @@ async function confirmDraftAsync(draft: {
   imageMessageId: string;
   mimeType: string;
   ocrJson: unknown;
-}): Promise<void> {
-  const ocr = draft.ocrJson as OcrParsedReceipt;
+}): Promise<boolean> {
+  // Read eventId/eventName before claiming (the row is deleted at the end).
+  const draftFull = await prisma.lineDraft.findUnique({ where: { id: draft.id } });
+  const eventId = draftFull?.eventId || "";
+  const eventName = draftFull?.eventName || "";
 
-  // Read eventId/eventName from draft (cast needed because Prisma types not regenerated yet)
-  const draftFull = await prisma.lineDraft.findUnique({ where: { id: draft.id } }) as Record<string, unknown> | null;
-  const eventId = (draftFull?.eventId as string) || "";
-  const eventName = (draftFull?.eventName as string) || "";
+  const claim = await prisma.lineDraft.updateMany({
+    where: { id: draft.id, status: "pending" },
+    data: { status: "saving" },
+  });
+  if (claim.count === 0) return false;
+
+  try {
+    await writeDraftToSheets(draft, eventId, eventName);
+  } catch (err) {
+    // คืนเป็น pending ให้กดบันทึกใหม่ได้ (ถ้าแถวยังอยู่)
+    await prisma.lineDraft
+      .updateMany({ where: { id: draft.id, status: "saving" }, data: { status: "pending" } })
+      .catch(() => {});
+    throw err;
+  }
+  return true;
+}
+
+async function writeDraftToSheets(
+  draft: {
+    id: string;
+    lineUserId: string;
+    userId: string;
+    orgId: string;
+    imageMessageId: string;
+    mimeType: string;
+    ocrJson: unknown;
+  },
+  eventId: string,
+  eventName: string,
+): Promise<void> {
+  const ocr = draft.ocrJson as OcrParsedReceipt;
 
   // Get services
   const sheets = await getSheetsService(draft.orgId);
@@ -983,7 +1102,7 @@ async function confirmDraftAsync(draft: {
   // Text entries skip Drive download/upload entirely — there's no file.
   const isTextEntry = draft.imageMessageId.startsWith("text:");
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayBangkok();
   const paymentId = GoogleSheetsService.generateId("PMT");
 
   let receiptUrl = "";
@@ -1030,18 +1149,34 @@ async function confirmDraftAsync(draft: {
     console.log(`[LINE] Confirming text-entry draft ${draft.id} — skipping Drive upload`);
   }
 
-  // Calculate amounts (เหมือน browser)
+  // Calculate amounts (เหมือน browser) — ต้องให้ TTL + VAT == GTTL เสมอ (LINE-07):
+  // ใบเสร็จที่ OCR ได้ทั้ง subtotal และ VAT → ใช้ subtotal เป็นฐาน + VAT ตามใบ
+  // ไม่ครบ → แยกจากยอดรวม (total/1.07) แล้วให้ VAT = total - ฐาน
   const totalAmount = ocr.totalAmount ?? ocr.subtotal ?? 0;
-  const costPerUnit = ocr.hasVat ? totalAmount / 1.07 : totalAmount;
+  const isVatPayee = !!ocr.hasVat || (ocr.vatAmount ?? 0) > 0;
+  let costPerUnit: number;
+  let vatAmount: number;
+  if (!isVatPayee) {
+    costPerUnit = roundTwo(totalAmount);
+    vatAmount = 0;
+  } else if (ocr.vatAmount != null && ocr.subtotal != null && ocr.subtotal > 0) {
+    costPerUnit = roundTwo(ocr.subtotal);
+    vatAmount = roundTwo(ocr.vatAmount);
+  } else {
+    costPerUnit = roundTwo(totalAmount / 1.07);
+    vatAmount = roundTwo(totalAmount - costPerUnit);
+  }
   const pctWTH = 0; // default — user แก้ในเว็บได้
 
   const calc = calculatePayment({
-    costPerUnit: Math.round(costPerUnit * 100) / 100,
+    costPerUnit,
     days: 1,
     numberOfPeople: 1,
     pctWTH,
-    isVatPayee: !!ocr.hasVat,
+    isVatPayee,
   });
+  // GTTL จาก VAT จริงของใบเสร็จ (calc.vatAmount คือ 7% ของฐาน ซึ่งอาจไม่ตรงใบ)
+  const gttlAmount = roundTwo(calc.ttlAmount - calc.wthAmount + vatAmount);
 
   // Build Description — text entries put the user's typed message verbatim.
   const paymentDescription = isTextEntry
@@ -1066,14 +1201,14 @@ async function confirmDraftAsync(draft: {
     InvoiceNumber: ocr.invoiceNumber || "",
     InvoiceFileURL: "",
     Description: paymentDescription,
-    CostPerUnit: Math.round(costPerUnit * 100) / 100,
+    CostPerUnit: costPerUnit,
     Days: 1,
     NoOfPPL: 1,
     TTLAmount: calc.ttlAmount,
     PctWTH: pctWTH,
     WTHAmount: calc.wthAmount,
-    VATAmount: ocr.vatAmount ?? calc.vatAmount,
-    GTTLAmount: calc.gttlAmount,
+    VATAmount: vatAmount,
+    GTTLAmount: gttlAmount,
     Status: "pending",
     PaymentDate: "",
     DueDate: ocr.documentDate || today,
@@ -1101,11 +1236,9 @@ async function confirmDraftAsync(draft: {
     UpdatedAt: now,
   });
 
-  // Mark draft confirmed (drive fields already saved earlier for image flow).
-  await prisma.lineDraft.update({
-    where: { id: draft.id },
-    data: { status: "confirmed" },
-  });
+  // บันทึกแล้ว → ลบ draft (ocrJson มีเลขภาษี/ยอด — เก็บไว้แค่ชั่วคราวตาม Zero Data Retention)
+  // ข้อมูลที่ต้องใช้ต่อ (ocr, eventName) อยู่ในหน่วยความจำแล้ว ไม่มีใครอ่าน draft หลังจากนี้
+  await prisma.lineDraft.deleteMany({ where: { id: draft.id } });
 
   // Audit log — distinguish OCR vs manual text entry
   const auditPrefix = isTextEntry ? "LINE Text" : "LINE OCR";
@@ -1113,14 +1246,14 @@ async function confirmDraftAsync(draft: {
     ? (ocr.rawText?.slice(0, 60) || "")
     : (ocr.vendorName || "");
 
-  await prisma.auditLog.create({
+  await safeAuditLog({
     data: {
       orgId: draft.orgId,
       userId: draft.userId,
       action: "create",
       entityType: "payment",
       entityRef: paymentId,
-      summary: `${auditPrefix}: ${auditLabel} ฿${totalAmount} | ${eventName || "ไม่ระบุโปรเจกต์"}`,
+      summary: `${auditPrefix}: ${auditLabel} ฿${gttlAmount} | ${eventName || "ไม่ระบุโปรเจกต์"}`,
     },
   });
 
@@ -1134,7 +1267,7 @@ async function confirmDraftAsync(draft: {
     buildSavedFlex({
       paymentId,
       vendor: savedLabel,
-      amount: totalAmount,
+      amount: gttlAmount,
       projectName: eventName || "ไม่ระบุ",
       webUrl: `${APP_BASE_URL}/expenses`,
     }),

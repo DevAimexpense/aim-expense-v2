@@ -17,9 +17,15 @@ import {
   GoogleSheetsService,
   SHEET_TABS,
 } from "../services/google-sheets.service";
-import { computeNextDocNumber } from "../lib/doc-number";
+import { computeNextDocNumber, withDocNumberLock } from "../lib/doc-number";
+import { withLock } from "../lib/lock";
+import { invalidateTab } from "../lib/cache";
+import { assertVatAllowed } from "../lib/org-vat";
+import { scopedEventIds } from "@/lib/permissions";
+import { todayBangkok } from "@/lib/utils/date";
 import { resolveIssuerBranch } from "../lib/issuer-branch";
 import { prisma } from "@/lib/prisma";
+import { safeAuditLog } from "@/server/lib/audit";
 
 // ===== Schemas =====
 
@@ -106,7 +112,8 @@ function branchLabelOf(branchType: string, branchNumber: string): string {
  * Per S25B carry-forward: ±7d soft, future hard-block.
  */
 function validateDocDate(docDate: string): { warn?: string } {
-  const today = new Date().toISOString().slice(0, 10);
+  // "วันนี้" ตามเวลาไทย — ISO/UTC ทำให้ 00:00–07:00 ไทยออกใบวันนี้ไม่ได้ ("วันที่ในอนาคต") DOC-05
+  const today = todayBangkok();
   if (docDate > today) {
     throw new TRPCError({
       code: "BAD_REQUEST",
@@ -204,8 +211,11 @@ export const taxInvoiceRouter = router({
       const sheets = await getSheetsService(ctx.org.orgId);
       await ensureTabsCached(sheets, ctx.org.orgId);
       const all = await sheets.getTaxInvoices();
+      // project_manager เห็นเฉพาะเอกสารของโปรเจกต์ในขอบเขตตัวเอง (CO-07)
+      const scope = scopedEventIds(ctx.org);
 
       const filtered = all.filter((r) => {
+        if (scope !== null && !scope.includes((r.EventID || "").trim())) return false;
         if (input?.status && r.Status !== input.status) return false;
         if (input?.customerId && r.CustomerID !== input.customerId) return false;
         if (input?.from && r.DocDate < input.from) return false;
@@ -239,6 +249,11 @@ export const taxInvoiceRouter = router({
         (r) => r.TaxInvoiceID === input.taxInvoiceId,
       );
       if (!header) return null;
+      // project_manager: นอกขอบเขต = ไม่พบ (CO-07)
+      const scope = scopedEventIds(ctx.org);
+      if (scope !== null && !scope.includes((header.EventID || "").trim())) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "ไม่พบใบกำกับภาษี" });
+      }
       const lines = (batch[SHEET_TABS.TAX_INVOICE_LINES] || [])
         .filter((r) => r.TaxInvoiceID === input.taxInvoiceId)
         .sort(
@@ -256,6 +271,8 @@ export const taxInvoiceRouter = router({
     .input(TaxInvoiceCreateInput)
     .mutation(async ({ ctx, input }) => {
       validateDocDate(input.docDate);
+      // ใบกำกับภาษีมี VAT เสมอ — org ไม่จด VAT ออกไม่ได้ (DOC-06)
+      await assertVatAllowed(ctx.org.orgId, true, "ใบกำกับภาษี");
 
       const sheets = await getSheetsService(ctx.org.orgId);
       await ensureTabsCached(sheets, ctx.org.orgId);
@@ -346,7 +363,7 @@ export const taxInvoiceRouter = router({
         throw e;
       }
 
-      await prisma.auditLog.create({
+      await safeAuditLog({
         data: {
           orgId: ctx.org.orgId,
           userId: ctx.session.userId,
@@ -367,6 +384,7 @@ export const taxInvoiceRouter = router({
     .input(z.object({ taxInvoiceId: z.string() }).merge(TaxInvoiceCreateInput))
     .mutation(async ({ ctx, input }) => {
       validateDocDate(input.docDate);
+      await assertVatAllowed(ctx.org.orgId, true, "ใบกำกับภาษี"); // DOC-06
 
       const sheets = await getSheetsService(ctx.org.orgId);
       const existing = await sheets.getTaxInvoiceById(input.taxInvoiceId);
@@ -439,7 +457,7 @@ export const taxInvoiceRouter = router({
         }))
         );
 
-      await prisma.auditLog.create({
+      await safeAuditLog({
         data: {
           orgId: ctx.org.orgId,
           userId: ctx.session.userId,
@@ -491,30 +509,38 @@ export const taxInvoiceRouter = router({
         });
       }
 
-      const docDate = existing.DocDate || new Date().toISOString().slice(0, 10);
-      // Sequential numbering — only count issued docs (skip draft/void)
-      const docNumber = await computeNextDocNumber(
-        sheets,
-        "TI",
-        docDate,
-        SHEET_TABS.TAX_INVOICES,
-        (status) => status === "issued",
-      );
+      await assertVatAllowed(ctx.org.orgId, true, "ใบกำกับภาษี"); // DOC-06
 
-      const now = new Date().toISOString();
-      await sheets.updateById(
-        SHEET_TABS.TAX_INVOICES,
-        "TaxInvoiceID",
-        input.taxInvoiceId,
-        {
-          DocNumber: docNumber,
-          Status: "issued",
-          IssuedAt: now,
-          UpdatedAt: now,
-        },
-      );
+      const docDate = existing.DocDate || todayBangkok();
+      // Sequential numbering — นับ issued **และ void** (เลขที่ยกเลิกต้องคงอยู่ในลำดับตามกฎสรรพากร
+      // ห้ามนำกลับมาใช้ซ้ำ — DOC-01) · ข้าม draft (ยังไม่มีเลข)
+      // อ่าน max สด + เขียน ภายใน lock ต่อ org/ประเภท/เดือน กันเลขชนเมื่อออกพร้อมกัน (DOC-03)
+      const docNumber = await withDocNumberLock(ctx.org.orgId, "TI", docDate, async () => {
+        const no = await computeNextDocNumber(
+          sheets,
+          "TI",
+          docDate,
+          SHEET_TABS.TAX_INVOICES,
+          (status) => status === "issued" || status === "void",
+          "DocNumber",
+          { spreadsheetId: ctx.org.googleSpreadsheetId },
+        );
+        const now = new Date().toISOString();
+        await sheets.updateById(
+          SHEET_TABS.TAX_INVOICES,
+          "TaxInvoiceID",
+          input.taxInvoiceId,
+          {
+            DocNumber: no,
+            Status: "issued",
+            IssuedAt: now,
+            UpdatedAt: now,
+          },
+        );
+        return no;
+      });
 
-      await prisma.auditLog.create({
+      await safeAuditLog({
         data: {
           orgId: ctx.org.orgId,
           userId: ctx.session.userId,
@@ -572,7 +598,7 @@ export const taxInvoiceRouter = router({
         },
       );
 
-      await prisma.auditLog.create({
+      await safeAuditLog({
         data: {
           orgId: ctx.org.orgId,
           userId: ctx.session.userId,
@@ -616,7 +642,7 @@ export const taxInvoiceRouter = router({
             input.taxInvoiceId
           );
 
-      await prisma.auditLog.create({
+      await safeAuditLog({
         data: {
           orgId: ctx.org.orgId,
           userId: ctx.session.userId,
@@ -673,8 +699,9 @@ export const taxInvoiceRouter = router({
       }
 
       const taxInvoiceId = GoogleSheetsService.generateId("TI");
-      const docDate = input.docDate || new Date().toISOString().slice(0, 10);
+      const docDate = input.docDate || todayBangkok();
       validateDocDate(docDate);
+      await assertVatAllowed(ctx.org.orgId, true, "ใบกำกับภาษี"); // DOC-06
 
       const now = new Date().toISOString();
 
@@ -752,7 +779,7 @@ export const taxInvoiceRouter = router({
         throw e;
       }
 
-      await prisma.auditLog.create({
+      await safeAuditLog({
         data: {
           orgId: ctx.org.orgId,
           userId: ctx.session.userId,
@@ -812,8 +839,9 @@ export const taxInvoiceRouter = router({
       }
 
       const taxInvoiceId = GoogleSheetsService.generateId("TI");
-      const docDate = input.docDate || new Date().toISOString().slice(0, 10);
+      const docDate = input.docDate || todayBangkok();
       validateDocDate(docDate);
+      await assertVatAllowed(ctx.org.orgId, true, "ใบกำกับภาษี"); // DOC-06
 
       const now = new Date().toISOString();
 
@@ -891,7 +919,7 @@ export const taxInvoiceRouter = router({
         throw e;
       }
 
-      await prisma.auditLog.create({
+      await safeAuditLog({
         data: {
           orgId: ctx.org.orgId,
           userId: ctx.session.userId,
@@ -936,38 +964,45 @@ export const taxInvoiceRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const sheets = await getSheetsService(ctx.org.orgId);
-      const existing = await sheets.getTaxInvoiceById(input.taxInvoiceId);
-      if (!existing) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "ไม่พบใบกำกับภาษี" });
-      }
-      if (existing.Status !== "issued") {
-        throw new TRPCError({
-          code: "PRECONDITION_FAILED",
-          message: `บันทึกการชำระเงินไม่ได้ — สถานะปัจจุบัน: ${existing.Status} (ต้อง issued)`,
-        });
-      }
+      // lock ต่อเอกสาร + อ่านสด (ไม่ใช้ cache 90 วิ) กันกดซ้ำ/2 คนพร้อมกันแล้วเขียนทับกัน (CO-04)
+      const existing = await withLock(`billing:${ctx.org.orgId}:${input.taxInvoiceId}`, async () => {
+        if (ctx.org.googleSpreadsheetId) {
+          await invalidateTab(ctx.org.googleSpreadsheetId, SHEET_TABS.TAX_INVOICES);
+        }
+        const fresh = await sheets.getTaxInvoiceById(input.taxInvoiceId);
+        if (!fresh) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "ไม่พบใบกำกับภาษี" });
+        }
+        if (fresh.Status !== "issued") {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: `บันทึกการชำระเงินไม่ได้ — สถานะปัจจุบัน: ${fresh.Status} (ต้อง issued)`,
+          });
+        }
 
-      const now = new Date().toISOString();
-      await sheets.updateById(
-        SHEET_TABS.TAX_INVOICES,
-        "TaxInvoiceID",
-        input.taxInvoiceId,
-        {
-          PaidAmount: round2(input.netReceived),
-          PaidDate: input.paidDate,
-          PaymentMethod: input.paymentMethod,
-          PaymentWHTPercent: input.whtPercent,
-          PaymentWHTAmount: round2(input.whtAmount),
-          PaymentAdjustmentAmount: round2(input.adjustmentAmount),
-          PaymentAdjustmentNote: input.adjustmentNote || "",
-          PaymentEvidenceUrl: input.paymentEvidenceUrl || "",
-          WHTCertUrl: input.whtCertUrl || existing.WHTCertUrl || "",
-          PaymentRecordedAt: now,
-          UpdatedAt: now,
-        },
-      );
+        const now = new Date().toISOString();
+        await sheets.updateById(
+          SHEET_TABS.TAX_INVOICES,
+          "TaxInvoiceID",
+          input.taxInvoiceId,
+          {
+            PaidAmount: round2(input.netReceived),
+            PaidDate: input.paidDate,
+            PaymentMethod: input.paymentMethod,
+            PaymentWHTPercent: input.whtPercent,
+            PaymentWHTAmount: round2(input.whtAmount),
+            PaymentAdjustmentAmount: round2(input.adjustmentAmount),
+            PaymentAdjustmentNote: input.adjustmentNote || "",
+            PaymentEvidenceUrl: input.paymentEvidenceUrl || "",
+            WHTCertUrl: input.whtCertUrl || fresh.WHTCertUrl || "",
+            PaymentRecordedAt: now,
+            UpdatedAt: now,
+          },
+        );
+        return fresh;
+      });
 
-      await prisma.auditLog.create({
+      await safeAuditLog({
         data: {
           orgId: ctx.org.orgId,
           userId: ctx.session.userId,

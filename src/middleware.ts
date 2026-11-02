@@ -14,7 +14,9 @@ const RATE_LIMITS: Record<string, { max: number; windowMs: number }> = {
   "/api/payments/upload": { max: 30, windowMs: 60 * 1000 }, // 30/min
   "/api/auth/line": { max: 10, windowMs: 60 * 1000 }, // 10/min login attempts
   "/api/auth/google": { max: 10, windowMs: 60 * 1000 },
-  "/api/line/webhook": { max: 300, windowMs: 60 * 1000 }, // LINE may burst
+  // "/api/line/webhook" is intentionally NOT listed: the route verifies the LINE
+  // signature itself, and a per-instance IP limit on LINE's shared egress IPs
+  // would 429 a busy group → LINE redelivers → duplicate rows (LINE-07).
 };
 
 function getClientId(req: NextRequest): string {

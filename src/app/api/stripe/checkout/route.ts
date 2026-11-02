@@ -11,19 +11,38 @@
 //   { url: "https://checkout.stripe.com/..." }
 //
 // Flow:
-//   1. Auth + active org check
-//   2. Resolve price via lookup_key
-//   3. Find/create Stripe Customer for the org (idempotent)
-//   4. Apply ref-coupon if valid affiliate code
-//   5. Create checkout.session with success/cancel URLs back to /account/billing
+//   1. Auth + active org check (comped/lifetime orgs are blocked — nothing to pay)
+//   2. Resolve price via lookup_key + assert amount/currency match PLAN_PRICING_THB
+//   3. Org already has a live Stripe subscription → update its price in place
+//      (one subscription per org, prorated) and return to /account/billing
+//   4. Find/create Stripe Customer for the org (idempotent)
+//   5. Apply ref-coupon: Referral row first, `aim_ref` cookie second
+//   6. Create checkout.session with success/cancel URLs back to /account/billing
+//      (keeping remaining trial days via subscription_data.trial_end)
 // ===========================================
 
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import type Stripe from "stripe";
 import { getSession } from "@/lib/auth/session";
 import { prisma } from "@/lib/prisma";
-import { stripe, getPriceByTierInterval, REFERRAL_COUPON_ID } from "@/lib/stripe";
-import { PLAN_TIERS, type PlanTier } from "@/lib/plans";
+import {
+  stripe,
+  getPriceByTierInterval,
+  REFERRAL_COUPON_ID,
+  ENTITLED_STATUSES,
+} from "@/lib/stripe";
+import {
+  PLAN_TIERS,
+  PLAN_PRICING_THB,
+  PLAN_LABELS,
+  isInTrial,
+  type PlanTier,
+} from "@/lib/plans";
+import { safeAuditLog } from "@/server/lib/audit";
+
+// Stripe rejects `trial_end` closer than 48h; add a little slack for clock skew.
+const TRIAL_END_MIN_AHEAD_S = 48 * 3600 + 10 * 60;
 
 const Body = z.object({
   tier: z.enum(
@@ -71,6 +90,109 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "ไม่พบ org" }, { status: 404 });
   }
 
+  // ฟรีตลอดชีพ (comped จากหลังบ้าน) — ไม่มีอะไรต้องจ่าย และ webhook จะไม่ทับ plan อยู่แล้ว
+  if (sub?.isBetaTester) {
+    return NextResponse.json(
+      {
+        error:
+          "บัญชีนี้ได้รับสิทธิ์ใช้งานฟรีจากทีมงานแล้ว ไม่ต้องชำระเงินผ่าน Stripe — หากต้องการเปลี่ยนแพ็กเกจ กรุณาติดต่อทีมงาน",
+      },
+      { status: 400 },
+    );
+  }
+
+  // Resolve price via lookup_key
+  let price: Stripe.Price;
+  try {
+    price = await getPriceByTierInterval(tier, interval);
+  } catch (err) {
+    return NextResponse.json(
+      {
+        error: err instanceof Error ? err.message : "Price lookup failed",
+      },
+      { status: 500 },
+    );
+  }
+
+  // Never charge an amount the website did not advertise: the Stripe price
+  // must equal PLAN_PRICING_THB (in satang) and be in THB.
+  const expectedTHB = PLAN_PRICING_THB[tier]?.[interval];
+  if (
+    expectedTHB === undefined ||
+    price.currency !== "thb" ||
+    price.unit_amount !== expectedTHB * 100
+  ) {
+    console.error(
+      `[stripe-checkout] price mismatch for ${tier}/${interval}: Stripe ${price.id} = ${price.unit_amount} ${price.currency}, expected ${(expectedTHB ?? 0) * 100} thb`,
+    );
+    return NextResponse.json(
+      {
+        error:
+          "ราคาในระบบไม่ตรงกับราคาใน Stripe — ระงับการชำระเงินชั่วคราวเพื่อความปลอดภัย กรุณาติดต่อทีมงาน",
+      },
+      { status: 500 },
+    );
+  }
+  const priceId = price.id;
+
+  // BIL-02: one Stripe subscription per org. If a live one exists, change its
+  // price in place (prorated) instead of opening a second Checkout — a second
+  // session would double-bill and orphan the old subscription id in our DB.
+  if (sub?.stripeSubscriptionId) {
+    let existing: Stripe.Subscription | null = null;
+    try {
+      existing = await stripe.subscriptions.retrieve(sub.stripeSubscriptionId);
+    } catch {
+      // Stale id (e.g. created under test keys, or deleted) → fresh checkout below
+      existing = null;
+    }
+    if (existing && ENTITLED_STATUSES.has(existing.status)) {
+      const item = existing.items.data[0];
+      if (!item) {
+        return NextResponse.json(
+          { error: "ไม่พบรายการในแพ็กเกจปัจจุบันบน Stripe กรุณาติดต่อทีมงาน" },
+          { status: 500 },
+        );
+      }
+      if (item.price.id === priceId) {
+        // Already on this exact price — nothing to change
+        return NextResponse.json({ url: "/account/billing?stripe=updated" });
+      }
+      try {
+        await stripe.subscriptions.update(existing.id, {
+          items: [{ id: item.id, price: priceId }],
+          proration_behavior: "create_prorations",
+          metadata: {
+            ...existing.metadata,
+            orgId,
+            ownerUserId: org.ownerId,
+            tier,
+            interval,
+          },
+        });
+      } catch (err) {
+        console.error("[stripe-checkout] subscription update failed", err);
+        return NextResponse.json(
+          { error: err instanceof Error ? err.message : "Stripe error" },
+          { status: 500 },
+        );
+      }
+      await safeAuditLog({
+        data: {
+          orgId,
+          userId: session.userId,
+          action: "update",
+          entityType: "subscription",
+          entityRef: existing.id,
+          summary: `เปลี่ยนแพ็กเกจเป็น ${PLAN_LABELS[tier]} (${interval}) — รอ Stripe ยืนยัน`,
+        },
+      });
+      // DB plan/limits are synced by the `customer.subscription.updated` webhook
+      return NextResponse.json({ url: "/account/billing?stripe=updated" });
+    }
+    // canceled / incomplete_expired / unknown → proceed with a new Checkout Session
+  }
+
   // Owner email for receipts
   const owner = await prisma.user.findUnique({
     where: { id: org.ownerId },
@@ -106,31 +228,46 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  // Resolve price via lookup_key
-  let priceId: string;
-  try {
-    const price = await getPriceByTierInterval(tier, interval);
-    priceId = price.id;
-  } catch (err) {
-    return NextResponse.json(
-      {
-        error: err instanceof Error ? err.message : "Price lookup failed",
-      },
-      { status: 500 },
-    );
-  }
-
-  // Check if ref code is valid (block self-referral here too as defence-in-depth)
+  // BIL-09: the discount must follow the same record the partner's commission
+  // follows — the Referral row written at signup — not the 30-day `aim_ref`
+  // cookie (which expires exactly when the trial does). Cookie/body code is
+  // only a secondary path for an org that has no Referral row.
+  // Self-referral is blocked in both paths as defence-in-depth.
   let discounts: { coupon: string }[] | undefined;
   let validRefPartnerId: string | null = null;
-  if (refCode) {
+  let appliedRefCode: string | undefined;
+
+  const referral = await prisma.referral.findUnique({
+    where: { referredOrgId: orgId },
+    include: { partner: { select: { id: true, code: true, isActive: true, userId: true } } },
+  });
+  if (
+    referral &&
+    (referral.status === "pending" || referral.status === "confirmed") &&
+    referral.partner.isActive &&
+    referral.partner.userId !== session.userId
+  ) {
+    discounts = [{ coupon: REFERRAL_COUPON_ID }];
+    validRefPartnerId = referral.partner.id;
+    appliedRefCode = referral.partner.code;
+  } else if (refCode) {
     const partner = await prisma.affiliatePartner.findUnique({
       where: { code: refCode },
     });
     if (partner && partner.isActive && partner.userId !== session.userId) {
       discounts = [{ coupon: REFERRAL_COUPON_ID }];
       validRefPartnerId = partner.id;
+      appliedRefCode = refCode;
     }
+  }
+
+  // Keep the remaining trial days: without `trial_end` Stripe charges today and
+  // the unused trial is lost. Stripe needs it ≥ 48h ahead; closer than that we
+  // simply start billing now (the customer loses < 2 days, acceptable).
+  let trialEnd: number | undefined;
+  if (sub && isInTrial(sub) && sub.trialEndsAt) {
+    const ts = Math.floor(sub.trialEndsAt.getTime() / 1000);
+    if (ts - Math.floor(Date.now() / 1000) >= TRIAL_END_MIN_AHEAD_S) trialEnd = ts;
   }
 
   // Use NEXT_PUBLIC_APP_URL or fall back to request origin
@@ -150,13 +287,16 @@ export async function POST(req: NextRequest) {
       // Apply coupon as session-level `discounts` (only if valid + present)
       ...(discounts ? { discounts } : { allow_promotion_codes: true }),
       subscription_data: {
+        ...(trialEnd ? { trial_end: trialEnd } : {}),
+        // tier/interval here are a FALLBACK only — the webhook resolves the
+        // real tier from the price (BIL-01).
         metadata: {
           orgId,
           ownerUserId: org.ownerId,
           tier,
           interval,
           ...(validRefPartnerId ? { refPartnerId: validRefPartnerId } : {}),
-          ...(refCode ? { refCode } : {}),
+          ...(appliedRefCode ? { refCode: appliedRefCode } : {}),
         },
       },
       success_url: `${origin}/account/billing?stripe=success&session_id={CHECKOUT_SESSION_ID}`,

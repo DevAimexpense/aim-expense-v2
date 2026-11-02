@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { todayBangkok } from "@/lib/utils/date";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { trpc } from "@/lib/trpc/client";
@@ -40,7 +41,7 @@ const formatTHB = (n: number) =>
   });
 
 function todayISO() {
-  return new Date().toISOString().slice(0, 10);
+  return todayBangkok();
 }
 
 interface LineState {

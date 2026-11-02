@@ -11,6 +11,7 @@ import {
 import { encryptToken } from "@/lib/google/token-encryption";
 import { getSession, setSessionCookie } from "@/lib/auth/session";
 import { prisma } from "@/lib/prisma";
+import { invalidateOrgInfoCache } from "@/server/lib/sheets-context";
 
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
@@ -103,6 +104,14 @@ export async function GET(request: NextRequest) {
       },
     });
 
+    // 4b. CO-08: ล้าง token cache (4 นาที) ของทุก org ที่ user นี้เป็นเจ้าของ
+    //     ไม่งั้น instance อุ่นยังใช้ token ของบัญชี Google เดิมต่ออีกพักหลัง reconnect
+    const ownedOrgs = await prisma.organization.findMany({
+      where: { ownerId: session.userId },
+      select: { id: true },
+    });
+    ownedOrgs.forEach((o) => invalidateOrgInfoCache(o.id));
+
     // 5. Update user email + name (if not already set from LINE)
     //    Only advance onboarding step when the user is still partway through
     //    onboarding. Reconnects from /settings/google ("done") must NOT reset
@@ -123,12 +132,14 @@ export async function GET(request: NextRequest) {
     });
 
     // 6. Refresh session with (possibly new) onboardingStep
+    //    CO-05: คง activeOrgId ไว้ — ไม่งั้น reconnect Google ทำให้เว็บสลับไป org เก่าสุดเงียบ ๆ
     await setSessionCookie({
       userId: user.id,
       lineUserId: user.lineUserId,
       displayName: user.lineDisplayName,
       avatarUrl: user.avatarUrl,
       onboardingStep: user.onboardingStep,
+      activeOrgId: session.activeOrgId ?? user.activeOrgId ?? null,
     });
 
     // 7. Redirect: in-onboarding → next step, post-onboarding → settings page

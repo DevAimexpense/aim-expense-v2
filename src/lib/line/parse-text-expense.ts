@@ -3,11 +3,25 @@
 // Extracts an expense amount + free-form description from a Thai/English
 // chat message such as "ค่ากาแฟ 100 บาท", "Starbucks 150", "แท็กซี่ 250".
 //
-// Design (per Session 14 spec):
-// - Trigger = any message containing a number → treat as expense.
-// - Description = full original text (user reviews/edits in web app later).
-// - No vendor extraction here — left blank, web flow handles it.
-// - No VAT / WHT / category guessing — defaults applied downstream.
+// Amount selection (LINE-03):
+//   (a) a number tagged with a currency unit — followed by บาท / บ. / ฿ / thb
+//       (case-insensitive) or preceded by ฿. If several, the LAST tagged one
+//       wins (Thai chat usually ends with the total: "...รวม 180 บาท").
+//   (b) otherwise the LAST valid number in the message.
+//   strict mode (group chats): only (a), or (b) when the number is the last
+//       token of the message — so "ห้อง 302" is still accepted (limitation:
+//       a trailing bare number is indistinguishable from an amount).
+//
+// Rejected candidates (never an amount):
+//   - ≥ 9 consecutive digits (phone numbers, tax IDs, doc numbers)
+//   - part of a date/time: digit[/.-:]digit on either side ("2024-11-01", "3:30")
+//   - followed by a count/time word: โมง น. นาฬิกา ชม. ชั่วโมง นาที คน ชิ้น ครั้ง %
+//   - amount ≤ 0 or > 9,999,999
+//   - glued to Latin letters that are not a unit ("iPhone 15pro")
+// Comma thousands and decimals are kept ("1,234.50" → 1234.5).
+//
+// Description = full original text (user reviews/edits in web app later).
+// No vendor / VAT / WHT / category guessing — defaults applied downstream.
 // ===========================================
 
 export interface ParsedTextExpense {
@@ -16,6 +30,24 @@ export interface ParsedTextExpense {
   /** Original message, trimmed — used as Description. */
   description: string;
 }
+
+export interface ParseTextExpenseOptions {
+  /** Group mode: accept only unit-tagged numbers or a trailing bare number. */
+  strict?: boolean;
+}
+
+const MAX_AMOUNT = 9_999_999;
+
+/** Number token: "1,234", "1,234.50", "100", "100.5" */
+const NUMBER_RE = /\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?/g;
+/** Currency unit right after the number (optional whitespace). */
+const UNIT_AFTER_RE = /^\s*(?:บาท|บ\.|฿|thb)/i;
+/** Words that mark the number as a count / time, not money. */
+const NOT_MONEY_AFTER_RE = /^\s*(?:โมง|น\.|นาฬิกา|ชม\.|ชั่วโมง|นาที|คน|ชิ้น|ครั้ง|%)/;
+/** Only whitespace / closing punctuation may follow the last token. */
+const TRAILING_RE = /^[\s.,!)\]]*$/;
+const THAI_CHAR_RE = /[฀-๿]/;
+const LATIN_RE = /[A-Za-z]/;
 
 /**
  * Heuristic: does this message look like INCOME (รายรับ) rather than an
@@ -34,33 +66,97 @@ export function looksLikeIncome(rawText: string): boolean {
 }
 
 /**
- * Try to interpret a chat message as a quick expense entry.
- * Returns null when the text contains no usable number — caller should fall
- * back to the help/echo response.
+ * Does the message contain at least one non-numeric word (a description)?
+ * Group chats must not book a bare "300" or "300 บาท" — there is nothing to
+ * describe the expense with.
  */
-export function parseTextExpense(rawText: string): ParsedTextExpense | null {
+export function hasDescriptionWord(rawText: string): boolean {
+  const stripped = (rawText || "")
+    .replace(/[\d,.]+/g, " ")
+    .replace(/บาท|บ\.|thb|฿/gi, " ");
+  return /[฀-๿A-Za-z]{2,}/.test(stripped);
+}
+
+/**
+ * Pure amount extractor — see the rules in the header comment.
+ * Returns null when no candidate survives.
+ */
+export function extractAmount(
+  rawText: string,
+  opts: ParseTextExpenseOptions = {},
+): number | null {
   const text = (rawText || "").trim();
   if (!text) return null;
 
-  // Match the FIRST number in the message. Supports:
-  //   - integers / decimals: "100", "1234.50"
-  //   - thousands commas:    "1,234", "12,345.67"
-  //   - leading currency:    "฿100"
-  //   - trailing unit:       "100 บาท", "100THB"
-  // We deliberately avoid attaching to identifiers (e.g. "iPhone 15") by
-  // requiring the number to be either at start, after whitespace, or after a
-  // currency symbol — and bounded on the right by whitespace, end-of-string,
-  // or a non-digit unit word.
-  const re = /(?:^|[\s฿])(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)/;
-  const m = text.match(re);
-  if (!m) return null;
+  let tagged: number | null = null; // last unit-tagged candidate
+  let lastBare: number | null = null; // last untagged candidate
+  let lastBareIsFinalToken = false;
 
-  const numeric = m[1].replace(/,/g, "");
-  const amount = parseFloat(numeric);
-  if (!Number.isFinite(amount) || amount <= 0) return null;
+  NUMBER_RE.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = NUMBER_RE.exec(text)) !== null) {
+    const token = m[0];
+    const start = m.index;
+    const end = start + token.length;
+    const before = text.slice(0, start);
+    const after = text.slice(end);
+    const prev = before.slice(-1);
+    const next = after.slice(0, 1);
 
-  return {
-    amount,
-    description: text,
-  };
+    // Left boundary: start / whitespace / ฿ / "(" / a Thai letter ("ค่ากาแฟ100บาท").
+    // A digit before cannot happen (regex is greedy) except via a separator.
+    const hasPrevCurrency = /฿\s*$/.test(before);
+    if (
+      prev !== "" &&
+      !/\s/.test(prev) &&
+      prev !== "(" &&
+      !hasPrevCurrency &&
+      !THAI_CHAR_RE.test(prev)
+    ) {
+      continue; // glued to a Latin word / punctuation → identifier, not money
+    }
+
+    // Phone / tax-id / document numbers: 9+ digits in a row.
+    if (/^\d{9,}/.test(token)) continue;
+
+    // Date / time fragments: "2024-11-01", "15/11", "3:30", "1.5.2024".
+    if (/\d[/.\-:]$/.test(before) || /^[/\-:]\d/.test(after)) continue;
+
+    const hasUnitAfter = UNIT_AFTER_RE.test(after);
+    if (!hasUnitAfter) {
+      if (NOT_MONEY_AFTER_RE.test(after)) continue;
+      if (next !== "" && LATIN_RE.test(next)) continue; // "15pro"
+    }
+
+    const amount = parseFloat(token.replace(/,/g, ""));
+    if (!Number.isFinite(amount) || amount <= 0 || amount > MAX_AMOUNT) continue;
+
+    if (hasUnitAfter || hasPrevCurrency) {
+      tagged = amount;
+    } else {
+      lastBare = amount;
+      lastBareIsFinalToken = TRAILING_RE.test(after);
+    }
+  }
+
+  if (tagged !== null) return tagged;
+  if (lastBare === null) return null;
+  if (opts.strict && !lastBareIsFinalToken) return null;
+  return lastBare;
+}
+
+/**
+ * Try to interpret a chat message as a quick expense entry.
+ * Returns null when the text contains no usable amount — caller should fall
+ * back to the help/echo response.
+ */
+export function parseTextExpense(
+  rawText: string,
+  opts: ParseTextExpenseOptions = {},
+): ParsedTextExpense | null {
+  const text = (rawText || "").trim();
+  if (!text) return null;
+  const amount = extractAmount(text, opts);
+  if (amount === null) return null;
+  return { amount, description: text };
 }

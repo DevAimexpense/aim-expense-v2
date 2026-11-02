@@ -15,7 +15,9 @@ import {
   msetCache,
   sheetsConfigMapKey,
   sheetsTabKey,
+  sheetsTabKeys,
 } from "@/server/lib/cache";
+import { withLock } from "@/server/lib/lock";
 
 // ===== Sheet Tab Names =====
 export const SHEET_TABS = {
@@ -134,6 +136,7 @@ export const SHEET_HEADERS: Record<string, string[]> = {
     "CreatedBy", // display name (denormalized) — สำหรับโชว์ใน UI
     "CreatedByUserId", // R6: stable userId — ใช้เช็ค ownership permission (display name เปลี่ยนได้)
     "UpdatedAt",
+    "WhtCertNo", // DOC-04: เลขหนังสือรับรอง 50 ทวิ ที่ออกครั้งแรก "เล่มที่|เลขที่" — คงที่ ไม่คำนวณใหม่
   ],
   [SHEET_TABS.EVENT_ASSIGNMENTS]: [
     "AssignmentID",
@@ -675,7 +678,7 @@ export class GoogleSheetsService {
    */
   async getAll(tabName: string): Promise<Record<string, string>[]> {
     const raw = await getOrFetch<CachedTab>(
-      sheetsTabKey(this.spreadsheetId, tabName),
+      await sheetsTabKey(this.spreadsheetId, tabName),
       ttlForTab(tabName),
       () => this.getRowsUncached(tabName),
     );
@@ -710,7 +713,7 @@ export class GoogleSheetsService {
     if (tabNames.length === 0) return {};
 
     // Try cache first — single Redis MGET round-trip
-    const keys = tabNames.map((t) => sheetsTabKey(this.spreadsheetId, t));
+    const keys = await sheetsTabKeys(this.spreadsheetId, tabNames);
     const cached = await mgetCache<CachedTab>(keys);
     if (cached.every((v) => v !== null)) {
       const out: Record<string, Record<string, string>[]> = {};
@@ -741,10 +744,9 @@ export class GoogleSheetsService {
     }
 
     // Warm cache (แถวดิบ, TTL ต่อแท็บ) — await ให้ read ถัดไปใน request เดียวกันเห็นค่า
+    // ใช้ key (epoch) ที่คำนวณก่อนอ่าน Google — ถ้ามี write ระหว่างนี้ epoch ขยับแล้ว ค่านี้จะไม่ถูกอ่านอีก
     await Promise.all(
-      tabNames.map((t) =>
-        setCache(sheetsTabKey(this.spreadsheetId, t), rawByTab[t], ttlForTab(t)),
-      ),
+      tabNames.map((t, i) => setCache(keys[i], rawByTab[t], ttlForTab(t))),
     );
 
     return result;
@@ -866,31 +868,38 @@ export class GoogleSheetsService {
   }
 
   /**
-   * ลบทุกแถวที่ column == value ในคำขอเดียว (เช่น ลบ lines ทั้งหมดของเอกสารหนึ่งใบ)
-   * อ่านแท็บ 1 ครั้ง + batchUpdate 1 ครั้ง — เดิม deleteById ทีละแถว = 3 requests ต่อแถว
-   * @returns จำนวนแถวที่ลบ
+   * CO-03: lock ต่อ spreadsheet+tab รอบ read-modify-write ที่อ้าง index แถว
+   * (updateById / deleteById / deleteRowsWhere / setConfig) — กัน approve กับ delete
+   * พร้อมกันแล้วแถวเลื่อน → เขียน/ลบผิดแถว  ไม่มี Redis = รันตรง ๆ (dev)
    */
-  async deleteRowsWhere(
+  private withTabLock<T>(tabName: string, fn: () => Promise<T>): Promise<T> {
+    return withLock(`sheet:${this.spreadsheetId}:${tabName}`, fn);
+  }
+
+  /**
+   * อ่านแท็บสดจาก Google (ไม่ผ่าน Redis) แล้วหา index แถวที่ `column == value`
+   * ต้องเรียกภายใน withTabLock เท่านั้น — index ที่ได้ใช้ได้เฉพาะระหว่างถือ lock
+   * @returns `null` ถ้าแท็บว่าง/ไม่มีคอลัมน์ · `indexes` = index ใน `rows` (0 = header)
+   */
+  private async locateRowsUncached(
     tabName: string,
     column: string,
-    value: string
-  ): Promise<number> {
-    if (!value) return 0;
-    const response = await this.sheets.spreadsheets.values.get({
-      spreadsheetId: this.spreadsheetId,
-      range: `${tabName}!A:ZZ`,
-    });
-    const rows = response.data.values;
-    if (!rows || rows.length < 2) return 0;
-    const colIndex = rows[0].indexOf(column);
-    if (colIndex === -1) return 0;
-
+    value: string,
+  ): Promise<{ headers: string[]; indexes: number[] } | null> {
+    const rows = await this.getRowsUncached(tabName);
+    if (rows.length < 2) return null;
+    const headers = rows[0];
+    const colIndex = headers.indexOf(column);
+    if (colIndex === -1) return null;
     const indexes: number[] = [];
     rows.forEach((row, i) => {
       if (i > 0 && row[colIndex] === value) indexes.push(i);
     });
-    if (indexes.length === 0) return 0;
+    return { headers, indexes };
+  }
 
+  /** sheetId (gid) ของแท็บ — ใช้กับ deleteDimension; `null` ถ้าไม่มีแท็บ (sheetId 0 = แท็บแรก ต้องไม่ใช้ falsy check) */
+  private async getSheetGid(tabName: string): Promise<number | null> {
     const spreadsheet = await this.sheets.spreadsheets.get({
       spreadsheetId: this.spreadsheetId,
       fields: "sheets.properties(sheetId,title)",
@@ -899,13 +908,15 @@ export class GoogleSheetsService {
       (sh) => sh.properties?.title === tabName
     );
     const sheetId = sheet?.properties?.sheetId;
-    if (sheetId === undefined || sheetId === null) return 0;
+    return sheetId === undefined || sheetId === null ? null : sheetId;
+  }
 
-    // ลบจากล่างขึ้นบน — index ของแถวที่เหลือจะไม่เลื่อน
+  /** ลบแถวตาม index (0-based ใน rows, header = 0) จากล่างขึ้นบน — index ของแถวที่เหลือจะไม่เลื่อน */
+  private async deleteRowIndexes(sheetId: number, indexes: number[]): Promise<void> {
     await this.sheets.spreadsheets.batchUpdate({
       spreadsheetId: this.spreadsheetId,
       requestBody: {
-        requests: indexes
+        requests: [...indexes]
           .sort((a, b) => b - a)
           .map((rowIndex) => ({
             deleteDimension: {
@@ -919,12 +930,39 @@ export class GoogleSheetsService {
           })),
       },
     });
-    await invalidateTab(this.spreadsheetId, tabName);
-    return indexes.length;
+  }
+
+  /**
+   * ลบทุกแถวที่ column == value ในคำขอเดียว (เช่น ลบ lines ทั้งหมดของเอกสารหนึ่งใบ)
+   * อ่านแท็บ 1 ครั้ง + batchUpdate 1 ครั้ง — เดิม deleteById ทีละแถว = 3 requests ต่อแถว
+   * @returns จำนวนแถวที่ลบ
+   */
+  async deleteRowsWhere(
+    tabName: string,
+    column: string,
+    value: string
+  ): Promise<number> {
+    if (!value) return 0;
+    return this.withTabLock(tabName, async () => {
+      // อ่านสดใน lock — index ต้องเป็นของจริง ณ ตอนลบ
+      const located = await this.locateRowsUncached(tabName, column, value);
+      if (!located || located.indexes.length === 0) return 0;
+
+      const sheetId = await this.getSheetGid(tabName);
+      if (sheetId === null) return 0;
+
+      await this.deleteRowIndexes(sheetId, located.indexes);
+      await invalidateTab(this.spreadsheetId, tabName);
+      return located.indexes.length;
+    });
   }
 
   /**
    * อัปเดตข้อมูล โดยหา row จาก ID column
+   *
+   * CO-02: เขียนเฉพาะเซลล์ที่เปลี่ยน (values.batchUpdate รายเซลล์) — เดิมเขียนทับทั้งแถว
+   * จากค่าที่อ่านกลับมาแบบ formatted ด้วย USER_ENTERED ทำให้เลขภาษี/เลขสาขาที่ขึ้นต้นด้วย 0
+   * ในคอลัมน์ที่ "ไม่ได้แก้" ถูก Sheets ตีความเป็นตัวเลข (0105... → 105...)
    */
   async updateById(
     tabName: string,
@@ -932,45 +970,34 @@ export class GoogleSheetsService {
     idValue: string,
     updates: Record<string, string | number>
   ): Promise<boolean> {
-    // Get all data including headers
-    const response = await this.sheets.spreadsheets.values.get({
-      spreadsheetId: this.spreadsheetId,
-      range: `${tabName}!A:ZZ`,
-    });
+    return this.withTabLock(tabName, async () => {
+      // CO-03: อ่านสดใน lock (ไม่ผ่าน Redis) แล้วเขียนทันที — ไม่มีใครเลื่อนแถวระหว่างนี้ได้
+      const located = await this.locateRowsUncached(tabName, idColumn, idValue);
+      if (!located || located.indexes.length === 0) return false;
+      const { headers, indexes } = located;
+      const rowNumber = indexes[0] + 1; // A1 notation = 1-based
 
-    const rows = response.data.values;
-    if (!rows || rows.length < 2) return false;
-
-    const headers = rows[0];
-    const idColIndex = headers.indexOf(idColumn);
-    if (idColIndex === -1) return false;
-
-    // Find row index (1-based, +1 for header)
-    const rowIndex = rows.findIndex(
-      (row, i) => i > 0 && row[idColIndex] === idValue
-    );
-    if (rowIndex === -1) return false;
-
-    // Apply updates
-    const updatedRow = [...rows[rowIndex]];
-    for (const [key, value] of Object.entries(updates)) {
-      const colIndex = headers.indexOf(key);
-      if (colIndex !== -1) {
-        updatedRow[colIndex] = String(preserveLeadingZeros(value));
+      const data: sheets_v4.Schema$ValueRange[] = [];
+      for (const [key, value] of Object.entries(updates)) {
+        const colIndex = headers.indexOf(key);
+        if (colIndex === -1) continue;
+        data.push({
+          range: `${tabName}!${columnLetter(colIndex + 1)}${rowNumber}`,
+          values: [[preserveLeadingZeros(value)]],
+        });
       }
-    }
 
-    // Write back
-    const range = `${tabName}!A${rowIndex + 1}:${columnLetter(headers.length)}${rowIndex + 1}`;
-    await this.sheets.spreadsheets.values.update({
-      spreadsheetId: this.spreadsheetId,
-      range,
-      valueInputOption: "USER_ENTERED",
-      requestBody: { values: [updatedRow] },
+      // แถวมีอยู่แต่ไม่มีคอลัมน์ไหนตรง header → ถือว่าสำเร็จเหมือนเดิม (เดิมเขียนแถวเดิมกลับ)
+      if (data.length > 0) {
+        await this.sheets.spreadsheets.values.batchUpdate({
+          spreadsheetId: this.spreadsheetId,
+          requestBody: { valueInputOption: "USER_ENTERED", data },
+        });
+      }
+
+      await invalidateTab(this.spreadsheetId, tabName);
+      return true;
     });
-
-    await invalidateTab(this.spreadsheetId, tabName);
-    return true;
   }
 
   /**
@@ -981,54 +1008,18 @@ export class GoogleSheetsService {
     idColumn: string,
     idValue: string
   ): Promise<boolean> {
-    const response = await this.sheets.spreadsheets.values.get({
-      spreadsheetId: this.spreadsheetId,
-      range: `${tabName}!A:ZZ`,
+    return this.withTabLock(tabName, async () => {
+      const located = await this.locateRowsUncached(tabName, idColumn, idValue);
+      if (!located || located.indexes.length === 0) return false;
+
+      const sheetId = await this.getSheetGid(tabName);
+      if (sheetId === null) return false;
+
+      // ลบเฉพาะแถวแรกที่ตรง ID (พฤติกรรมเดิม)
+      await this.deleteRowIndexes(sheetId, [located.indexes[0]]);
+      await invalidateTab(this.spreadsheetId, tabName);
+      return true;
     });
-
-    const rows = response.data.values;
-    if (!rows || rows.length < 2) return false;
-
-    const headers = rows[0];
-    const idColIndex = headers.indexOf(idColumn);
-    if (idColIndex === -1) return false;
-
-    const rowIndex = rows.findIndex(
-      (row, i) => i > 0 && row[idColIndex] === idValue
-    );
-    if (rowIndex === -1) return false;
-
-    // Get sheet ID for the tab
-    const spreadsheet = await this.sheets.spreadsheets.get({
-      spreadsheetId: this.spreadsheetId,
-    });
-
-    const sheet = spreadsheet.data.sheets?.find(
-      (s) => s.properties?.title === tabName
-    );
-    if (!sheet?.properties?.sheetId) return false;
-
-    // Delete the row
-    await this.sheets.spreadsheets.batchUpdate({
-      spreadsheetId: this.spreadsheetId,
-      requestBody: {
-        requests: [
-          {
-            deleteDimension: {
-              range: {
-                sheetId: sheet.properties.sheetId,
-                dimension: "ROWS",
-                startIndex: rowIndex,
-                endIndex: rowIndex + 1,
-              },
-            },
-          },
-        ],
-      },
-    });
-
-    await invalidateTab(this.spreadsheetId, tabName);
-    return true;
   }
 
   // ===== DOMAIN-SPECIFIC METHODS =====
@@ -1166,48 +1157,51 @@ export class GoogleSheetsService {
    * Resilient: ถ้า Config tab ไม่มี header ให้สร้างเอง (Key/Value)
    */
   async setConfig(key: string, value: string): Promise<void> {
-    // อ่านทั้ง tab เพื่อหา row index
-    let rows: string[][] = [];
-    try {
-      const response = await this.sheets.spreadsheets.values.get({
-        spreadsheetId: this.spreadsheetId,
-        range: `${SHEET_TABS.CONFIG}!A:B`,
-      });
-      rows = (response.data.values as string[][] | undefined) || [];
-    } catch {
-      // tab ไม่มี — ปล่อยให้ ensureAllTabsExist() เรียกก่อน (caller responsibility)
-      throw new Error(`Sheet "${SHEET_TABS.CONFIG}" not found`);
-    }
-
-    // Detect header row
-    const firstA = String(rows[0]?.[0] ?? "").trim().toLowerCase();
-    const hasHeader = firstA === "key" || firstA === "keys";
-    const startIdx = hasHeader ? 1 : 0;
-
-    // Find existing row
-    let existingRow = -1;
-    for (let i = startIdx; i < rows.length; i++) {
-      if (String(rows[i]?.[0] ?? "").trim() === key) {
-        existingRow = i;
-        break;
+    // CO-03: index แถวของ key ต้องไม่เลื่อนระหว่างอ่านกับเขียน
+    return this.withTabLock(SHEET_TABS.CONFIG, async () => {
+      // อ่านทั้ง tab เพื่อหา row index
+      let rows: string[][] = [];
+      try {
+        const response = await this.sheets.spreadsheets.values.get({
+          spreadsheetId: this.spreadsheetId,
+          range: `${SHEET_TABS.CONFIG}!A:B`,
+        });
+        rows = (response.data.values as string[][] | undefined) || [];
+      } catch {
+        // tab ไม่มี — ปล่อยให้ ensureAllTabsExist() เรียกก่อน (caller responsibility)
+        throw new Error(`Sheet "${SHEET_TABS.CONFIG}" not found`);
       }
-    }
 
-    if (existingRow !== -1) {
-      // Update Value column (B) only — preserve Key
-      const range = `${SHEET_TABS.CONFIG}!B${existingRow + 1}`;
-      await this.sheets.spreadsheets.values.update({
-        spreadsheetId: this.spreadsheetId,
-        range,
-        valueInputOption: "USER_ENTERED",
-        requestBody: { values: [[value]] },
-      });
-      await invalidateTab(this.spreadsheetId, SHEET_TABS.CONFIG);
-      return;
-    }
+      // Detect header row
+      const firstA = String(rows[0]?.[0] ?? "").trim().toLowerCase();
+      const hasHeader = firstA === "key" || firstA === "keys";
+      const startIdx = hasHeader ? 1 : 0;
 
-    // Append new row (Key, Value) — appendRow → appendRows already invalidates
-    await this.appendRow(SHEET_TABS.CONFIG, [key, value]);
+      // Find existing row
+      let existingRow = -1;
+      for (let i = startIdx; i < rows.length; i++) {
+        if (String(rows[i]?.[0] ?? "").trim() === key) {
+          existingRow = i;
+          break;
+        }
+      }
+
+      if (existingRow !== -1) {
+        // Update Value column (B) only — preserve Key
+        const range = `${SHEET_TABS.CONFIG}!B${existingRow + 1}`;
+        await this.sheets.spreadsheets.values.update({
+          spreadsheetId: this.spreadsheetId,
+          range,
+          valueInputOption: "USER_ENTERED",
+          requestBody: { values: [[value]] },
+        });
+        await invalidateTab(this.spreadsheetId, SHEET_TABS.CONFIG);
+        return;
+      }
+
+      // Append new row (Key, Value) — appendRow → appendRows already invalidates
+      await this.appendRow(SHEET_TABS.CONFIG, [key, value]);
+    });
   }
 
   async getConfigMap(): Promise<Record<string, string>> {

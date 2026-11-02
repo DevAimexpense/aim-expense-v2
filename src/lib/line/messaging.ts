@@ -185,6 +185,7 @@ export async function getMessageContent(messageId: string): Promise<Buffer> {
 
   const res = await fetch(`${LINE_CONTENT_URL}/${messageId}/content`, {
     headers: { Authorization: `Bearer ${token}` },
+    signal: AbortSignal.timeout(20_000), // webhook มีเวลา 30 วิ — อย่าค้างจนโดน timeout แล้ว LINE ส่งซ้ำ
   });
 
   if (!res.ok) {

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { todayBangkok } from "@/lib/utils/date";
 import { trpc } from "@/lib/trpc/client";
 import { WTH_TYPES } from "@/lib/wth-types";
 import {
@@ -846,4 +847,4 @@ function buildDescription(data: ExtractedData): string {
   return p.join(" - ").slice(0, 200);
 }
 function fmtN(n: number): string { return new Intl.NumberFormat("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n || 0); }
-function todayISO(): string { return new Date().toISOString().slice(0, 10); }
+function todayISO(): string { return todayBangkok(); }

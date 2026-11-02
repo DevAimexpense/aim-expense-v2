@@ -15,7 +15,12 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
-import { stripe } from "@/lib/stripe";
+import {
+  stripe,
+  tierIntervalFromPrice,
+  ENTITLED_STATUSES,
+  type BillingInterval,
+} from "@/lib/stripe";
 import { prisma } from "@/lib/prisma";
 import {
   AFFILIATE_COMMISSION_SCHEDULE,
@@ -23,6 +28,8 @@ import {
   PLAN_LIMITS,
   type PlanTier,
 } from "@/lib/plans";
+import { quotaCacheFor } from "@/lib/comp";
+import { safeAuditLog } from "@/server/lib/audit";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs"; // Stripe webhook signature verify needs node, not edge
@@ -33,6 +40,47 @@ function tierFromMetadata(meta: Stripe.Metadata | null | undefined): PlanTier {
   const t = (meta?.tier || "").toLowerCase();
   if (t === "basic" || t === "pro" || t === "business" || t === "max") return t;
   return "free";
+}
+
+function intervalFromMetadata(
+  meta: Stripe.Metadata | null | undefined,
+): BillingInterval {
+  return meta?.interval === "yearly" ? "yearly" : "monthly";
+}
+
+/**
+ * BIL-01: the tier/interval the customer is actually paying for comes from the
+ * subscription's price, not from metadata (which is written once at checkout
+ * and goes stale after a plan change in the Customer Portal / Dashboard).
+ * Metadata is only a fallback for an unknown price, and we log mismatches.
+ */
+function resolveTierInterval(s: Stripe.Subscription): {
+  tier: PlanTier;
+  interval: BillingInterval;
+} {
+  const item = s.items.data[0];
+  const fromPrice = tierIntervalFromPrice(item?.price);
+  const metaTier = tierFromMetadata(s.metadata);
+  const metaInterval = intervalFromMetadata(s.metadata);
+
+  if (!fromPrice) {
+    console.warn(
+      `[stripe-webhook] ${s.id}: unknown price ${item?.price?.id ?? "(none)"} — falling back to metadata (${metaTier} ${metaInterval})`,
+    );
+    return { tier: metaTier, interval: metaInterval };
+  }
+  if (fromPrice.tier !== metaTier || fromPrice.interval !== metaInterval) {
+    console.warn(
+      `[stripe-webhook] ${s.id}: metadata says ${metaTier} ${metaInterval} but price ${item?.price?.id} is ${fromPrice.tier} ${fromPrice.interval} — using price`,
+    );
+  }
+  return fromPrice;
+}
+
+/** BIL-03: SDK 22 / API 2026-03-25 moved `current_period_end` onto the item. */
+function periodEndOf(s: Stripe.Subscription): Date | null {
+  const ts = s.items.data[0]?.current_period_end;
+  return ts ? new Date(ts * 1000) : null;
 }
 
 export async function POST(req: NextRequest) {
@@ -111,7 +159,7 @@ async function handleCheckoutCompleted(s: Stripe.Checkout.Session) {
       data: { stripeCustomerId: s.customer },
     });
   }
-  await prisma.auditLog.create({
+  await safeAuditLog({
     data: {
       orgId,
       userId: s.metadata?.ownerUserId || "system",
@@ -140,12 +188,9 @@ async function handleSubscriptionUpdate(s: Stripe.Subscription) {
 }
 
 async function updateSubscriptionRow(orgId: string, s: Stripe.Subscription) {
-  const tier = tierFromMetadata(s.metadata);
-  const interval = (s.metadata?.interval || "monthly") as "monthly" | "yearly";
+  const { tier, interval } = resolveTierInterval(s);
   const priceId = s.items.data[0]?.price?.id || null;
-
-  const limits = PLAN_LIMITS[tier];
-  const periodEnd = (s as Stripe.Subscription & { current_period_end?: number }).current_period_end;
+  const currentPeriodEnd = periodEndOf(s);
 
   // ฟรีตลอดชีพ (comped จากหลังบ้าน) → เก็บสถานะ Stripe ไว้ แต่ไม่ทับ plan/quota ที่ทีมงานให้
   const existing = await prisma.subscription.findUnique({
@@ -159,42 +204,50 @@ async function updateSubscriptionRow(orgId: string, s: Stripe.Subscription) {
         stripeSubscriptionId: s.id,
         stripePriceId: priceId,
         billingInterval: interval,
-        currentPeriodEnd: periodEnd ? new Date(periodEnd * 1000) : null,
+        currentPeriodEnd,
         cancelAtPeriodEnd: s.cancel_at_period_end,
       },
     });
     return;
   }
 
+  // BIL-04: only an entitled status (active / trialing / past_due) unlocks the
+  // paid tier. incomplete / incomplete_expired / unpaid / canceled → Free, but
+  // we keep the Stripe ids so a later `updated` (e.g. 3DS completed) can
+  // promote again and `deleted` can still find the row.
+  const entitled = ENTITLED_STATUSES.has(s.status);
+  const planToStore: PlanTier = entitled ? tier : "free";
+
   await prisma.subscription.update({
     where: { orgId },
     data: {
-      plan: tier,
+      plan: planToStore,
       status: s.status,
       stripeSubscriptionId: s.id,
       stripePriceId: priceId,
       billingInterval: interval,
-      currentPeriodEnd: periodEnd ? new Date(periodEnd * 1000) : null,
+      currentPeriodEnd,
       cancelAtPeriodEnd: s.cancel_at_period_end,
-      // Trial cleared once they've upgraded to a paid plan
-      trialPlan: null,
-      trialStartedAt: null,
-      trialEndsAt: null,
+      // Trial markers are cleared only once the paid plan is really live —
+      // an `incomplete` checkout must not cost the customer their trial days.
+      ...(entitled
+        ? { trialPlan: null, trialStartedAt: null, trialEndsAt: null }
+        : {}),
       // Cache quotas for fast read
-      maxMembers: limits.users === -1 ? 9999 : limits.users,
-      maxEvents: limits.events === -1 ? 9999 : limits.events,
-      scanCredits: limits.ocrPerMonth === -1 ? 999999 : limits.ocrPerMonth,
+      ...quotaCacheFor(planToStore),
     },
   });
 
-  await prisma.auditLog.create({
+  await safeAuditLog({
     data: {
       orgId,
       userId: "system",
       action: "update",
       entityType: "subscription",
       entityRef: s.id,
-      summary: `Subscription ${s.status}: ${tier} ${interval}`,
+      summary: entitled
+        ? `Subscription ${s.status}: ${tier} ${interval}`
+        : `Subscription ${s.status} (${tier} ${interval}) → plan held at Free until payment settles`,
     },
   });
 }
@@ -234,7 +287,7 @@ async function handleSubscriptionDeleted(s: Stripe.Subscription) {
       scanCredits: freeLimits.ocrPerMonth,
     },
   });
-  await prisma.auditLog.create({
+  await safeAuditLog({
     data: {
       orgId: sub.orgId,
       userId: "system",
@@ -263,7 +316,7 @@ async function handleInvoicePaid(invoice: Stripe.Invoice) {
   const amountPaid = (invoice.amount_paid || 0) / 100; // satangs → THB
 
   // Audit
-  await prisma.auditLog.create({
+  await safeAuditLog({
     data: {
       orgId,
       userId: "system",
@@ -283,34 +336,30 @@ async function handleInvoicePaid(invoice: Stripe.Invoice) {
   }
 }
 
+/**
+ * BIL-10: idempotent + atomic. Commissions are created BEFORE the referral is
+ * flipped to `confirmed`, inside one transaction, and any monthIndex that
+ * already exists is skipped — so a Stripe retry after a partial failure
+ * fills in the missing rows instead of leaving the partner short forever.
+ */
 async function maybeConfirmReferral(orgId: string, invoice: Stripe.Invoice) {
   const referral = await prisma.referral.findUnique({
     where: { referredOrgId: orgId },
+    include: {
+      partner: { select: { programType: true } },
+      commissions: { select: { monthIndex: true } },
+    },
   });
   if (!referral || referral.status !== "pending") return;
 
-  // Mark confirmed + schedule commission rows
-  await prisma.referral.update({
-    where: { id: referral.id },
-    data: {
-      status: "confirmed",
-      confirmedAt: new Date(),
-      firstPaymentAt: new Date(),
-    },
-  });
-
   // Only partner_affiliate earns cash commissions; a customer_referral
   // (free-month model) is confirmed but accrues no cash.
-  const partner = await prisma.affiliatePartner.findUnique({
-    where: { id: referral.partnerId },
-    select: { programType: true },
-  });
-  if (partner?.programType !== "partner_affiliate") return;
+  const earnsCash = referral.partner?.programType === "partner_affiliate";
 
   // Get monthly price baseline for commission calculation
   const sub = await prisma.subscription.findUnique({
     where: { orgId },
-    select: { stripePriceId: true, billingInterval: true },
+    select: { billingInterval: true },
   });
   // For yearly subscriptions, normalise to per-month equivalent for commission
   const linePriceCents = invoice.amount_paid || 0;
@@ -318,23 +367,41 @@ async function maybeConfirmReferral(orgId: string, invoice: Stripe.Invoice) {
     sub?.billingInterval === "yearly" ? linePriceCents / 12 : linePriceCents;
   const monthlyPriceTHB = monthlyEquivCents / 100;
 
-  // Schedule commissions for months 2 / 3 / 4 (month 1 = 0 hold per design)
+  // Schedule commissions for months 2 / 3 / 4 (month 1 = 0 hold per design),
+  // skipping any monthIndex a previous (partially failed) attempt already wrote.
+  const already = new Set(referral.commissions.map((c) => c.monthIndex));
   const now = new Date();
-  for (const entry of AFFILIATE_COMMISSION_SCHEDULE) {
-    if (entry.percent === 0) continue;
-    const scheduledFor = new Date(now);
-    scheduledFor.setMonth(scheduledFor.getMonth() + (entry.monthIndex - 2));
-    await prisma.commission.create({
+  const rows = earnsCash
+    ? AFFILIATE_COMMISSION_SCHEDULE.filter(
+        (e) => e.percent > 0 && !already.has(e.monthIndex),
+      ).map((entry) => {
+        const scheduledFor = new Date(now);
+        scheduledFor.setMonth(scheduledFor.getMonth() + (entry.monthIndex - 2));
+        return {
+          partnerId: referral.partnerId,
+          referralId: referral.id,
+          monthIndex: entry.monthIndex,
+          amountTHB: computeCommission(monthlyPriceTHB, entry.monthIndex),
+          status: "scheduled",
+          scheduledFor,
+        };
+      })
+    : [];
+
+  await prisma.$transaction(async (tx) => {
+    if (rows.length > 0) {
+      await tx.commission.createMany({ data: rows });
+    }
+    // Flip status LAST, and only if still pending (guards concurrent retries).
+    await tx.referral.updateMany({
+      where: { id: referral.id, status: "pending" },
       data: {
-        partnerId: referral.partnerId,
-        referralId: referral.id,
-        monthIndex: entry.monthIndex,
-        amountTHB: computeCommission(monthlyPriceTHB, entry.monthIndex),
-        status: "scheduled",
-        scheduledFor,
+        status: "confirmed",
+        confirmedAt: now,
+        firstPaymentAt: now,
       },
     });
-  }
+  });
 }
 
 /** Invalidate a referral + claw back its UNPAID commissions (paid stay paid). */
@@ -376,7 +443,7 @@ async function handlePaymentFailed(invoice: Stripe.Invoice) {
     where: { stripeCustomerId: customerId },
   });
   if (!sub) return;
-  await prisma.auditLog.create({
+  await safeAuditLog({
     data: {
       orgId: sub.orgId,
       userId: "system",

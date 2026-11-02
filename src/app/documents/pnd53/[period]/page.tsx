@@ -9,6 +9,7 @@ import { getOrgContext } from "@/lib/auth/middleware";
 import { getSheetsService } from "@/server/lib/sheets-context";
 import { prisma } from "@/lib/prisma";
 import { parsePeriod, vendorTypeOf } from "@/lib/wht-form-utils";
+import { isSettled } from "@/lib/payment-status";
 import { PND53SummaryDocument } from "./document";
 
 export const metadata = {
@@ -50,21 +51,25 @@ export default async function PND53SummaryPage({
 
   if (!org) redirect("/");
 
-  const payeeTaxIdMap = new Map(payees.map((p) => [p.PayeeID, p.TaxID || ""]));
+  // TaxID + BranchType ของผู้รับเงิน — ใช้ตัดสิน ภ.ง.ด.3/53 ด้วยกฎเดียวกับใบ 50 ทวิ (DOC-07)
+  const payeeInfoMap = new Map(
+    payees.map((p) => [p.PayeeID, { taxId: p.TaxID || "", branchType: p.BranchType || "" }]),
+  );
 
   let totalCount = 0;
   let totalIncome = 0;
   let totalWHT = 0;
   for (const p of payments) {
-    if (p.Status !== "paid") continue;
+    if (!isSettled(p.Status)) continue; // paid | cleared — DOC-02
     const wth = num(p.WTHAmount);
     if (wth <= 0) continue;
     const paidDate = paidDateOf(p);
     if (!paidDate) continue;
     if (paidDate < periodInfo.fromISO || paidDate > periodInfo.toISO) continue;
 
-    const taxId = payeeTaxIdMap.get(p.PayeeID) || p.VendorTaxIdSnapshot || "";
-    if (vendorTypeOf(taxId) !== "pnd53") continue;
+    const info = payeeInfoMap.get(p.PayeeID);
+    const taxId = info?.taxId || p.VendorTaxIdSnapshot || "";
+    if (vendorTypeOf(taxId, info?.branchType) !== "pnd53") continue;
 
     totalCount += 1;
     totalIncome += num(p.TTLAmount);

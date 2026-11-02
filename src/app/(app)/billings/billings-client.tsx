@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { trpc } from "@/lib/trpc/client";
 import DateInput from "@/components/shared/date-input";
-import { formatDate } from "@/lib/utils/date";
+import { formatDate, todayBangkok } from "@/lib/utils/date";
 
 type Status = "draft" | "sent" | "partial" | "paid" | "void";
 
@@ -47,7 +47,7 @@ function isOverdue(dueDate: string, status: Status, balance: number): boolean {
   if (status === "void" || status === "paid") return false;
   if (balance <= 0) return false;
   if (!dueDate) return false;
-  return dueDate < new Date().toISOString().slice(0, 10);
+  return dueDate < todayBangkok();
 }
 
 export function BillingsClient({ entityType = "company" }: { entityType?: string }) {
@@ -434,7 +434,7 @@ function QuickIncomeModal({
     eventId: "",
     payerName: "",
     payerTaxId: "",
-    docDate: new Date().toISOString().slice(0, 10),
+    docDate: todayBangkok(),
     amount: "",
     incomeType: "service",
     whtPercent: "3",

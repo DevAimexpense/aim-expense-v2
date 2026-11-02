@@ -100,7 +100,7 @@ export function PricingCards({ t, lang = "th", full = false }: { t: PricingCopy;
                 {full ? (
                   <PlanButton tier={tier} interval={interval} hot={hot} label={t.choose} lang={lang} />
                 ) : (
-                  <a href="/pricing" className={buttonClass(hot ? "primary" : "outline", "md", "w-full")}>{t.choose}</a>
+                  <a href={lang === "en" ? "/en/pricing" : "/pricing"} className={buttonClass(hot ? "primary" : "outline", "md", "w-full")}>{t.choose}</a>
                 )}
               </div>
             </div>

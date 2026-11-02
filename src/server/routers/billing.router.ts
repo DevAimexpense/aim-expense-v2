@@ -12,9 +12,15 @@ import {
   GoogleSheetsService,
   SHEET_TABS,
 } from "../services/google-sheets.service";
-import { computeNextDocNumber } from "../lib/doc-number";
+import { computeNextDocNumber, withDocNumberLock, docPeriod } from "../lib/doc-number";
+import { withLock } from "../lib/lock";
+import { invalidateTab } from "../lib/cache";
+import { assertVatAllowed } from "../lib/org-vat";
+import { scopedEventIds } from "@/lib/permissions";
+import { todayBangkok } from "@/lib/utils/date";
 import { resolveIssuerBranch } from "../lib/issuer-branch";
 import { prisma } from "@/lib/prisma";
+import { safeAuditLog } from "@/server/lib/audit";
 
 // ===== Schemas =====
 
@@ -197,6 +203,22 @@ function shapeLine(r: Record<string, string>) {
   };
 }
 
+/**
+ * แก้วันที่เอกสารข้ามเดือนหลังมีเลขแล้ว → เลขยังเป็นของเดือนเดิม (ไม่ renumber เพราะเลขอาจถูก
+ * ส่งให้ลูกค้าแล้ว) — คืนข้อความเตือนให้ UI แสดง; undefined = ไม่ต้องเตือน (DOC-07)
+ */
+function monthMoveWarning(
+  oldDate: string | undefined,
+  newDate: string,
+  docNumber: string | undefined
+): string | undefined {
+  if (!docNumber || !oldDate) return undefined;
+  const a = docPeriod(oldDate);
+  const b = docPeriod(newDate);
+  if (a.yyyy === b.yyyy && a.mm === b.mm) return undefined;
+  return `วันที่เอกสารถูกย้ายไปเดือนอื่น แต่เลขที่ ${docNumber} ยังเป็นเลขรันของเดือนเดิม (${a.mm}/${a.yyyy})`;
+}
+
 // ===== Router =====
 
 export const billingRouter = router({
@@ -217,8 +239,11 @@ export const billingRouter = router({
       const sheets = await getSheetsService(ctx.org.orgId);
       await ensureTabsCached(sheets, ctx.org.orgId);
       const all = await sheets.getBillings();
+      // project_manager เห็นเฉพาะเอกสารของโปรเจกต์ในขอบเขตตัวเอง (CO-07)
+      const scope = scopedEventIds(ctx.org);
 
       const filtered = all.filter((r) => {
+        if (scope !== null && !scope.includes((r.EventID || "").trim())) return false;
         if (input?.kind) {
           const k = r.DocKind === "receipt" ? "receipt" : "billing";
           if (k !== input.kind) return false;
@@ -253,6 +278,11 @@ export const billingRouter = router({
         (r) => r.BillingID === input.billingId
       );
       if (!header) return null;
+      // project_manager: นอกขอบเขต = ไม่พบ (CO-07)
+      const scope = scopedEventIds(ctx.org);
+      if (scope !== null && !scope.includes((header.EventID || "").trim())) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "ไม่พบใบวางบิล" });
+      }
       const lines = (batch[SHEET_TABS.BILLING_LINES] || [])
         .filter((r) => r.BillingID === input.billingId)
         .sort(
@@ -269,6 +299,8 @@ export const billingRouter = router({
   create: permissionProcedure("manageBillings")
     .input(BillingCreateInput)
     .mutation(async ({ ctx, input }) => {
+      // org ไม่จด VAT ออกเอกสารมี VAT ไม่ได้ — บังคับฝั่ง server (DOC-06)
+      await assertVatAllowed(ctx.org.orgId, input.isVat, "ใบวางบิล");
       const sheets = await getSheetsService(ctx.org.orgId);
       await ensureTabsCached(sheets, ctx.org.orgId);
 
@@ -278,12 +310,7 @@ export const billingRouter = router({
       }
 
       const billingId = GoogleSheetsService.generateId("BIL");
-      const docNumber = await computeNextDocNumber(
-        sheets,
-        "BIL",
-        input.docDate,
-        SHEET_TABS.BILLINGS
-      );
+      let docNumber = "";
 
       const totals = computeBillingTotals(
         input.lines,
@@ -298,42 +325,55 @@ export const billingRouter = router({
       const now = new Date().toISOString();
 
       try {
-        await sheets.appendRowByHeaders(SHEET_TABS.BILLINGS, {
-          BillingID: billingId,
-          DocNumber: docNumber,
-          DocDate: input.docDate,
-          DueDate: input.dueDate,
-          CustomerID: customer.CustomerID,
-          CustomerNameSnapshot: customer.CustomerName || "",
-          CustomerTaxIdSnapshot: customer.TaxID || "",
-          CustomerAddressSnapshot:
-            customer.BillingAddress || customer.Address || "",
-          IssuerBranchSnapshot: issuer.branchLabel,
-          IssuerAddressSnapshot: issuer.address,
-          SourceQuotationID: input.sourceQuotationId || "",
-          EventID: input.eventId || "",
-          ProjectName: input.projectName || "",
-          Status: "draft",
-          Subtotal: totals.subtotal,
-          DiscountAmount: input.discountAmount,
-          VATAmount: totals.vatAmount,
-          VATIncluded: input.vatIncluded ? "TRUE" : "FALSE",
-          IsVAT: input.isVat ? "TRUE" : "FALSE",
-          WHTPercent: input.whtPercent,
-          WHTAmount: totals.whtAmount,
-          GrandTotal: totals.grandTotal,
-          AmountReceivable: totals.amountReceivable,
-          PaidAmount: 0,
-          PaidDate: "",
-          PaymentMethod: "",
-          BankAccountID: "",
-          Notes: input.notes || "",
-          Terms: input.terms || "",
-          PreparedBy: ctx.session.displayName || "",
-          PreparedByUserId: ctx.session.userId,
-          CreatedAt: now,
-          UpdatedAt: now,
-          PdfUrl: "",
+        // เลขเอกสาร: อ่าน max สด + append header ภายใน lock ต่อ org/ประเภท/เดือน (DOC-03 / CO-04)
+        docNumber = await withDocNumberLock(ctx.org.orgId, "BIL", input.docDate, async () => {
+          const no = await computeNextDocNumber(
+            sheets,
+            "BIL",
+            input.docDate,
+            SHEET_TABS.BILLINGS,
+            undefined,
+            "DocNumber",
+            { spreadsheetId: ctx.org.googleSpreadsheetId }
+          );
+          await sheets.appendRowByHeaders(SHEET_TABS.BILLINGS, {
+            BillingID: billingId,
+            DocNumber: no,
+            DocDate: input.docDate,
+            DueDate: input.dueDate,
+            CustomerID: customer.CustomerID,
+            CustomerNameSnapshot: customer.CustomerName || "",
+            CustomerTaxIdSnapshot: customer.TaxID || "",
+            CustomerAddressSnapshot:
+              customer.BillingAddress || customer.Address || "",
+            IssuerBranchSnapshot: issuer.branchLabel,
+            IssuerAddressSnapshot: issuer.address,
+            SourceQuotationID: input.sourceQuotationId || "",
+            EventID: input.eventId || "",
+            ProjectName: input.projectName || "",
+            Status: "draft",
+            Subtotal: totals.subtotal,
+            DiscountAmount: input.discountAmount,
+            VATAmount: totals.vatAmount,
+            VATIncluded: input.vatIncluded ? "TRUE" : "FALSE",
+            IsVAT: input.isVat ? "TRUE" : "FALSE",
+            WHTPercent: input.whtPercent,
+            WHTAmount: totals.whtAmount,
+            GrandTotal: totals.grandTotal,
+            AmountReceivable: totals.amountReceivable,
+            PaidAmount: 0,
+            PaidDate: "",
+            PaymentMethod: "",
+            BankAccountID: "",
+            Notes: input.notes || "",
+            Terms: input.terms || "",
+            PreparedBy: ctx.session.displayName || "",
+            PreparedByUserId: ctx.session.userId,
+            CreatedAt: now,
+            UpdatedAt: now,
+            PdfUrl: "",
+          });
+          return no;
         });
 
         await sheets.appendRowsByHeaders(
@@ -365,7 +405,7 @@ export const billingRouter = router({
         throw e;
       }
 
-      await prisma.auditLog.create({
+      await safeAuditLog({
         data: {
           orgId: ctx.org.orgId,
           userId: ctx.session.userId,
@@ -412,12 +452,7 @@ export const billingRouter = router({
       await ensureTabsCached(sheets, ctx.org.orgId);
 
       const billingId = GoogleSheetsService.generateId("BIL");
-      const docNumber = await computeNextDocNumber(
-        sheets,
-        "BIL",
-        input.docDate,
-        SHEET_TABS.BILLINGS
-      );
+      let docNumber = "";
 
       // Personal income is not VAT-registered → no VAT. Compute totals locally
       // instead of computeBillingTotals (which always adds 7% VAT). WHT can be
@@ -436,43 +471,56 @@ export const billingRouter = router({
       const now = new Date().toISOString();
 
       try {
-        await sheets.appendRowByHeaders(SHEET_TABS.BILLINGS, {
-          BillingID: billingId,
-          DocNumber: docNumber,
-          DocDate: input.docDate,
-          DueDate: input.docDate,
-          CustomerID: "",
-          CustomerNameSnapshot: input.payerName,
-          CustomerTaxIdSnapshot: input.payerTaxId || "",
-          CustomerAddressSnapshot: "",
-          IssuerBranchSnapshot: issuer.branchLabel,
-          IssuerAddressSnapshot: issuer.address,
-          SourceQuotationID: "",
-          EventID: input.eventId,
-          ProjectName: input.eventName || "",
-          Status: "paid",
-          Subtotal: subtotal,
-          DiscountAmount: 0,
-          VATAmount: vatAmount,
-          VATIncluded: "FALSE",
-          IsVAT: "FALSE",
-          WHTPercent: input.whtPercent,
-          WHTAmount: whtAmount,
-          GrandTotal: grandTotal,
-          AmountReceivable: amountReceivable,
-          PaidAmount: amountReceivable,
-          PaidDate: input.docDate,
-          PaymentMethod: "",
-          BankAccountID: "",
-          Notes: input.notes || "",
-          Terms: "",
-          PreparedBy: ctx.session.displayName || "",
-          PreparedByUserId: ctx.session.userId,
-          CreatedAt: now,
-          UpdatedAt: now,
-          PdfUrl: "",
-          WHTCertUrl: "",
-          IncomeType: input.incomeType || "",
+        // เลขเอกสาร: อ่าน max สด + append header ภายใน lock ต่อ org/ประเภท/เดือน (DOC-03 / CO-04)
+        docNumber = await withDocNumberLock(ctx.org.orgId, "BIL", input.docDate, async () => {
+          const no = await computeNextDocNumber(
+            sheets,
+            "BIL",
+            input.docDate,
+            SHEET_TABS.BILLINGS,
+            undefined,
+            "DocNumber",
+            { spreadsheetId: ctx.org.googleSpreadsheetId }
+          );
+          await sheets.appendRowByHeaders(SHEET_TABS.BILLINGS, {
+            BillingID: billingId,
+            DocNumber: no,
+            DocDate: input.docDate,
+            DueDate: input.docDate,
+            CustomerID: "",
+            CustomerNameSnapshot: input.payerName,
+            CustomerTaxIdSnapshot: input.payerTaxId || "",
+            CustomerAddressSnapshot: "",
+            IssuerBranchSnapshot: issuer.branchLabel,
+            IssuerAddressSnapshot: issuer.address,
+            SourceQuotationID: "",
+            EventID: input.eventId,
+            ProjectName: input.eventName || "",
+            Status: "paid",
+            Subtotal: subtotal,
+            DiscountAmount: 0,
+            VATAmount: vatAmount,
+            VATIncluded: "FALSE",
+            IsVAT: "FALSE",
+            WHTPercent: input.whtPercent,
+            WHTAmount: whtAmount,
+            GrandTotal: grandTotal,
+            AmountReceivable: amountReceivable,
+            PaidAmount: amountReceivable,
+            PaidDate: input.docDate,
+            PaymentMethod: "",
+            BankAccountID: "",
+            Notes: input.notes || "",
+            Terms: "",
+            PreparedBy: ctx.session.displayName || "",
+            PreparedByUserId: ctx.session.userId,
+            CreatedAt: now,
+            UpdatedAt: now,
+            PdfUrl: "",
+            WHTCertUrl: "",
+            IncomeType: input.incomeType || "",
+          });
+          return no;
         });
 
         await sheets.appendRowByHeaders(SHEET_TABS.BILLING_LINES, {
@@ -500,7 +548,7 @@ export const billingRouter = router({
         throw e;
       }
 
-      await prisma.auditLog.create({
+      await safeAuditLog({
         data: {
           orgId: ctx.org.orgId,
           userId: ctx.session.userId,
@@ -517,6 +565,7 @@ export const billingRouter = router({
   update: permissionProcedure("manageBillings")
     .input(z.object({ billingId: z.string() }).merge(BillingCreateInput))
     .mutation(async ({ ctx, input }) => {
+      await assertVatAllowed(ctx.org.orgId, input.isVat, "ใบวางบิล"); // DOC-06
       const sheets = await getSheetsService(ctx.org.orgId);
       await ensureTabsCached(sheets, ctx.org.orgId); // IsVAT column on older sheets
       const existing = await sheets.getBillingById(input.billingId);
@@ -619,7 +668,7 @@ export const billingRouter = router({
         }))
         );
 
-      await prisma.auditLog.create({
+      await safeAuditLog({
         data: {
           orgId: ctx.org.orgId,
           userId: ctx.session.userId,
@@ -630,7 +679,8 @@ export const billingRouter = router({
         },
       });
 
-      return { success: true };
+      // ย้าย DocDate ข้ามเดือนหลังมีเลขแล้ว: คงเลขเดิม แต่เตือนผู้ใช้ (DOC-07)
+      return { success: true, warning: monthMoveWarning(existing.DocDate, input.docDate, existing.DocNumber) };
     }),
 
   // ===== State transitions =====
@@ -658,7 +708,7 @@ export const billingRouter = router({
           UpdatedAt: new Date().toISOString(),
         }
       );
-      await prisma.auditLog.create({
+      await safeAuditLog({
         data: {
           orgId: ctx.org.orgId,
           userId: ctx.session.userId,
@@ -694,7 +744,7 @@ export const billingRouter = router({
           UpdatedAt: new Date().toISOString(),
         }
       );
-      await prisma.auditLog.create({
+      await safeAuditLog({
         data: {
           orgId: ctx.org.orgId,
           userId: ctx.session.userId,
@@ -727,6 +777,7 @@ export const billingRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      await assertVatAllowed(ctx.org.orgId, input.isVat, "ใบเสร็จรับเงิน"); // DOC-06
       const sheets = await getSheetsService(ctx.org.orgId);
       await ensureTabsCached(sheets, ctx.org.orgId);
 
@@ -736,14 +787,7 @@ export const billingRouter = router({
       }
 
       const billingId = GoogleSheetsService.generateId("RC");
-      const receiptNumber = await computeNextDocNumber(
-        sheets,
-        "RC",
-        input.docDate,
-        SHEET_TABS.BILLINGS,
-        undefined,
-        "ReceiptNumber"
-      );
+      let receiptNumber = "";
       const totals = computeBillingTotals(
         input.lines,
         input.vatIncluded,
@@ -755,46 +799,59 @@ export const billingRouter = router({
       const now = new Date().toISOString();
 
       try {
-        await sheets.appendRowByHeaders(SHEET_TABS.BILLINGS, {
-          BillingID: billingId,
-          DocNumber: receiptNumber,
-          DocDate: input.docDate,
-          DueDate: input.docDate,
-          CustomerID: customer.CustomerID,
-          CustomerNameSnapshot: customer.CustomerName || "",
-          CustomerTaxIdSnapshot: customer.TaxID || "",
-          CustomerAddressSnapshot:
-            customer.BillingAddress || customer.Address || "",
-          IssuerBranchSnapshot: issuer.branchLabel,
-          IssuerAddressSnapshot: issuer.address,
-          SourceQuotationID: "",
-          EventID: input.eventId || "",
-          ProjectName: input.projectName || "",
-          Status: "paid",
-          Subtotal: totals.subtotal,
-          DiscountAmount: input.discountAmount,
-          VATAmount: totals.vatAmount,
-          VATIncluded: input.vatIncluded ? "TRUE" : "FALSE",
-          IsVAT: input.isVat ? "TRUE" : "FALSE",
-          WHTPercent: input.whtPercent,
-          WHTAmount: totals.whtAmount,
-          GrandTotal: totals.grandTotal,
-          AmountReceivable: totals.amountReceivable,
-          // ชำระครบ = PaidAmount เท่ากับ GrandTotal (ตามนิยาม balance = GrandTotal - PaidAmount)
-          PaidAmount: totals.grandTotal,
-          PaidDate: input.docDate,
-          PaymentMethod: input.paymentMethod,
-          BankAccountID: "",
-          Notes: input.notes || "",
-          Terms: "",
-          PreparedBy: ctx.session.displayName || "",
-          PreparedByUserId: ctx.session.userId,
-          CreatedAt: now,
-          UpdatedAt: now,
-          PdfUrl: "",
-          ReceiptNumber: receiptNumber,
-          ReceiptDate: input.docDate,
-          DocKind: "receipt",
+        // เลขเอกสาร: อ่าน max สด + append header ภายใน lock ต่อ org/ประเภท/เดือน (DOC-03 / CO-04)
+        receiptNumber = await withDocNumberLock(ctx.org.orgId, "RC", input.docDate, async () => {
+          const no = await computeNextDocNumber(
+            sheets,
+            "RC",
+            input.docDate,
+            SHEET_TABS.BILLINGS,
+            undefined,
+            "ReceiptNumber",
+            { spreadsheetId: ctx.org.googleSpreadsheetId }
+          );
+          await sheets.appendRowByHeaders(SHEET_TABS.BILLINGS, {
+            BillingID: billingId,
+            DocNumber: no,
+            DocDate: input.docDate,
+            DueDate: input.docDate,
+            CustomerID: customer.CustomerID,
+            CustomerNameSnapshot: customer.CustomerName || "",
+            CustomerTaxIdSnapshot: customer.TaxID || "",
+            CustomerAddressSnapshot:
+              customer.BillingAddress || customer.Address || "",
+            IssuerBranchSnapshot: issuer.branchLabel,
+            IssuerAddressSnapshot: issuer.address,
+            SourceQuotationID: "",
+            EventID: input.eventId || "",
+            ProjectName: input.projectName || "",
+            Status: "paid",
+            Subtotal: totals.subtotal,
+            DiscountAmount: input.discountAmount,
+            VATAmount: totals.vatAmount,
+            VATIncluded: input.vatIncluded ? "TRUE" : "FALSE",
+            IsVAT: input.isVat ? "TRUE" : "FALSE",
+            WHTPercent: input.whtPercent,
+            WHTAmount: totals.whtAmount,
+            GrandTotal: totals.grandTotal,
+            AmountReceivable: totals.amountReceivable,
+            // ชำระครบ = PaidAmount เท่ากับ GrandTotal (ตามนิยาม balance = GrandTotal - PaidAmount)
+            PaidAmount: totals.grandTotal,
+            PaidDate: input.docDate,
+            PaymentMethod: input.paymentMethod,
+            BankAccountID: "",
+            Notes: input.notes || "",
+            Terms: "",
+            PreparedBy: ctx.session.displayName || "",
+            PreparedByUserId: ctx.session.userId,
+            CreatedAt: now,
+            UpdatedAt: now,
+            PdfUrl: "",
+            ReceiptNumber: no,
+            ReceiptDate: input.docDate,
+            DocKind: "receipt",
+          });
+          return no;
         });
 
         await sheets.appendRowsByHeaders(
@@ -826,7 +883,7 @@ export const billingRouter = router({
         throw e;
       }
 
-      await prisma.auditLog.create({
+      await safeAuditLog({
         data: {
           orgId: ctx.org.orgId,
           userId: ctx.session.userId,
@@ -852,6 +909,7 @@ export const billingRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      await assertVatAllowed(ctx.org.orgId, input.isVat, "ใบเสร็จรับเงิน"); // DOC-06
       const sheets = await getSheetsService(ctx.org.orgId);
       await ensureTabsCached(sheets, ctx.org.orgId);
       const existing = await sheets.getBillingById(input.billingId);
@@ -924,7 +982,7 @@ export const billingRouter = router({
         }))
         );
 
-      await prisma.auditLog.create({
+      await safeAuditLog({
         data: {
           orgId: ctx.org.orgId,
           userId: ctx.session.userId,
@@ -935,7 +993,12 @@ export const billingRouter = router({
         },
       });
 
-      return { success: true, billingId: input.billingId };
+      return {
+        success: true,
+        billingId: input.billingId,
+        // ย้าย DocDate ข้ามเดือนหลังมีเลขแล้ว: คงเลขเดิม แต่เตือนผู้ใช้ (DOC-07)
+        warning: monthMoveWarning(existing.DocDate, input.docDate, existing.ReceiptNumber || existing.DocNumber),
+      };
     }),
 
   /** ยกเลิกใบเสร็จรับเงินที่ออกโดยตรง (เลขที่ยังคงอยู่ ไม่นำกลับมาใช้ซ้ำ) */
@@ -954,7 +1017,7 @@ export const billingRouter = router({
         Status: "void",
         UpdatedAt: new Date().toISOString(),
       });
-      await prisma.auditLog.create({
+      await safeAuditLog({
         data: {
           orgId: ctx.org.orgId,
           userId: ctx.session.userId,
@@ -1000,23 +1063,27 @@ export const billingRouter = router({
       const receiptDate =
         input.receiptDate ||
         existing.PaidDate ||
-        new Date().toISOString().slice(0, 10);
-      const receiptNumber = await computeNextDocNumber(
-        sheets,
-        "RC",
-        receiptDate,
-        SHEET_TABS.BILLINGS,
-        undefined,
-        "ReceiptNumber"
-      );
-
-      await sheets.updateById(SHEET_TABS.BILLINGS, "BillingID", input.billingId, {
-        ReceiptNumber: receiptNumber,
-        ReceiptDate: receiptDate,
-        UpdatedAt: new Date().toISOString(),
+        todayBangkok(); // DOC-05
+      // อ่าน max สด + เขียนเลข ภายใน lock ต่อ org/RC/เดือน (DOC-03)
+      const receiptNumber = await withDocNumberLock(ctx.org.orgId, "RC", receiptDate, async () => {
+        const no = await computeNextDocNumber(
+          sheets,
+          "RC",
+          receiptDate,
+          SHEET_TABS.BILLINGS,
+          undefined,
+          "ReceiptNumber",
+          { spreadsheetId: ctx.org.googleSpreadsheetId }
+        );
+        await sheets.updateById(SHEET_TABS.BILLINGS, "BillingID", input.billingId, {
+          ReceiptNumber: no,
+          ReceiptDate: receiptDate,
+          UpdatedAt: new Date().toISOString(),
+        });
+        return no;
       });
 
-      await prisma.auditLog.create({
+      await safeAuditLog({
         data: {
           orgId: ctx.org.orgId,
           userId: ctx.session.userId,
@@ -1043,57 +1110,68 @@ export const billingRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const sheets = await getSheetsService(ctx.org.orgId);
-      const existing = await sheets.getBillingById(input.billingId);
-      if (!existing) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "ไม่พบใบวางบิล" });
-      }
-      if (existing.Status === "void") {
-        throw new TRPCError({
-          code: "PRECONDITION_FAILED",
-          message: "ใบวางบิลถูกยกเลิกแล้ว",
-        });
-      }
-      if (existing.Status === "draft") {
-        throw new TRPCError({
-          code: "PRECONDITION_FAILED",
-          message: "ต้องส่งใบวางบิลก่อนถึงจะบันทึกรับเงินได้",
-        });
-      }
-      if (existing.Status === "paid") {
-        throw new TRPCError({
-          code: "PRECONDITION_FAILED",
-          message: "ใบวางบิลนี้ชำระครบแล้ว",
-        });
-      }
+      // lock ต่อเอกสาร + อ่าน PaidAmount สด (ไม่ใช้ cache 90 วิ) — กดซ้ำ/2 คนพร้อมกันต้องไม่
+      // คำนวณยอดรับจากค่าเก่า (CO-04)
+      const { existing, newPaid, newStatus, grandTotal } = await withLock(
+        `billing:${ctx.org.orgId}:${input.billingId}`,
+        async () => {
+          if (ctx.org.googleSpreadsheetId) {
+            await invalidateTab(ctx.org.googleSpreadsheetId, SHEET_TABS.BILLINGS);
+          }
+          const existing = await sheets.getBillingById(input.billingId);
+          if (!existing) {
+            throw new TRPCError({ code: "NOT_FOUND", message: "ไม่พบใบวางบิล" });
+          }
+          if (existing.Status === "void") {
+            throw new TRPCError({
+              code: "PRECONDITION_FAILED",
+              message: "ใบวางบิลถูกยกเลิกแล้ว",
+            });
+          }
+          if (existing.Status === "draft") {
+            throw new TRPCError({
+              code: "PRECONDITION_FAILED",
+              message: "ต้องส่งใบวางบิลก่อนถึงจะบันทึกรับเงินได้",
+            });
+          }
+          if (existing.Status === "paid") {
+            throw new TRPCError({
+              code: "PRECONDITION_FAILED",
+              message: "ใบวางบิลนี้ชำระครบแล้ว",
+            });
+          }
 
-      const grandTotal = parseFloat(existing.GrandTotal) || 0;
-      const previousPaid = parseFloat(existing.PaidAmount) || 0;
-      const newPaid = round2(previousPaid + input.amount);
+          const grandTotal = parseFloat(existing.GrandTotal) || 0;
+          const previousPaid = parseFloat(existing.PaidAmount) || 0;
+          const newPaid = round2(previousPaid + input.amount);
 
-      if (newPaid > grandTotal) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: `จำนวนเงินที่รับเกินยอดรวม (รับแล้ว ${previousPaid} + ${input.amount} > ${grandTotal})`,
-        });
-      }
+          if (newPaid > grandTotal) {
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: `จำนวนเงินที่รับเกินยอดรวม (รับแล้ว ${previousPaid} + ${input.amount} > ${grandTotal})`,
+            });
+          }
 
-      const newStatus = newPaid >= grandTotal ? "paid" : "partial";
+          const newStatus = newPaid >= grandTotal ? "paid" : "partial";
 
-      await sheets.updateById(
-        SHEET_TABS.BILLINGS,
-        "BillingID",
-        input.billingId,
-        {
-          PaidAmount: newPaid,
-          PaidDate: input.paidDate,
-          PaymentMethod: input.paymentMethod,
-          BankAccountID: input.bankAccountId || "",
-          Status: newStatus,
-          UpdatedAt: new Date().toISOString(),
+          await sheets.updateById(
+            SHEET_TABS.BILLINGS,
+            "BillingID",
+            input.billingId,
+            {
+              PaidAmount: newPaid,
+              PaidDate: input.paidDate,
+              PaymentMethod: input.paymentMethod,
+              BankAccountID: input.bankAccountId || "",
+              Status: newStatus,
+              UpdatedAt: new Date().toISOString(),
+            }
+          );
+          return { existing, newPaid, newStatus, grandTotal };
         }
       );
 
-      await prisma.auditLog.create({
+      await safeAuditLog({
         data: {
           orgId: ctx.org.orgId,
           userId: ctx.session.userId,

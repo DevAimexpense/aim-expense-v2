@@ -235,6 +235,7 @@ export class AksonOcrProvider implements OcrProvider {
 
     const response = await fetch(AKSON_UPLOAD_URL, {
       method: "POST",
+      signal: AbortSignal.timeout(20_000), // กัน provider ค้างเกินเวลา webhook/route (LINE-05)
       headers: {
         "X-API-Key": apiKey,
       },
@@ -271,6 +272,7 @@ export class AksonOcrProvider implements OcrProvider {
 
     const response = await fetch(OPENAI_API_URL, {
       method: "POST",
+      signal: AbortSignal.timeout(20_000), // กัน provider ค้างเกินเวลา webhook/route (LINE-05)
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",

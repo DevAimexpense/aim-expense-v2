@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { todayBangkok } from "@/lib/utils/date";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { trpc } from "@/lib/trpc/client";
@@ -50,12 +51,12 @@ const formatTHB = (n: number) =>
   });
 
 function todayISO() {
-  return new Date().toISOString().slice(0, 10);
+  return todayBangkok();
 }
 function plus30DaysISO() {
   const d = new Date();
   d.setDate(d.getDate() + 30);
-  return d.toISOString().slice(0, 10);
+  return todayBangkok(d);
 }
 
 // ===== Types =====

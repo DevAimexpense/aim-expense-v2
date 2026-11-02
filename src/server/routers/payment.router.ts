@@ -11,6 +11,8 @@ import { prisma } from "@/lib/prisma";
 import { calculatePayment } from "@/lib/calculations";
 import { TRPCError } from "@trpc/server";
 import { scopedEventIds } from "@/lib/permissions";
+import { todayBangkok } from "@/lib/utils/date";
+import { safeAuditLog } from "@/server/lib/audit";
 
 const PaymentInputSchema = z.object({
   eventId: z.string().min(1),
@@ -284,7 +286,7 @@ export const paymentRouter = router({
         GTTLAmount: calc.gttlAmount,
         Status: status,
         // วันที่จ่ายเงิน = วันที่ตามเอกสาร/ใบเสร็จที่ผู้ใช้กรอก (ไม่ใช่วันที่คีย์รายการ)
-        PaymentDate: isPaidDirect ? input.paymentDate || now.slice(0, 10) : "",
+        PaymentDate: isPaidDirect ? input.paymentDate || todayBangkok() : "",
         DueDate: input.dueDate,
         ApprovedBy: isPaidDirect ? ctx.session.displayName : "",
         ApprovedAt: isPaidDirect ? now : "",
@@ -310,7 +312,7 @@ export const paymentRouter = router({
         UpdatedAt: now,
       });
 
-      await prisma.auditLog.create({
+      await safeAuditLog({
         data: {
           orgId: ctx.org.orgId,
           userId: ctx.session.userId,
@@ -439,7 +441,7 @@ export const paymentRouter = router({
       const ok = await sheets.updateById(SHEET_TABS.PAYMENTS, "PaymentID", input.paymentId, updates);
       if (!ok) throw new Error("แก้ไขไม่สำเร็จ");
 
-      await prisma.auditLog.create({
+      await safeAuditLog({
         data: {
           orgId: ctx.org.orgId,
           userId: ctx.session.userId,
@@ -492,7 +494,7 @@ export const paymentRouter = router({
       const ok = await sheets.updateById(SHEET_TABS.PAYMENTS, "PaymentID", input.paymentId, updates);
       if (!ok) throw new Error("บันทึกไม่สำเร็จ");
 
-      await prisma.auditLog.create({
+      await safeAuditLog({
         data: {
           orgId: ctx.org.orgId,
           userId: ctx.session.userId,
@@ -537,7 +539,7 @@ export const paymentRouter = router({
       }
 
       if (success > 0) {
-        await prisma.auditLog.create({
+        await safeAuditLog({
           data: {
             orgId: ctx.org.orgId,
             userId: ctx.session.userId,
@@ -574,7 +576,7 @@ export const paymentRouter = router({
         if (ok) success++;
       }
 
-      await prisma.auditLog.create({
+      await safeAuditLog({
         data: {
           orgId: ctx.org.orgId,
           userId: ctx.session.userId,
@@ -614,7 +616,7 @@ export const paymentRouter = router({
       }
 
       if (success > 0) {
-        await prisma.auditLog.create({
+        await safeAuditLog({
           data: {
             orgId: ctx.org.orgId,
             userId: ctx.session.userId,
@@ -639,7 +641,8 @@ export const paymentRouter = router({
       const sheets = await getSheetsService(ctx.org.orgId);
       const now = new Date().toISOString();
       const batchId = input.batchId || GoogleSheetsService.generateId("BATCH");
-      const paymentDate = input.paymentDate || now.slice(0, 10);
+      // วันที่จ่าย default = "วันนี้" ตามเวลาไทย (ISO/UTC ให้วันก่อนหน้าช่วง 00:00–07:00) DOC-05
+      const paymentDate = input.paymentDate || todayBangkok();
       let success = 0;
 
       for (const id of input.paymentIds) {
@@ -656,7 +659,7 @@ export const paymentRouter = router({
         if (ok) success++;
       }
 
-      await prisma.auditLog.create({
+      await safeAuditLog({
         data: {
           orgId: ctx.org.orgId,
           userId: ctx.session.userId,
@@ -695,7 +698,7 @@ export const paymentRouter = router({
       });
       if (!ok) throw new Error("เคลียร์ไม่สำเร็จ");
 
-      await prisma.auditLog.create({
+      await safeAuditLog({
         data: {
           orgId: ctx.org.orgId,
           userId: ctx.session.userId,
@@ -755,7 +758,7 @@ export const paymentRouter = router({
       const gttl = parseFloat(existing.GTTLAmount) || 0;
       const diff = gttl - input.actualExpense;
 
-      await prisma.auditLog.create({
+      await safeAuditLog({
         data: {
           orgId: ctx.org.orgId,
           userId: ctx.session.userId,
@@ -792,7 +795,7 @@ export const paymentRouter = router({
       const ok = await sheets.deleteById(SHEET_TABS.PAYMENTS, "PaymentID", input.paymentId);
       if (!ok) throw new Error("ลบไม่สำเร็จ");
 
-      await prisma.auditLog.create({
+      await safeAuditLog({
         data: {
           orgId: ctx.org.orgId,
           userId: ctx.session.userId,

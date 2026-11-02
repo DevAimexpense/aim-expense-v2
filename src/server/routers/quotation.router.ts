@@ -12,9 +12,13 @@ import {
   GoogleSheetsService,
   SHEET_TABS,
 } from "../services/google-sheets.service";
-import { computeNextDocNumber } from "../lib/doc-number";
+import { computeNextDocNumber, withDocNumberLock, docPeriod } from "../lib/doc-number";
+import { assertVatAllowed } from "../lib/org-vat";
+import { scopedEventIds } from "@/lib/permissions";
+import { todayBangkok } from "@/lib/utils/date";
 import { resolveIssuerBranch } from "../lib/issuer-branch";
 import { prisma } from "@/lib/prisma";
+import { safeAuditLog } from "@/server/lib/audit";
 
 // ===== Schemas =====
 
@@ -160,6 +164,22 @@ function shapeLine(r: Record<string, string>) {
   };
 }
 
+/**
+ * แก้วันที่เอกสารข้ามเดือนหลังมีเลขแล้ว → เลขยังเป็นของเดือนเดิม (ไม่ renumber เพราะเลขอาจถูก
+ * ส่งให้ลูกค้าแล้ว) — คืนข้อความเตือนให้ UI แสดง; undefined = ไม่ต้องเตือน (DOC-07)
+ */
+function monthMoveWarning(
+  oldDate: string | undefined,
+  newDate: string,
+  docNumber: string | undefined
+): string | undefined {
+  if (!docNumber || !oldDate) return undefined;
+  const a = docPeriod(oldDate);
+  const b = docPeriod(newDate);
+  if (a.yyyy === b.yyyy && a.mm === b.mm) return undefined;
+  return `วันที่เอกสารถูกย้ายไปเดือนอื่น แต่เลขที่ ${docNumber} ยังเป็นเลขรันของเดือนเดิม (${a.mm}/${a.yyyy})`;
+}
+
 // ===== Router =====
 
 export const quotationRouter = router({
@@ -178,8 +198,11 @@ export const quotationRouter = router({
       const sheets = await getSheetsService(ctx.org.orgId);
       await ensureTabsCached(sheets, ctx.org.orgId);
       const all = await sheets.getQuotations();
+      // project_manager เห็นเฉพาะเอกสารของโปรเจกต์ในขอบเขตตัวเอง (CO-07)
+      const scope = scopedEventIds(ctx.org);
 
       const filtered = all.filter((r) => {
+        if (scope !== null && !scope.includes((r.EventID || "").trim())) return false;
         if (input?.status && r.Status !== input.status) return false;
         if (input?.customerId && r.CustomerID !== input.customerId)
           return false;
@@ -211,6 +234,11 @@ export const quotationRouter = router({
         (r) => r.QuotationID === input.quotationId
       );
       if (!header) return null;
+      // project_manager: นอกขอบเขต = ไม่พบ (CO-07)
+      const scope = scopedEventIds(ctx.org);
+      if (scope !== null && !scope.includes((header.EventID || "").trim())) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "ไม่พบใบเสนอราคา" });
+      }
       const lines = (batch[SHEET_TABS.QUOTATION_LINES] || [])
         .filter((r) => r.QuotationID === input.quotationId)
         .sort(
@@ -227,6 +255,8 @@ export const quotationRouter = router({
   create: permissionProcedure("manageQuotations")
     .input(QuotationCreateInput)
     .mutation(async ({ ctx, input }) => {
+      // org ไม่จด VAT ออกเอกสารมี VAT ไม่ได้ — บังคับฝั่ง server (DOC-06)
+      await assertVatAllowed(ctx.org.orgId, input.isVat, "ใบเสนอราคา");
       const sheets = await getSheetsService(ctx.org.orgId);
       await ensureTabsCached(sheets, ctx.org.orgId);
 
@@ -240,12 +270,7 @@ export const quotationRouter = router({
       }
 
       const quotationId = GoogleSheetsService.generateId("QT");
-      const docNumber = await computeNextDocNumber(
-        sheets,
-        "QT",
-        input.docDate,
-        SHEET_TABS.QUOTATIONS
-      );
+      let docNumber = "";
 
       const totals = computeQuotationTotals(
         input.lines,
@@ -261,33 +286,46 @@ export const quotationRouter = router({
 
       // 2. Header write — wrap whole flow in try/catch + cleanup
       try {
-        await sheets.appendRowByHeaders(SHEET_TABS.QUOTATIONS, {
-          QuotationID: quotationId,
-          DocNumber: docNumber,
-          DocDate: input.docDate,
-          ValidUntil: input.validUntil,
-          CustomerID: customer.CustomerID,
-          CustomerNameSnapshot: customer.CustomerName || "",
-          CustomerTaxIdSnapshot: customer.TaxID || "",
-          CustomerAddressSnapshot: customer.Address || "",
-          IssuerBranchSnapshot: issuer.branchLabel,
-          IssuerAddressSnapshot: issuer.address,
-          Status: "draft",
-          EventID: input.eventId || "",
-          ProjectName: input.projectName || "",
-          Subtotal: totals.subtotal,
-          DiscountAmount: input.discountAmount,
-          VATAmount: totals.vatAmount,
-          VATIncluded: input.vatIncluded ? "TRUE" : "FALSE",
-          IsVAT: input.isVat ? "TRUE" : "FALSE",
-          GrandTotal: totals.grandTotal,
-          Notes: input.notes || "",
-          Terms: input.terms || "",
-          PreparedBy: ctx.session.displayName || "",
-          PreparedByUserId: ctx.session.userId,
-          CreatedAt: now,
-          UpdatedAt: now,
-          PdfUrl: "",
+        // เลขเอกสาร: อ่าน max สด + append header ภายใน lock ต่อ org/ประเภท/เดือน (DOC-03 / CO-04)
+        docNumber = await withDocNumberLock(ctx.org.orgId, "QT", input.docDate, async () => {
+          const no = await computeNextDocNumber(
+            sheets,
+            "QT",
+            input.docDate,
+            SHEET_TABS.QUOTATIONS,
+            undefined,
+            "DocNumber",
+            { spreadsheetId: ctx.org.googleSpreadsheetId }
+          );
+          await sheets.appendRowByHeaders(SHEET_TABS.QUOTATIONS, {
+            QuotationID: quotationId,
+            DocNumber: no,
+            DocDate: input.docDate,
+            ValidUntil: input.validUntil,
+            CustomerID: customer.CustomerID,
+            CustomerNameSnapshot: customer.CustomerName || "",
+            CustomerTaxIdSnapshot: customer.TaxID || "",
+            CustomerAddressSnapshot: customer.Address || "",
+            IssuerBranchSnapshot: issuer.branchLabel,
+            IssuerAddressSnapshot: issuer.address,
+            Status: "draft",
+            EventID: input.eventId || "",
+            ProjectName: input.projectName || "",
+            Subtotal: totals.subtotal,
+            DiscountAmount: input.discountAmount,
+            VATAmount: totals.vatAmount,
+            VATIncluded: input.vatIncluded ? "TRUE" : "FALSE",
+            IsVAT: input.isVat ? "TRUE" : "FALSE",
+            GrandTotal: totals.grandTotal,
+            Notes: input.notes || "",
+            Terms: input.terms || "",
+            PreparedBy: ctx.session.displayName || "",
+            PreparedByUserId: ctx.session.userId,
+            CreatedAt: now,
+            UpdatedAt: now,
+            PdfUrl: "",
+          });
+          return no;
         });
 
         // 3. Lines
@@ -326,7 +364,7 @@ export const quotationRouter = router({
       }
 
       // 4. Audit
-      await prisma.auditLog.create({
+      await safeAuditLog({
         data: {
           orgId: ctx.org.orgId,
           userId: ctx.session.userId,
@@ -349,6 +387,7 @@ export const quotationRouter = router({
       z.object({ quotationId: z.string() }).merge(QuotationCreateInput)
     )
     .mutation(async ({ ctx, input }) => {
+      await assertVatAllowed(ctx.org.orgId, input.isVat, "ใบเสนอราคา"); // DOC-06
       const sheets = await getSheetsService(ctx.org.orgId);
       await ensureTabsCached(sheets, ctx.org.orgId); // IsVAT column on older sheets
       const existing = await sheets.getQuotationById(input.quotationId);
@@ -421,7 +460,7 @@ export const quotationRouter = router({
         }))
         );
 
-      await prisma.auditLog.create({
+      await safeAuditLog({
         data: {
           orgId: ctx.org.orgId,
           userId: ctx.session.userId,
@@ -432,7 +471,8 @@ export const quotationRouter = router({
         },
       });
 
-      return { success: true };
+      // ย้าย DocDate ข้ามเดือนหลังมีเลขแล้ว: คงเลขเดิม (เลขรันเป็นของเดือนที่ออก) แต่เตือนผู้ใช้ (DOC-07)
+      return { success: true, warning: monthMoveWarning(existing.DocDate, input.docDate, existing.DocNumber) };
     }),
 
   // ===== State transitions =====
@@ -493,7 +533,7 @@ export const quotationRouter = router({
           UpdatedAt: new Date().toISOString(),
         }
       );
-      await prisma.auditLog.create({
+      await safeAuditLog({
         data: {
           orgId: ctx.org.orgId,
           userId: ctx.session.userId,
@@ -569,61 +609,71 @@ export const quotationRouter = router({
       const grandTotal = parseFloat(q.GrandTotal) || 0;
       const vatIncluded = q.VATIncluded === "TRUE" || q.VATIncluded === "true";
       const isVat = q.IsVAT !== "FALSE";
+      // parseFloat("") = NaN และ `NaN ?? 0` ยังเป็น NaN → กันด้วย Number.isFinite (DOC-07)
+      const customerWht = parseFloat(customer.DefaultWHTPercent);
       const whtPercent =
-        input.whtPercent ?? parseFloat(customer.DefaultWHTPercent) ?? 0;
+        input.whtPercent ?? (Number.isFinite(customerWht) ? customerWht : 0);
       const whtAmount = Math.round(((subtotal * whtPercent) / 100) * 100) / 100;
       const amountReceivable = Math.round((grandTotal - whtAmount) * 100) / 100;
 
       const billingId = GoogleSheetsService.generateId("BIL");
-      const docDate = input.docDate || new Date().toISOString().slice(0, 10);
-      const docNumber = await computeNextDocNumber(
-        sheets,
-        "BIL",
-        docDate,
-        SHEET_TABS.BILLINGS
-      );
+      const docDate = input.docDate || todayBangkok(); // DOC-05
+      let docNumber = "";
 
       const now = new Date().toISOString();
 
       try {
-        await sheets.appendRowByHeaders(SHEET_TABS.BILLINGS, {
-          BillingID: billingId,
-          DocNumber: docNumber,
-          DocDate: docDate,
-          DueDate: input.dueDate,
-          CustomerID: customer.CustomerID,
-          CustomerNameSnapshot: q.CustomerNameSnapshot || customer.CustomerName,
-          CustomerTaxIdSnapshot:
-            q.CustomerTaxIdSnapshot || customer.TaxID || "",
-          CustomerAddressSnapshot:
-            q.CustomerAddressSnapshot ||
-            customer.BillingAddress ||
-            customer.Address ||
-            "",
-          SourceQuotationID: q.QuotationID,
-          EventID: q.EventID || "",
-          ProjectName: q.ProjectName || "",
-          Status: "draft",
-          Subtotal: subtotal,
-          DiscountAmount: discountAmount,
-          VATAmount: vatAmount,
-          VATIncluded: vatIncluded ? "TRUE" : "FALSE",
-          IsVAT: isVat ? "TRUE" : "FALSE",
-          WHTPercent: whtPercent,
-          WHTAmount: whtAmount,
-          GrandTotal: grandTotal,
-          AmountReceivable: amountReceivable,
-          PaidAmount: 0,
-          PaidDate: "",
-          PaymentMethod: "",
-          BankAccountID: "",
-          Notes: q.Notes || "",
-          Terms: q.Terms || "",
-          PreparedBy: ctx.session.displayName || "",
-          PreparedByUserId: ctx.session.userId,
-          CreatedAt: now,
-          UpdatedAt: now,
-          PdfUrl: "",
+        // เลขเอกสาร: อ่าน max สด + append header ภายใน lock ต่อ org/ประเภท/เดือน (DOC-03 / CO-04)
+        docNumber = await withDocNumberLock(ctx.org.orgId, "BIL", docDate, async () => {
+          const no = await computeNextDocNumber(
+            sheets,
+            "BIL",
+            docDate,
+            SHEET_TABS.BILLINGS,
+            undefined,
+            "DocNumber",
+            { spreadsheetId: ctx.org.googleSpreadsheetId }
+          );
+          await sheets.appendRowByHeaders(SHEET_TABS.BILLINGS, {
+            BillingID: billingId,
+            DocNumber: no,
+            DocDate: docDate,
+            DueDate: input.dueDate,
+            CustomerID: customer.CustomerID,
+            CustomerNameSnapshot: q.CustomerNameSnapshot || customer.CustomerName,
+            CustomerTaxIdSnapshot:
+              q.CustomerTaxIdSnapshot || customer.TaxID || "",
+            CustomerAddressSnapshot:
+              q.CustomerAddressSnapshot ||
+              customer.BillingAddress ||
+              customer.Address ||
+              "",
+            SourceQuotationID: q.QuotationID,
+            EventID: q.EventID || "",
+            ProjectName: q.ProjectName || "",
+            Status: "draft",
+            Subtotal: subtotal,
+            DiscountAmount: discountAmount,
+            VATAmount: vatAmount,
+            VATIncluded: vatIncluded ? "TRUE" : "FALSE",
+            IsVAT: isVat ? "TRUE" : "FALSE",
+            WHTPercent: whtPercent,
+            WHTAmount: whtAmount,
+            GrandTotal: grandTotal,
+            AmountReceivable: amountReceivable,
+            PaidAmount: 0,
+            PaidDate: "",
+            PaymentMethod: "",
+            BankAccountID: "",
+            Notes: q.Notes || "",
+            Terms: q.Terms || "",
+            PreparedBy: ctx.session.displayName || "",
+            PreparedByUserId: ctx.session.userId,
+            CreatedAt: now,
+            UpdatedAt: now,
+            PdfUrl: "",
+          });
+          return no;
         });
 
         await sheets.appendRowsByHeaders(
@@ -667,7 +717,7 @@ export const quotationRouter = router({
       );
 
       // Audit (2 entries)
-      await prisma.auditLog.create({
+      await safeAuditLog({
         data: {
           orgId: ctx.org.orgId,
           userId: ctx.session.userId,
@@ -677,7 +727,7 @@ export const quotationRouter = router({
           summary: `สร้างใบวางบิล ${docNumber} จากใบเสนอราคา ${q.DocNumber}`,
         },
       });
-      await prisma.auditLog.create({
+      await safeAuditLog({
         data: {
           orgId: ctx.org.orgId,
           userId: ctx.session.userId,
@@ -716,7 +766,7 @@ async function transitionStatus(
     Status: next,
     UpdatedAt: new Date().toISOString(),
   });
-  await prisma.auditLog.create({
+  await safeAuditLog({
     data: {
       orgId: ctx.org.orgId,
       userId: ctx.session.userId,

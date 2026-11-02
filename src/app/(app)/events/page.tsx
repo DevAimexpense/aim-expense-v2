@@ -4,7 +4,7 @@ import { useState } from "react";
 import { trpc } from "@/lib/trpc/client";
 import SearchableSelect, { type SearchableSelectOption } from "@/components/searchable-select";
 import DateInput from "@/components/shared/date-input";
-import { formatDate } from "@/lib/utils/date";
+import { formatDate, todayBangkok } from "@/lib/utils/date";
 
 const STATUS_LABEL: Record<string, { label: string; class: string }> = {
   active: { label: "ดำเนินการ", class: "app-badge-success" },
@@ -728,11 +728,11 @@ function formatNumber(n: number): string {
 }
 
 function todayISO(): string {
-  return new Date().toISOString().slice(0, 10);
+  return todayBangkok();
 }
 
 function addDaysISO(days: number): string {
   const d = new Date();
   d.setDate(d.getDate() + days);
-  return d.toISOString().slice(0, 10);
+  return todayBangkok(d);
 }

@@ -17,6 +17,7 @@ import {
   vendorTypeOf,
   branchLabelOf,
 } from "@/lib/wht-form-utils";
+import { isSettled } from "@/lib/payment-status";
 import { PND3AttachDocument, type PND3AttachRow } from "./document";
 
 export const metadata = {
@@ -74,7 +75,7 @@ export default async function PND3AttachPage({
   // Aggregate ใบแนบ ภงด.3 rows for this period
   const rows: PND3AttachRow[] = [];
   for (const p of payments) {
-    if (p.Status !== "paid") continue;
+    if (!isSettled(p.Status)) continue; // paid | cleared — DOC-02
     const wth = num(p.WTHAmount);
     if (wth <= 0) continue;
 
@@ -86,7 +87,7 @@ export default async function PND3AttachPage({
     const taxId = info?.taxId || p.VendorTaxIdSnapshot || "";
 
     // Filter to ภ.ง.ด.3 (personal — TaxID NOT starting with 0, or empty)
-    if (vendorTypeOf(taxId) !== "pnd3") continue;
+    if (vendorTypeOf(taxId, info?.branchType) !== "pnd3") continue;
 
     const incomeType =
       p.CategoryMain || p.Description || "ค่าบริการ";

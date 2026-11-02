@@ -23,10 +23,11 @@ export default async function PermissionsPage() {
   if (session.onboardingStep !== "done") redirect("/");
 
   const org = await getOrgContext(session.userId);
-  if (!org) redirect("/");
+  if (!org) redirect("/select-org");
 
   // Server-side gate (UI is filtered too, but this is the source of truth)
-  if (!org.permissions.managePermissions) redirect("/dashboard");
+  // CO-08: admin bypass เหมือน requirePermission ใน tRPC — admin ที่ flag ถูกปิดยังเข้าหน้าได้
+  if (org.role !== "admin" && !org.permissions.managePermissions) redirect("/dashboard");
 
   return <PermissionsClient orgName={org.orgName} />;
 }

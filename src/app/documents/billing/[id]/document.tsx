@@ -30,7 +30,13 @@ interface DocData {
     vatIncluded: boolean;
     isVat: boolean;
     /** มีค่า = render เป็น "ใบเสร็จรับเงิน" (ใช้จาก /documents/receipt/[id]) */
-    receipt?: { number: string; date: string; direct?: boolean } | null;
+    receipt?: {
+      number: string;
+      date: string;
+      direct?: boolean;
+      /** ฝั่งบุคคล (entityType=personal): ใบเสร็จแสดงยอดรับจริงหลังหัก ณ ที่จ่าย — DOC-07 */
+      personal?: boolean;
+    } | null;
     whtPercent: number;
     whtAmount: number;
     grandTotal: number;
@@ -558,8 +564,17 @@ function DocPage({
 }: {
   copyType: "original" | "copy";
 } & DocData) {
-  const balance = header.grandTotal - header.paidAmount;
   const receipt = header.receipt || null;
+  // ฝั่งบุคคล + มีหัก ณ ที่จ่าย: "ได้รับเงินไว้" = ยอดหลังหัก (amountReceivable) ไม่ใช่ยอดรวม
+  // เพราะผู้จ่ายหักภาษีไว้และออก 50 ทวิ ให้ · quickIncome เก็บ PaidAmount = amountReceivable อยู่แล้ว
+  // จึงต้องคิดยอดคงค้างจาก amountReceivable ด้วย — เฉพาะโหมดนี้ ฝั่งนิติบุคคลคงเดิม (DOC-07)
+  const personalWht = !!receipt?.personal && header.whtAmount > 0;
+  const paidShown = personalWht
+    ? Math.min(header.paidAmount, header.amountReceivable)
+    : header.paidAmount;
+  const balance = personalWht
+    ? Math.max(0, header.amountReceivable - header.paidAmount)
+    : header.grandTotal - header.paidAmount;
 
   return (
     <div className={`doc-page doc-page-${copyType}`}>
@@ -743,12 +758,17 @@ function DocPage({
           {header.paidAmount > 0 && (
             <div className="paid-info" style={{ marginTop: "0.75rem" }}>
               ✓ {receipt ? "ได้รับเงินไว้เรียบร้อยแล้ว" : "รับเงินแล้ว"}:{" "}
-              <strong>{formatMoney(header.paidAmount)}</strong>{" "}
+              <strong>{formatMoney(paidShown)}</strong>{" "}
               บาท
               {balance > 0 && (
                 <span style={{ color: "#c2410c", marginLeft: "0.5rem" }}>
                   (คงค้าง: {formatMoney(balance)})
                 </span>
+              )}
+              {personalWht && (
+                <div style={{ marginTop: "0.25rem" }}>
+                  หัก ณ ที่จ่าย {formatMoney(header.whtAmount)} บาท (50 ทวิ)
+                </div>
               )}
             </div>
           )}

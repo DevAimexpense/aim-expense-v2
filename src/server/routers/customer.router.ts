@@ -8,6 +8,7 @@ import { router, orgProcedure, permissionProcedure } from "../trpc";
 import { getSheetsService, ensureTabsCached } from "../lib/sheets-context";
 import { GoogleSheetsService, SHEET_TABS } from "../services/google-sheets.service";
 import { prisma } from "@/lib/prisma";
+import { safeAuditLog } from "@/server/lib/audit";
 
 const CustomerInputSchema = z.object({
   customerName: z.string().min(1, "กรุณากรอกชื่อลูกค้า").max(200),
@@ -109,7 +110,7 @@ export const customerRouter = router({
         CreatedBy: ctx.session.displayName || "",
       });
 
-      await prisma.auditLog.create({
+      await safeAuditLog({
         data: {
           orgId: ctx.org.orgId,
           userId: ctx.session.userId,
@@ -162,7 +163,7 @@ export const customerRouter = router({
       );
       if (!ok) throw new Error("ไม่พบลูกค้า");
 
-      await prisma.auditLog.create({
+      await safeAuditLog({
         data: {
           orgId: ctx.org.orgId,
           userId: ctx.session.userId,
@@ -199,7 +200,7 @@ export const customerRouter = router({
       );
       if (!ok) throw new Error("ไม่พบลูกค้า");
 
-      await prisma.auditLog.create({
+      await safeAuditLog({
         data: {
           orgId: ctx.org.orgId,
           userId: ctx.session.userId,

@@ -13,6 +13,7 @@ import { getSession } from "@/lib/auth/session";
 import { getOrgContext } from "@/lib/auth/middleware";
 import { prisma } from "@/lib/prisma";
 import { stripe } from "@/lib/stripe";
+import { safeAuditLog } from "@/server/lib/audit";
 
 export async function POST(req: NextRequest) {
   const session = await getSession();
@@ -52,8 +53,8 @@ export async function POST(req: NextRequest) {
     const updated = await stripe.subscriptions.update(sub.stripeSubscriptionId, {
       cancel_at_period_end: cancel,
     });
-    const periodEnd = (updated as typeof updated & { current_period_end?: number })
-      .current_period_end;
+    // SDK 22 / API 2026-03-25: `current_period_end` lives on the subscription item
+    const periodEnd = updated.items.data[0]?.current_period_end;
 
     // เขียน DB ทันที (webhook จะ sync ซ้ำอีกรอบ — ค่าเดียวกัน)
     await prisma.subscription.update({
@@ -63,7 +64,7 @@ export async function POST(req: NextRequest) {
         ...(periodEnd ? { currentPeriodEnd: new Date(periodEnd * 1000) } : {}),
       },
     });
-    await prisma.auditLog.create({
+    await safeAuditLog({
       data: {
         orgId: org.orgId,
         userId: session.userId,

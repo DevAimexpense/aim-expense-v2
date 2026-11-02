@@ -5,6 +5,8 @@
 // ===========================================
 
 import { GoogleSheetsService } from "../services/google-sheets.service";
+import { invalidateTab } from "./cache";
+import { withLock } from "./lock";
 
 // RC = ใบเสร็จรับเงิน (ออกจากใบวางบิลที่รับเงินครบ — เลขเก็บในคอลัมน์ ReceiptNumber ของ Billings)
 export type DocPrefixType = "QT" | "BIL" | "TI" | "RC";
@@ -67,6 +69,8 @@ export function docPeriod(docDate: string | Date | undefined | null): {
  * @param tab          ชื่อ sheet ที่อ่าน (SHEET_TABS.QUOTATIONS / BILLINGS / TAX_INVOICES)
  * @param statusFilter optional — filter row ตาม Status field (เช่น TI: นับเฉพาะ "issued")
  * @param numberColumn คอลัมน์ที่เก็บเลข (default DocNumber) — ใบเสร็จรับเงินใช้ ReceiptNumber
+ * @param opts.spreadsheetId ถ้าส่งมา → ล้าง cache ของ tab ก่อนอ่าน (อ่านสด) — ใช้ภายใน
+ *        `withDocNumberLock` เพื่อไม่ให้ max+1 คำนวณจาก snapshot เก่า 90 วิ (DOC-03 / CO-04)
  */
 export async function computeNextDocNumber(
   sheets: GoogleSheetsService,
@@ -74,9 +78,13 @@ export async function computeNextDocNumber(
   docDate: string,
   tab: string,
   statusFilter?: (status: string) => boolean,
-  numberColumn: string = "DocNumber"
+  numberColumn: string = "DocNumber",
+  opts: { spreadsheetId?: string | null } = {}
 ): Promise<string> {
   const prefix = await getDocPrefix(sheets, type);
+  // อ่านสด: ล้าง cache ของ tab ก่อน (ข้อจำกัด — ถ้ามี getAll ของ tab เดียวกันค้างอยู่ใน
+  // in-flight dedupe ของ getOrFetch จะยังได้ค่านั้น แต่หน้าต่างเวลาสั้นมากเมื่ออยู่ใน lock)
+  if (opts.spreadsheetId) await invalidateTab(opts.spreadsheetId, tab);
   const all = await sheets.getAll(tab);
   const { yyyy, mm } = docPeriod(docDate);
   const periodPrefix = `${prefix}-${yyyy}-${mm}-`;
@@ -89,6 +97,25 @@ export async function computeNextDocNumber(
     .filter((n) => !isNaN(n));
   const next = (seqs.length > 0 ? Math.max(...seqs) : 0) + 1;
   return `${prefix}-${yyyy}-${mm}-${String(next).padStart(3, "0")}`;
+}
+
+/**
+ * ล็อกช่วง "อ่าน max → เขียนแถว" ของเลขเอกสารรายเดือน (DOC-03)
+ *
+ * key = org + ประเภทเอกสาร + งวด (YYYY-MM ของวันที่เอกสาร) — 2 คนออกเอกสารชนิดเดียวกัน
+ * เดือนเดียวกันพร้อมกันจะต่อคิว ไม่ได้เลขซ้ำ · ไม่มี Redis (dev) → รันตรง ๆ เหมือนเดิม
+ *
+ * ผู้เรียกต้องเรียก `computeNextDocNumber(..., { spreadsheetId })` **ภายใน** fn
+ * และ append/update แถวให้เสร็จก่อนออกจาก fn (TTL ของ lock 8 วิ — พอสำหรับ 2–3 Sheets calls)
+ */
+export function withDocNumberLock<T>(
+  orgId: string,
+  type: DocPrefixType,
+  docDate: string,
+  fn: () => Promise<T>
+): Promise<T> {
+  const { yyyy, mm } = docPeriod(docDate);
+  return withLock(`docno:${orgId}:${type}:${yyyy}-${mm}`, fn, { ttlMs: 15000, waitMs: 10000 });
 }
 
 /**

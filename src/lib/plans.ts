@@ -239,8 +239,9 @@ export function effectivePlan(
   return "free";
 }
 
-function normalisePlan(value: string): PlanTier {
-  return (PLAN_TIERS as readonly string[]).includes(value)
+/** แปลงค่า plan จาก DB/Stripe ให้เป็น PlanTier ที่รู้จัก — ค่าแปลก ๆ → "free" */
+export function normalisePlan(value: string | null | undefined): PlanTier {
+  return value && (PLAN_TIERS as readonly string[]).includes(value)
     ? (value as PlanTier)
     : "free";
 }
@@ -292,12 +293,16 @@ export const SELF_SERVE_PLANS: PlanTier[] = ["basic", "pro", "business", "max"];
 
 // ===== Affiliate / Referral constants =====
 
-/** Discount applied to the first invoice when a valid referral code is used. */
+/**
+ * Discount applied to the first invoice when a valid referral code is used.
+ * NOTE: the "+100 OCR first month" bonus was never implemented (BIL-09) —
+ * removed from here so no UI/FAQ can promise it. The Prisma default on
+ * `Referral.discountApplied` still says `..._plus_100ocr` (schema change
+ * pending); treat that string as legacy, not as a promise.
+ */
 export const REFERRAL_DISCOUNT = {
   /** First-invoice discount percentage. */
   firstInvoicePercentOff: 20,
-  /** Bonus OCR scans added to the first month's quota on signup-with-code. */
-  bonusOcrFirstMonth: 100,
   /** Stripe coupon ID we'll create in Stripe dashboard. */
   stripeCouponId: "ref-20pct-month1",
 } as const;

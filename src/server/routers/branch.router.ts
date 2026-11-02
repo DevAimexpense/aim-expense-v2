@@ -9,6 +9,7 @@ import { z } from "zod";
 import { router, orgProcedure } from "../trpc";
 import { prisma } from "@/lib/prisma";
 import { TRPCError } from "@trpc/server";
+import { safeAuditLog } from "@/server/lib/audit";
 
 const BranchInput = z.object({
   name: z.string().trim().min(1, "กรอกชื่อสาขา").max(200),
@@ -75,7 +76,7 @@ export const branchRouter = router({
         },
       });
 
-      await prisma.auditLog.create({
+      await safeAuditLog({
         data: {
           orgId: ctx.org.orgId,
           userId: ctx.session.userId,
@@ -130,7 +131,7 @@ export const branchRouter = router({
         },
       });
 
-      await prisma.auditLog.create({
+      await safeAuditLog({
         data: {
           orgId: ctx.org.orgId,
           userId: ctx.session.userId,
@@ -158,7 +159,7 @@ export const branchRouter = router({
 
       await prisma.branch.delete({ where: { id: input.id } });
 
-      await prisma.auditLog.create({
+      await safeAuditLog({
         data: {
           orgId: ctx.org.orgId,
           userId: ctx.session.userId,

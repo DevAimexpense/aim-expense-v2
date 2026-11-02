@@ -9,6 +9,27 @@ import { router, orgProcedure, permissionProcedure } from "../trpc";
 import { getSheetsService } from "../lib/sheets-context";
 import { GoogleSheetsService, SHEET_TABS } from "../services/google-sheets.service";
 import { prisma } from "@/lib/prisma";
+import { scopedEventIds } from "@/lib/permissions";
+import { safeAuditLog } from "@/server/lib/audit";
+
+/**
+ * ตรวจว่า eventId เป็นโปรเจกต์ของ org นี้จริง (อยู่ใน Sheet ของ org) และถ้าเป็น project_manager
+ * ต้องอยู่ในขอบเขตที่ได้รับมอบหมาย — ไม่เช่นนั้น PM ส่ง eventId ใดก็ได้มาดูรายชื่อ (CO-07)
+ */
+async function assertEventInScope(
+  sheets: GoogleSheetsService,
+  org: { role: string; eventScope: string[] },
+  eventId: string
+): Promise<void> {
+  const scope = scopedEventIds(org);
+  if (scope !== null && !scope.includes(eventId.trim())) {
+    throw new TRPCError({ code: "NOT_FOUND", message: "ไม่พบโปรเจกต์" });
+  }
+  const event = await sheets.getEventById(eventId);
+  if (!event) {
+    throw new TRPCError({ code: "NOT_FOUND", message: "ไม่พบโปรเจกต์" });
+  }
+}
 
 export const eventAssignmentRouter = router({
   /**
@@ -18,6 +39,7 @@ export const eventAssignmentRouter = router({
     .input(z.object({ eventId: z.string() }))
     .query(async ({ ctx, input }) => {
       const sheets = await getSheetsService(ctx.org.orgId);
+      await assertEventInScope(sheets, ctx.org, input.eventId); // CO-07
       const assignments = await sheets.getEventAssignments(input.eventId);
 
       // Enrich with user info from DB
@@ -60,6 +82,9 @@ export const eventAssignmentRouter = router({
   availableMembers: orgProcedure
     .input(z.object({ eventId: z.string() }))
     .query(async ({ ctx, input }) => {
+      const sheets = await getSheetsService(ctx.org.orgId);
+      await assertEventInScope(sheets, ctx.org, input.eventId); // CO-07
+
       // Get all active org members
       const members = await prisma.orgMember.findMany({
         where: { orgId: ctx.org.orgId, status: "active" },
@@ -78,7 +103,6 @@ export const eventAssignmentRouter = router({
       });
 
       // Get already-assigned users for this event
-      const sheets = await getSheetsService(ctx.org.orgId);
       const existing = await sheets.getEventAssignments(input.eventId);
       const assignedIds = new Set(
         existing.map((a: Record<string, string>) => a.UserID)
@@ -170,7 +194,7 @@ export const eventAssignmentRouter = router({
 
       // Audit log
       const memberName = member.user.lineDisplayName || member.user.fullName || "—";
-      await prisma.auditLog.create({
+      await safeAuditLog({
         data: {
           orgId: ctx.org.orgId,
           userId: ctx.session.userId,
@@ -240,7 +264,7 @@ export const eventAssignmentRouter = router({
       }
 
       // Audit log
-      await prisma.auditLog.create({
+      await safeAuditLog({
         data: {
           orgId: ctx.org.orgId,
           userId: ctx.session.userId,
@@ -326,7 +350,7 @@ export const eventAssignmentRouter = router({
       }
 
       // Audit log
-      await prisma.auditLog.create({
+      await safeAuditLog({
         data: {
           orgId: ctx.org.orgId,
           userId: ctx.session.userId,

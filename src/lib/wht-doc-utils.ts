@@ -28,10 +28,12 @@ export function generateWhtDocNumber(
   const monthStr = String(month).padStart(2, "0");
   const dayStr = String(day).padStart(2, "0");
 
-  // หาลำดับของ payment ปัจจุบันในลิสต์ (เรียงตาม CreatedAt)
-  const sorted = [...allMonthPayments].sort((a, b) =>
-    (a.CreatedAt || "").localeCompare(b.CreatedAt || "")
-  );
+  // หาลำดับของ payment ปัจจุบันในลิสต์ (เรียงตาม CreatedAt → PaymentID เป็น tie-break
+  // ให้ลำดับคงที่ทุกครั้งที่ render แม้ CreatedAt เท่ากัน/ว่าง — DOC-04)
+  const sorted = [...allMonthPayments].sort((a, b) => {
+    const c = (a.CreatedAt || "").localeCompare(b.CreatedAt || "");
+    return c !== 0 ? c : a.PaymentID.localeCompare(b.PaymentID);
+  });
   const idx = sorted.findIndex((p) => p.PaymentID === thisPaymentId);
   const seq = idx >= 0 ? idx + 1 : 1;
   const seqStr = String(seq).padStart(3, "0");

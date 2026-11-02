@@ -5,6 +5,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { verifyWebhookSignature } from "@/lib/line/messaging";
+import { getRedis } from "@/server/lib/cache";
 import {
   handleFollow,
   handleJoin,
@@ -54,13 +55,43 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true });
   }
 
-  // 4) Dispatch each event (concurrently, isolated failures)
+  // 4) Dispatch each event (concurrently, isolated failures) — skipping any
+  //    webhookEventId we already accepted (LINE redelivers on timeout/non-2xx).
   await Promise.allSettled(
-    body.events.map((event) => dispatchEvent(event))
+    body.events.map(async (event) => {
+      if (await alreadySeen(event)) return;
+      await dispatchEvent(event);
+    })
   );
 
   // 5) Always 200 — LINE retries on non-2xx
   return NextResponse.json({ ok: true });
+}
+
+const SEEN_TTL_SEC = 24 * 60 * 60;
+
+/**
+ * Dedupe by `webhookEventId` with Redis `SET NX EX 86400` (LINE-05).
+ * Without Redis (dev) we cannot dedupe → process every event as before.
+ */
+async function alreadySeen(event: LineWebhookEvent): Promise<boolean> {
+  const id = event.webhookEventId;
+  if (!id) return false;
+  const redis = getRedis();
+  if (!redis) return false;
+  try {
+    const ok = await redis.set(`line:evt:${id}`, 1, { nx: true, ex: SEEN_TTL_SEC });
+    if (ok) return false;
+    console.warn(
+      `[LINE webhook] duplicate event ${id} skipped` +
+        (event.deliveryContext?.isRedelivery ? " (redelivery)" : ""),
+    );
+    return true;
+  } catch (err) {
+    // Redis hiccup must not drop a real event — fail open.
+    console.warn("[LINE webhook] dedupe check failed, processing anyway:", err);
+    return false;
+  }
 }
 
 async function dispatchEvent(event: LineWebhookEvent): Promise<void> {

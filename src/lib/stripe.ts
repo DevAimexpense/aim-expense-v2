@@ -7,7 +7,7 @@
 // ===========================================
 
 import Stripe from "stripe";
-import type { PlanTier } from "@/lib/plans";
+import { SELF_SERVE_PLANS, type PlanTier } from "@/lib/plans";
 
 // Lazy singleton — the Stripe client is created on FIRST USE, not at import.
 // This keeps `next build` (which imports every route module to collect page
@@ -120,6 +120,44 @@ export async function getPriceByTierInterval(
 
   priceCache.set(cacheKey, price);
   return price;
+}
+
+/** Statuses in which a Stripe subscription actually grants the paid tier. */
+export const ENTITLED_STATUSES: ReadonlySet<Stripe.Subscription.Status> = new Set([
+  "active",
+  "trialing",
+  "past_due", // grace period — Stripe keeps retrying; drop on `unpaid`/`canceled`
+]);
+
+/**
+ * Reverse-resolve (tier, interval) from the price the customer is ACTUALLY
+ * being charged for (BIL-01). Plan changes made in the Stripe Customer Portal
+ * or Dashboard do not touch our metadata, so metadata can lie — the price
+ * cannot.
+ *
+ * Match order: env `STRIPE_PRICE_{TIER}_{INTERVAL}` ids → cached prices from
+ * `getPriceByTierInterval` → `lookup_key` (`pro_monthly`, ...).
+ * Returns `null` when the price is unknown; caller falls back to metadata.
+ */
+export function tierIntervalFromPrice(
+  price: Stripe.Price | string | null | undefined,
+): { tier: PlanTier; interval: BillingInterval } | null {
+  if (!price) return null;
+  const priceId = typeof price === "string" ? price : price.id;
+  const lookupKey = typeof price === "string" ? null : price.lookup_key;
+
+  for (const tier of SELF_SERVE_PLANS) {
+    for (const interval of ["monthly", "yearly"] as const) {
+      if (envPriceIdFor(tier, interval) === priceId) return { tier, interval };
+      if (priceCache.get(`${tier}_${interval}`)?.id === priceId) {
+        return { tier, interval };
+      }
+      if (lookupKey && lookupKey === lookupKeyFor(tier, interval)) {
+        return { tier, interval };
+      }
+    }
+  }
+  return null;
 }
 
 /**

@@ -115,6 +115,9 @@ export async function loadWhtCertData(
     const docMonth = docDate.getMonth() + 1;
     monthPayments = allPayments
       .filter((p) => {
+        // รายการที่ยกเลิก/ถูกปฏิเสธไม่อยู่ในลำดับเลขหนังสือรับรอง — ไม่เช่นนั้นเลขของใบที่พิมพ์ไปแล้ว
+        // จะเลื่อนเมื่อรายการก่อนหน้าถูกยกเลิก (DOC-04)
+        if (p.Status === "cancelled" || p.Status === "rejected") return false;
         const pDateStr = resolveWhtCertDate(p);
         if (!pDateStr) return false;
         const d = new Date(pDateStr);
@@ -131,7 +134,23 @@ export async function loadWhtCertData(
     monthPayments = [{ PaymentID: payment.PaymentID, CreatedAt: payment.CreatedAt || "" }];
   }
 
-  const docNumber = generateWhtDocNumber(paymentDate, monthPayments, payment.PaymentID);
+  // DOC-04: เลขที่ออกไปแล้วต้องคงที่ — ใช้ค่าที่เก็บใน Payments.WhtCertNo ("เล่มที่|เลขที่") ถ้ามี
+  // ถ้ายังไม่มี (ออกครั้งแรก) คำนวณแล้วบันทึกกลับทันที การบันทึกล้มเหลวไม่ทำให้ใบออกไม่ได้
+  const storedCertNo = String((payment as Record<string, string | undefined>).WhtCertNo || "");
+  let docNumber: { book: string; number: string };
+  if (storedCertNo.includes("|")) {
+    const [book, number] = storedCertNo.split("|");
+    docNumber = { book, number };
+  } else {
+    docNumber = generateWhtDocNumber(paymentDate, monthPayments, payment.PaymentID);
+    try {
+      await sheets.updateById(SHEET_TABS.PAYMENTS, "PaymentID", payment.PaymentID, {
+        WhtCertNo: `${docNumber.book}|${docNumber.number}`,
+      });
+    } catch (e) {
+      console.error("[wht-cert] persist WhtCertNo failed:", e);
+    }
+  }
 
   // Branch info (สำหรับชื่อผู้มีหน้าที่หัก)
   const payerBranchInfo =

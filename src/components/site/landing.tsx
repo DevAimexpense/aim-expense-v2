@@ -35,9 +35,9 @@ export function Landing({ lang }: { lang: Lang }) {
       <main>
         <Hero h={h} lang={lang} />
         <Stories h={h} lang={lang} />
-        <YourData h={h} lang={lang} />
+        <YourData h={h} />
         <HowSteps h={h} />
-        <PricingSection h={h} />
+        <PricingSection h={h} lang={lang} />
         <FaqSection h={h} lang={lang} items={faq} />
         <CtaBand h={h} />
       </main>
@@ -65,7 +65,7 @@ function Hero({ h, lang }: { h: Home; lang: Lang }) {
             <Button href="/login" size="lg" variant="inverse" className="shadow-lg shadow-brand-900/40">
               {t.ctaStart}
             </Button>
-            <Link href="/pricing" className="arrow-link inline-flex items-center justify-center gap-2 rounded-xl border border-white/30 px-6 py-3 text-base font-medium text-white transition hover:border-white/60 hover:bg-white/10">
+            <Link href={withLang(lang, "/pricing")} className="arrow-link inline-flex items-center justify-center gap-2 rounded-xl border border-white/30 px-6 py-3 text-base font-medium text-white transition hover:border-white/60 hover:bg-white/10">
               {t.ctaPricing}
               <ArrowRight size={18} aria-hidden />
             </Link>
@@ -216,7 +216,7 @@ const STATUS_TONE: Record<string, string> = {
   Pending: "bg-amber-100 text-amber-800",
 };
 
-function YourData({ h, lang }: { h: Home; lang: Lang }) {
+function YourData({ h }: { h: Home }) {
   const t = h.data;
   return (
     <section id="data" className="border-y border-brand-100 bg-brand-50">
@@ -281,8 +281,6 @@ function YourData({ h, lang }: { h: Home; lang: Lang }) {
           <figcaption className="mt-3 text-center text-xs text-slate-600">{t.sheetCaption}</figcaption>
         </Reveal>
       </div>
-      {/* lang ไว้ให้ STATUS_TONE ใช้ในอนาคต */}
-      <span hidden>{lang}</span>
     </section>
   );
 }
@@ -315,7 +313,7 @@ function HowSteps({ h }: { h: Home }) {
 }
 
 // ===================== Pricing =====================
-function PricingSection({ h }: { h: Home }) {
+function PricingSection({ h, lang }: { h: Home; lang: Lang }) {
   const t = h.pricing;
   return (
     <section id="pricing" className="border-y border-brand-100 bg-brand-50/60">
@@ -326,10 +324,10 @@ function PricingSection({ h }: { h: Home }) {
           <p className="mt-3 text-slate-700">{t.desc}</p>
         </Reveal>
         <Reveal className="mt-10" delay={0.1}>
-          <PricingCards t={t} />
+          <PricingCards t={t} lang={lang} />
         </Reveal>
         <div className="mt-8 text-center">
-          <Link href="/pricing" className="arrow-link inline-flex items-center gap-1.5 text-sm font-semibold text-brand-700 hover:underline">
+          <Link href={withLang(lang, "/pricing")} className="arrow-link inline-flex items-center gap-1.5 text-sm font-semibold text-brand-700 hover:underline">
             {t.cta}
             <ArrowRight size={16} aria-hidden />
           </Link>

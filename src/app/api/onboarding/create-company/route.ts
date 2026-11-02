@@ -247,13 +247,14 @@ export async function POST(req: NextRequest) {
       return newOrg;
     });
 
-    // Refresh session
+    // Refresh session — CO-05: active org = บริษัทที่เพิ่งสร้าง (ตรงกับ User.activeOrgId ใน tx)
     await setSessionCookie({
       userId: user.id,
       lineUserId: user.lineUserId,
       displayName: user.lineDisplayName,
       avatarUrl: user.avatarUrl,
       onboardingStep: "done",
+      activeOrgId: org.id,
     });
 
     // Welcome the new org owner over LINE (best-effort — never blocks signup)

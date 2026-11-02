@@ -29,8 +29,9 @@ export async function getOrgAccessToken(ownerId: string): Promise<string> {
   }
 
   // Refresh token if expired (with 5min buffer)
+  // CO-08: tokenExpiry == null = ไม่รู้ว่าหมดเมื่อไร → ถือว่าหมดอายุ (refresh เลย) แทนการใช้ token เก่าดื้อ ๆ
   const isExpired =
-    conn.tokenExpiry &&
+    !conn.tokenExpiry ||
     new Date(conn.tokenExpiry).getTime() < Date.now() + 5 * 60 * 1000;
 
   if (isExpired && conn.refreshToken) {
@@ -45,7 +46,8 @@ export async function getOrgAccessToken(ownerId: string): Promise<string> {
         },
       });
       return accessToken;
-    } catch {
+    } catch (err) {
+      console.warn("[sheets-context] refresh failed for owner", ownerId, err);
       throw new TRPCError({
         code: "PRECONDITION_FAILED",
         message: "Token หมดอายุ กรุณาเชื่อมต่อ Google ใหม่",
@@ -54,6 +56,50 @@ export async function getOrgAccessToken(ownerId: string): Promise<string> {
   }
 
   return decryptToken(conn.accessToken);
+}
+
+/**
+ * CO-08: Google ตอบ 401 / invalid_grant / invalid token = token ที่ถือไว้ใช้ไม่ได้แล้ว
+ * (owner revoke หรือ reconnect บัญชีอื่น) — ต้องทิ้งค่าที่ cache ไว้ ไม่ใช่รอ 4 นาที
+ */
+function isGoogleAuthError(err: unknown): boolean {
+  const e = err as {
+    code?: number | string;
+    status?: number;
+    response?: { status?: number };
+    message?: string;
+  } | null;
+  const status = Number(e?.response?.status ?? e?.status ?? e?.code);
+  if (status === 401) return true;
+  return /invalid_grant|invalid_token|Invalid Credentials|Token has been expired or revoked/i.test(
+    e?.message || String(err),
+  );
+}
+
+/**
+ * ครอบ service ให้ทุก method ที่ reject ด้วย auth error ล้าง orgInfoCache ของ org นั้น
+ * ก่อนโยน error ต่อ — request ถัดไปจะอ่าน token ใหม่จาก DB (หรือ refresh) แทนค่าเก่า
+ */
+function withAuthErrorEviction<T extends object>(service: T, orgId: string): T {
+  return new Proxy(service, {
+    get(target, prop, receiver) {
+      const value = Reflect.get(target, prop, receiver);
+      if (typeof value !== "function") return value;
+      return (...args: unknown[]) => {
+        const result = (value as (...a: unknown[]) => unknown).apply(target, args);
+        if (result instanceof Promise) {
+          return result.catch((err: unknown) => {
+            if (isGoogleAuthError(err)) {
+              console.warn("[sheets-context] Google auth error → evict token cache for org", orgId);
+              invalidateOrgInfoCache(orgId);
+            }
+            throw err;
+          });
+        }
+        return result;
+      };
+    },
+  });
 }
 
 /**
@@ -75,6 +121,10 @@ const orgInfoCache = new Map<
 >();
 const ORG_INFO_TTL_MS = 4 * 60 * 1000;
 
+/**
+ * ล้าง token/spreadsheet ที่ cache ไว้ของ org (instance นี้) — เรียกจาก Google OAuth callback
+ * หลังเก็บ token ใหม่ และจาก withAuthErrorEviction เมื่อ Google ปฏิเสธ token
+ */
 export function invalidateOrgInfoCache(orgId: string): void {
   orgInfoCache.delete(orgId);
 }
@@ -87,7 +137,10 @@ export async function getSheetsService(
 ): Promise<GoogleSheetsService> {
   const cached = orgInfoCache.get(orgId);
   if (cached && cached.expiresAt > Date.now()) {
-    return new GoogleSheetsService(cached.accessToken, cached.spreadsheetId);
+    return withAuthErrorEviction(
+      new GoogleSheetsService(cached.accessToken, cached.spreadsheetId),
+      orgId,
+    );
   }
 
   const org = await prisma.organization.findUnique({
@@ -111,7 +164,10 @@ export async function getSheetsService(
     spreadsheetId: org.googleSpreadsheetId,
     expiresAt: Date.now() + ORG_INFO_TTL_MS,
   });
-  return new GoogleSheetsService(accessToken, org.googleSpreadsheetId);
+  return withAuthErrorEviction(
+    new GoogleSheetsService(accessToken, org.googleSpreadsheetId),
+    orgId,
+  );
 }
 
 // Module-level cache: orgId → timestamp ของการ ensureAllTabsExist ครั้งล่าสุด

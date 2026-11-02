@@ -19,6 +19,7 @@ import { PLAN_LABELS } from "@/lib/plans";
 import { TRPCError } from "@trpc/server";
 import type { Prisma } from "@prisma/client";
 import { readVatRegistered, readReceiptMode } from "@/lib/org-settings";
+import { safeAuditLog } from "@/server/lib/audit";
 
 /**
  * Helper: Get valid access token for a user (refresh if expired)
@@ -495,7 +496,7 @@ export const orgRouter = router({
       await sheets.setConfig("DOC_PREFIX_TI", input.TI);
       await sheets.setConfig("DOC_PREFIX_RC", input.RC);
 
-      await prisma.auditLog.create({
+      await safeAuditLog({
         data: {
           orgId: ctx.org.orgId,
           userId: ctx.session.userId,

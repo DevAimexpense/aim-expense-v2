@@ -6,12 +6,12 @@ import { useRouter } from "next/navigation";
 import { trpc } from "@/lib/trpc/client";
 import { StatusBadge } from "../quotations-client";
 import DateInput from "@/components/shared/date-input";
-import { formatDate } from "@/lib/utils/date";
+import { formatDate, todayBangkok } from "@/lib/utils/date";
 
 const PLUS_30_DAYS = () => {
   const d = new Date();
   d.setDate(d.getDate() + 30);
-  return d.toISOString().slice(0, 10);
+  return todayBangkok(d);
 };
 
 const formatTHB = (n: number) =>
@@ -427,7 +427,7 @@ function ConvertToBillingModal({
 }) {
   const convertMut = trpc.quotation.convertToBilling.useMutation();
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayBangkok();
   const [docDate, setDocDate] = useState(today);
   const [dueDate, setDueDate] = useState(PLUS_30_DAYS());
   const [whtPercent, setWhtPercent] = useState(0);

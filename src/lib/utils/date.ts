@@ -55,3 +55,25 @@ export function formatMonthYear(
   const yyyy = d.getFullYear() + 543;
   return `${mm}/${yyyy}`;
 }
+
+// ===========================================
+// "วันนี้" ตามเวลาไทย — ใช้แทน `new Date().toISOString().slice(0, 10)` ทุกที่
+// (ISO = UTC → ช่วง 00:00–07:00 เวลาไทยจะได้วันก่อนหน้า ทำให้เอกสารลงวัน/เลขเดือนผิด)
+// ใช้ได้ทั้ง server และ client
+// ===========================================
+const BANGKOK_YMD = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "Asia/Bangkok",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+
+/** วันที่ตามเวลาไทยในรูป `YYYY-MM-DD` (ค.ศ.) — ค่าเริ่มต้นคือตอนนี้ */
+export function todayBangkok(d: Date = new Date()): string {
+  return BANGKOK_YMD.format(d); // en-CA ให้ YYYY-MM-DD
+}
+
+/** เดือนตามเวลาไทยในรูป `YYYY-MM` (ใช้กับโควตารายเดือน / เลขเอกสารรายเดือน) */
+export function yearMonthBangkok(d: Date = new Date()): string {
+  return todayBangkok(d).slice(0, 7);
+}

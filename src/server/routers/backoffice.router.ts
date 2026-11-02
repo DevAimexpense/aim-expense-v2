@@ -26,6 +26,7 @@ import {
   quotaCacheFor,
 } from "@/lib/comp";
 import { formatDate } from "@/lib/utils/date";
+import { safeAuditLog } from "@/server/lib/audit";
 
 const FILTERS = ["all", "paying", "trialing", "lifetime", "free"] as const;
 
@@ -176,7 +177,7 @@ export const backofficeRouter = router({
         summary = `ทีมงานให้ใช้ฟรี ${input.months} เดือน (${planLabel}) ถึง ${formatDate(end)}${noteSuffix}`;
       }
 
-      await prisma.auditLog.create({
+      await safeAuditLog({
         data: {
           orgId: org.id,
           userId: ctx.session.userId,
@@ -226,7 +227,7 @@ export const backofficeRouter = router({
         },
       });
 
-      await prisma.auditLog.create({
+      await safeAuditLog({
         data: {
           orgId: org.id,
           userId: ctx.session.userId,

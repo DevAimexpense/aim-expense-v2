@@ -17,6 +17,7 @@ import {
   vendorTypeOf,
   branchLabelOf,
 } from "@/lib/wht-form-utils";
+import { isSettled } from "@/lib/payment-status";
 import { PND53AttachDocument, type PND53AttachRow } from "./document";
 
 export const metadata = {
@@ -73,7 +74,7 @@ export default async function PND53AttachPage({
 
   const rows: PND53AttachRow[] = [];
   for (const p of payments) {
-    if (p.Status !== "paid") continue;
+    if (!isSettled(p.Status)) continue; // paid | cleared — DOC-02
     const wth = num(p.WTHAmount);
     if (wth <= 0) continue;
 
@@ -85,7 +86,7 @@ export default async function PND53AttachPage({
     const taxId = info?.taxId || p.VendorTaxIdSnapshot || "";
 
     // Filter to ภ.ง.ด.53 (juristic — TaxID 13 digits starting with "0")
-    if (vendorTypeOf(taxId) !== "pnd53") continue;
+    if (vendorTypeOf(taxId, info?.branchType) !== "pnd53") continue;
 
     const incomeType =
       p.CategoryMain || p.Description || "ค่าบริการ";

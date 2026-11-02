@@ -421,6 +421,7 @@ export class OpenAIOcrProvider implements OcrProvider {
 
     const response = await fetch(OPENAI_API_URL, {
       method: "POST",
+      signal: AbortSignal.timeout(20_000), // กัน provider ค้างเกินเวลา webhook/route (LINE-05)
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
@@ -472,6 +473,7 @@ export class OpenAIOcrProvider implements OcrProvider {
 
     const response = await fetch(OPENAI_API_URL, {
       method: "POST",
+      signal: AbortSignal.timeout(20_000), // กัน provider ค้างเกินเวลา webhook/route (LINE-05)
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
@@ -521,6 +523,7 @@ export class OpenAIOcrProvider implements OcrProvider {
 
     const response = await fetch(OPENAI_API_URL, {
       method: "POST",
+      signal: AbortSignal.timeout(20_000), // กัน provider ค้างเกินเวลา webhook/route (LINE-05)
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
@@ -572,6 +575,7 @@ export class OpenAIOcrProvider implements OcrProvider {
 
     const response = await fetch(OPENAI_API_URL, {
       method: "POST",
+      signal: AbortSignal.timeout(20_000), // กัน provider ค้างเกินเวลา webhook/route (LINE-05)
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",

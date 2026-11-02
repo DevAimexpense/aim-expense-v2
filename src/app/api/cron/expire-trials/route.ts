@@ -13,20 +13,30 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { PLAN_LIMITS } from "@/lib/plans";
+import { PLAN_LABELS, normalisePlan } from "@/lib/plans";
+import { quotaCacheFor } from "@/lib/comp";
+import { safeAuditLog } from "@/server/lib/audit";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
-  // Vercel Cron sends `Authorization: Bearer ${CRON_SECRET}` header
+  // Vercel Cron sends `Authorization: Bearer ${CRON_SECRET}` header.
+  // Fail CLOSED: with no secret configured this route must not be callable by
+  // anyone on the internet (it rewrites every org's quota).
   const authHeader = req.headers.get("authorization");
   const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
+  if (!cronSecret) {
+    console.error("[cron/expire-trials] CRON_SECRET is not set — refusing to run");
+    return NextResponse.json(
+      { error: "CRON_SECRET not configured — cron disabled" },
+      { status: 500 },
+    );
+  }
+  if (authHeader !== `Bearer ${cronSecret}`) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const now = new Date();
-  const freeLimits = PLAN_LIMITS.free;
 
   // Find all subs with an expired trial that hasn't been downgraded yet
   // (trialPlan still set + trialEndsAt in past + plan still "free")
@@ -35,38 +45,39 @@ export async function GET(req: NextRequest) {
       trialEndsAt: { lt: now },
       trialPlan: { not: null },
     },
-    select: { id: true, orgId: true },
+    select: { id: true, orgId: true, plan: true, isBetaTester: true },
   });
 
   if (expired.length === 0) {
     return NextResponse.json({ success: true, expiredCount: 0, ranAt: now });
   }
 
-  // Batch update — clear trial fields + reset limits to plan ("free" by default)
-  // Note: if user has already upgraded to a paid plan during the trial, we keep
-  // their paid plan; we only clear the trial markers.
+  // Clear trial fields + reset the quota cache to the org's REAL plan (BIL-05).
+  // A backoffice "free months" grant on top of a paid Stripe plan (or a
+  // lifetime comp) must fall back to that plan's limits, not to Free.
   for (const sub of expired) {
+    const plan = normalisePlan(sub.plan);
     await prisma.subscription.update({
       where: { id: sub.id },
       data: {
         trialPlan: null,
         trialStartedAt: null,
         trialEndsAt: null,
-        // reset limits to current `plan` (likely "free" unless already upgraded)
-        maxMembers: freeLimits.users,
-        maxEvents: 3, // legacy field, keep close to free
-        scanCredits: freeLimits.ocrPerMonth,
+        ...quotaCacheFor(plan),
       },
     });
 
-    await prisma.auditLog.create({
+    await safeAuditLog({
       data: {
         orgId: sub.orgId,
         userId: "system", // synthetic — cron runs without user context
         action: "update",
         entityType: "subscription",
         entityRef: sub.id,
-        summary: "Trial expired → downgraded to Free Forever",
+        summary:
+          plan === "free"
+            ? "Trial expired → downgraded to Free Forever"
+            : `Trial expired → back to ${PLAN_LABELS[plan]}${sub.isBetaTester ? " (lifetime)" : ""}`,
       },
     });
   }

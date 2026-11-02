@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { todayBangkok } from "@/lib/utils/date";
 import { trpc } from "@/lib/trpc/client";
 import DateInput from "@/components/shared/date-input";
 
@@ -126,14 +127,14 @@ export function ReceiptReviewModal({
       setExtracted(data);
       // Pre-fill form
       setReceiptNumber(data.invoiceNumber || invoiceNumber || "");
-      setReceiptDate(data.documentDate || new Date().toISOString().slice(0, 10));
+      setReceiptDate(data.documentDate || todayBangkok());
       setOcrStatus("done");
     } catch (e) {
       setError(e instanceof Error ? e.message : "OCR ล้มเหลว — กรอกข้อมูลด้วยตนเอง");
       setOcrStatus("failed");
       // Allow manual entry even if OCR fails
       setReceiptNumber(invoiceNumber || "");
-      setReceiptDate(new Date().toISOString().slice(0, 10));
+      setReceiptDate(todayBangkok());
     }
   };
 

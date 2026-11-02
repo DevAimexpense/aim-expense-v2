@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { todayBangkok } from "@/lib/utils/date";
 import { trpc } from "@/lib/trpc/client";
 import { calculatePayment } from "@/lib/calculations";
 import { WTH_TYPES, findWthTypeByRate } from "@/lib/wth-types";
@@ -1077,5 +1078,5 @@ function formatNumber(n: number): string {
 function addDaysISO(days: number): string {
   const d = new Date();
   d.setDate(d.getDate() + days);
-  return d.toISOString().slice(0, 10);
+  return todayBangkok(d);
 }

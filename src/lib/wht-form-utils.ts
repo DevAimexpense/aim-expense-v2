@@ -3,6 +3,8 @@
 // ตามแบบฟอร์มกรมสรรพากร (พิมพ์ มี.ค. 2560)
 // ===========================================
 
+import { getPndForm } from "./wht-doc-utils";
+
 /**
  * Parse period string YYYY-MM → year, month, monthIndex (0-11)
  * Falls back to current month if invalid.
@@ -229,8 +231,8 @@ export function branchLabelOf(branchType: string, branchNumber: string): string 
  *   - 13 digits starting with "0" → นิติบุคคล (ภงด.53)
  *   - else                        → บุคคลธรรมดา (ภงด.3)
  */
-export function vendorTypeOf(taxId: string): "pnd3" | "pnd53" {
-  const digits = (taxId || "").replace(/\D/g, "");
-  if (digits.length === 13 && digits.startsWith("0")) return "pnd53";
-  return "pnd3";
+export function vendorTypeOf(taxId: string, branchType?: string): "pnd3" | "pnd53" {
+  // กฎเดียวกับหนังสือรับรอง 50 ทวิ (getPndForm) — ไม่มี TaxID แต่มี BranchType HQ/Branch
+  // = นิติบุคคล → ภ.ง.ด.53 (DOC-07: เดิมรายงานกับใบ 50 ทวิ ตัดสินไม่ตรงกัน)
+  return getPndForm(taxId, branchType) === "53" ? "pnd53" : "pnd3";
 }

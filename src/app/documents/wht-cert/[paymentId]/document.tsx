@@ -8,6 +8,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { saveDocumentPdf, runAutoSaveIfRequested } from "@/lib/utils/save-doc-pdf";
+import { todayBangkok } from "@/lib/utils/date";
 
 interface WthCertProps {
   paymentId: string;
@@ -47,7 +48,7 @@ export function WthCertDocument({ paymentId }: WthCertProps) {
         const loaded: Loaded = {
           blob,
           url: objectUrl,
-          docDate: res.headers.get("x-doc-date") || new Date().toISOString().slice(0, 10),
+          docDate: res.headers.get("x-doc-date") || todayBangkok(),
           docNumber: res.headers.get("x-doc-number") || "",
           filename: res.headers.get("x-doc-filename") || "50tawi.pdf",
         };

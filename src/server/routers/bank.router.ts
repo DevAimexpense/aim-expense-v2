@@ -8,6 +8,7 @@ import { router, orgProcedure, permissionProcedure } from "../trpc";
 import { getSheetsService, ensureTabsCached } from "../lib/sheets-context";
 import { GoogleSheetsService, SHEET_TABS } from "../services/google-sheets.service";
 import { prisma } from "@/lib/prisma";
+import { safeAuditLog } from "@/server/lib/audit";
 
 export const bankRouter = router({
   /**
@@ -57,7 +58,7 @@ export const bankRouter = router({
         "", "", "", "FALSE",
       ]);
 
-      await prisma.auditLog.create({
+      await safeAuditLog({
         data: {
           orgId: ctx.org.orgId,
           userId: ctx.session.userId,
@@ -97,7 +98,7 @@ export const bankRouter = router({
       const ok = await sheets.deleteById(SHEET_TABS.BANKS, "BankID", input.bankId);
       if (!ok) throw new Error("ไม่พบธนาคาร");
 
-      await prisma.auditLog.create({
+      await safeAuditLog({
         data: {
           orgId: ctx.org.orgId,
           userId: ctx.session.userId,

@@ -10,7 +10,7 @@ import {
   EXPENSE_NATURE_OPTIONS,
 } from "@/lib/constants/expense-categories";
 import { pdfFirstPageToImage, isPdfFile } from "@/lib/utils/pdf-to-image";
-import { formatDate } from "@/lib/utils/date";
+import { formatDate, todayBangkok } from "@/lib/utils/date";
 import DateInput from "@/components/shared/date-input";
 
 interface Event {
@@ -1609,5 +1609,5 @@ function formatNumber(n: number): string {
 function addDaysISO(days: number): string {
   const d = new Date();
   d.setDate(d.getDate() + days);
-  return d.toISOString().slice(0, 10);
+  return todayBangkok(d);
 }

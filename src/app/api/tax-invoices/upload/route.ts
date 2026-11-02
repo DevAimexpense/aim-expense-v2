@@ -21,6 +21,8 @@ import {
 import { SHEET_TABS } from "@/server/services/google-sheets.service";
 import { prisma } from "@/lib/prisma";
 import { validateUploadedFile } from "@/lib/security/file-validation";
+import { safeAuditLog } from "@/server/lib/audit";
+import { todayBangkok } from "@/lib/utils/date";
 
 export async function POST(req: NextRequest) {
   const session = await getSession();
@@ -81,7 +83,7 @@ export async function POST(req: NextRequest) {
     }
 
     const { drive, receiptsFolderId } = await getDriveService(org.orgId);
-    const refDate = paidDateInput || ti.DocDate || new Date().toISOString().slice(0, 10);
+    const refDate = paidDateInput || ti.DocDate || todayBangkok();
 
     // Build folder path Receipts/{YYYY}/{MM}
     let date = new Date(refDate);
@@ -137,7 +139,7 @@ export async function POST(req: NextRequest) {
       updates,
     );
 
-    await prisma.auditLog.create({
+    await safeAuditLog({
       data: {
         orgId: org.orgId,
         userId: session.userId,

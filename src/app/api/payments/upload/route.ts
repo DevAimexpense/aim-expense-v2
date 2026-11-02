@@ -17,6 +17,8 @@ import { getSheetsService, getDriveService, ensureTabsCached } from "@/server/li
 import { SHEET_TABS } from "@/server/services/google-sheets.service";
 import { prisma } from "@/lib/prisma";
 import { validateUploadedFile } from "@/lib/security/file-validation";
+import { safeAuditLog } from "@/server/lib/audit";
+import { todayBangkok } from "@/lib/utils/date";
 
 export async function POST(req: NextRequest) {
   const session = await getSession();
@@ -90,7 +92,7 @@ export async function POST(req: NextRequest) {
       clientReceiptDate ||
       payment.ReceiptDate ||
       payment.DueDate ||
-      new Date().toISOString().slice(0, 10);
+      todayBangkok();
 
     // Description สำหรับชื่อไฟล์: client → payment.Description → payee name → "expense"
     const description =
@@ -144,7 +146,7 @@ export async function POST(req: NextRequest) {
 
     await sheets.updateById(SHEET_TABS.PAYMENTS, "PaymentID", paymentId, updates);
 
-    await prisma.auditLog.create({
+    await safeAuditLog({
       data: {
         orgId: org.orgId,
         userId: session.userId,

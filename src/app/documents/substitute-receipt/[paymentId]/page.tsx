@@ -9,6 +9,7 @@ import { getOrgContext } from "@/lib/auth/middleware";
 import { getSheetsService } from "@/server/lib/sheets-context";
 import { SHEET_TABS } from "@/server/services/google-sheets.service";
 import { prisma } from "@/lib/prisma";
+import { todayBangkok } from "@/lib/utils/date";
 import { SubstituteReceiptDocument } from "./document";
 import { AutoFailMessenger } from "@/lib/utils/auto-fail-messenger";
 
@@ -71,7 +72,7 @@ export default async function SubstituteReceiptPage({
       payment={{
         paymentId: payment.PaymentID,
         description: payment.Description || "",
-        date: payment.PaymentDate || payment.ApprovedAt?.slice(0, 10) || new Date().toISOString().slice(0, 10),
+        date: payment.PaymentDate || payment.ApprovedAt?.slice(0, 10) || todayBangkok(),
         amount: parseFloat(payment.GTTLAmount) || 0,
         eventName: event?.EventName || "",
         notes: payment.Notes || "",

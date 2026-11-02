@@ -9,6 +9,8 @@ import { getSheetsService } from "../lib/sheets-context";
 import { GoogleSheetsService, SHEET_TABS } from "../services/google-sheets.service";
 import { prisma } from "@/lib/prisma";
 import { scopedEventIds } from "@/lib/permissions";
+import { checkQuota, effectivePlan } from "@/lib/plans";
+import { safeAuditLog } from "@/server/lib/audit";
 
 const EventInputSchema = z.object({
   eventName: z.string().min(1, "กรุณากรอกชื่อโปรเจกต์").max(200),
@@ -134,18 +136,21 @@ export const eventRouter = router({
     .mutation(async ({ ctx, input }) => {
       const sheets = await getSheetsService(ctx.org.orgId);
 
-      // Check plan limit
+      // Check plan limit — from PLAN_LIMITS via the effective plan (trial-aware),
+      // not the cached `maxEvents` column, which drifts (BIL-06).
       const subscription = await prisma.subscription.findUnique({
         where: { orgId: ctx.org.orgId },
+        select: { plan: true, trialPlan: true, trialEndsAt: true },
       });
       if (subscription) {
         const existing = await sheets.getEvents();
         const activeCount = existing.filter(
           (e) => e.Status !== "completed" && e.Status !== "cancelled"
         ).length;
-        if (activeCount >= subscription.maxEvents) {
+        const quota = checkQuota(effectivePlan(subscription), "events", activeCount);
+        if (!quota.ok) {
           throw new Error(
-            `แพ็คเกจปัจจุบันรองรับโปรเจกต์ active สูงสุด ${subscription.maxEvents} โปรเจกต์`
+            `แพ็คเกจปัจจุบันรองรับโปรเจกต์ active สูงสุด ${quota.limit} โปรเจกต์`
           );
         }
       }
@@ -166,7 +171,7 @@ export const eventRouter = router({
       ]);
 
       // Audit log
-      await prisma.auditLog.create({
+      await safeAuditLog({
         data: {
           orgId: ctx.org.orgId,
           userId: ctx.session.userId,
@@ -214,7 +219,7 @@ export const eventRouter = router({
       );
       if (!ok) throw new Error("ไม่พบโปรเจกต์");
 
-      await prisma.auditLog.create({
+      await safeAuditLog({
         data: {
           orgId: ctx.org.orgId,
           userId: ctx.session.userId,
@@ -251,7 +256,7 @@ export const eventRouter = router({
       );
       if (!ok) throw new Error("ไม่พบโปรเจกต์");
 
-      await prisma.auditLog.create({
+      await safeAuditLog({
         data: {
           orgId: ctx.org.orgId,
           userId: ctx.session.userId,

@@ -9,6 +9,7 @@ import { getSheetsService, ensureTabsCached } from "../lib/sheets-context";
 import { GoogleSheetsService, SHEET_TABS } from "../services/google-sheets.service";
 import { prisma } from "@/lib/prisma";
 import { TRPCError } from "@trpc/server";
+import { safeAuditLog } from "@/server/lib/audit";
 
 const CompanyBankInputSchema = z.object({
   bankName: z.string().trim().min(1, "เลือกธนาคาร").max(100),
@@ -112,7 +113,7 @@ export const companyBankRouter = router({
         now,
       ]);
 
-      await prisma.auditLog.create({
+      await safeAuditLog({
         data: {
           orgId: ctx.org.orgId,
           userId: ctx.session.userId,
@@ -167,7 +168,7 @@ export const companyBankRouter = router({
       );
       if (!ok) throw new Error("ไม่พบบัญชี");
 
-      await prisma.auditLog.create({
+      await safeAuditLog({
         data: {
           orgId: ctx.org.orgId,
           userId: ctx.session.userId,
@@ -204,7 +205,7 @@ export const companyBankRouter = router({
       );
       if (!ok) throw new Error("ไม่พบบัญชี");
 
-      await prisma.auditLog.create({
+      await safeAuditLog({
         data: {
           orgId: ctx.org.orgId,
           userId: ctx.session.userId,

@@ -1,7 +1,8 @@
 // ===========================================
 // Per-month usage counter — quota enforcement helper (S26)
 // Tracks OCR scans (and future metered metrics) per org per calendar month.
-// Used to gate calls in /api/ocr/* + bonus-OCR consumption.
+// Used to gate calls in /api/ocr/* + LINE OCR + bonus-OCR consumption.
+// เดือนนับตามเวลาไทย (yearMonthBangkok) ให้ตรงกับ "รีเซ็ตทุกเดือน" ที่เว็บบอก
 // ===========================================
 
 import { prisma } from "@/lib/prisma";
@@ -11,12 +12,13 @@ import {
   type PlanLimits,
   type SubscriptionState,
 } from "@/lib/plans";
+import { yearMonthBangkok } from "@/lib/utils/date";
 
 export type UsageMetric = "ocr";
 
-/** Format current month as `YYYY-MM`. */
+/** Current month as `YYYY-MM` in Asia/Bangkok. */
 function currentYearMonth(now = new Date()): string {
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  return yearMonthBangkok(now);
 }
 
 interface QuotaCheck {
@@ -47,51 +49,69 @@ export async function getUsage(
   return row?.count || 0;
 }
 
+async function planLimitFor(orgId: string, metric: UsageMetric): Promise<number> {
+  const sub = await prisma.subscription.findUnique({
+    where: { orgId },
+    select: { plan: true, trialPlan: true, trialEndsAt: true },
+  });
+  const plan = effectivePlan(sub as SubscriptionState | null);
+  return PLAN_LIMITS[plan][metricToLimit(metric)];
+}
+
 /**
  * Atomically check + increment usage. Returns the result of the check.
  * If `ok=false` the increment did NOT happen (caller should refuse the action).
  *
- * Pattern: read → check vs limit → upsert atomic (Postgres ON CONFLICT).
- * No race conditions because Postgres serialises the upsert.
+ * Pattern: make sure the row exists → one conditional UPDATE
+ * (`count = count + 1 WHERE count < limit`). Postgres row-locks the UPDATE,
+ * so N concurrent scans can never push `count` past the limit (the old
+ * read-compare-upsert could).
  */
 export async function incrementAndCheckQuota(
   orgId: string,
   metric: UsageMetric,
   limitOverride?: number,
 ): Promise<QuotaCheck> {
-  // Look up the org's plan to get the limit
-  const sub = await prisma.subscription.findUnique({
-    where: { orgId },
-    select: { plan: true, trialPlan: true, trialEndsAt: true },
+  const planLimit = limitOverride ?? (await planLimitFor(orgId, metric));
+  const yearMonth = currentYearMonth();
+  const key = { orgId_yearMonth_metric: { orgId, yearMonth, metric } };
+
+  // Unlimited — plain increment.
+  if (planLimit === -1) {
+    const row = await prisma.usageCounter.upsert({
+      where: key,
+      create: { orgId, yearMonth, metric, count: 1 },
+      update: { count: { increment: 1 } },
+    });
+    return { ok: true, current: row.count, limit: -1, remaining: Infinity, metric };
+  }
+
+  // Ensure the month row exists (concurrent first-scans may race on create —
+  // the unique violation is harmless, the row is there either way).
+  try {
+    await prisma.usageCounter.upsert({
+      where: key,
+      create: { orgId, yearMonth, metric, count: 0 },
+      update: {},
+    });
+  } catch (err) {
+    if (!(err && typeof err === "object" && (err as { code?: string }).code === "P2002")) throw err;
+  }
+
+  const bumped = await prisma.usageCounter.updateMany({
+    where: { orgId, yearMonth, metric, count: { lt: planLimit } },
+    data: { count: { increment: 1 } },
   });
-
-  const plan = effectivePlan(sub as SubscriptionState | null);
-  const planLimit = limitOverride ?? PLAN_LIMITS[plan][metricToLimit(metric)];
-
   const current = await getUsage(orgId, metric);
 
-  // Unlimited
-  if (planLimit === -1) {
-    await bumpCounter(orgId, metric);
-    return { ok: true, current: current + 1, limit: -1, remaining: Infinity, metric };
+  if (bumped.count === 0) {
+    return { ok: false, current, limit: planLimit, remaining: 0, metric };
   }
-
-  if (current >= planLimit) {
-    return {
-      ok: false,
-      current,
-      limit: planLimit,
-      remaining: 0,
-      metric,
-    };
-  }
-
-  await bumpCounter(orgId, metric);
   return {
     ok: true,
-    current: current + 1,
+    current,
     limit: planLimit,
-    remaining: Math.max(0, planLimit - current - 1),
+    remaining: Math.max(0, planLimit - current),
     metric,
   };
 }
@@ -101,12 +121,7 @@ export async function checkQuotaOnly(
   orgId: string,
   metric: UsageMetric,
 ): Promise<QuotaCheck> {
-  const sub = await prisma.subscription.findUnique({
-    where: { orgId },
-    select: { plan: true, trialPlan: true, trialEndsAt: true },
-  });
-  const plan = effectivePlan(sub as SubscriptionState | null);
-  const limit = PLAN_LIMITS[plan][metricToLimit(metric)];
+  const limit = await planLimitFor(orgId, metric);
   const current = await getUsage(orgId, metric);
   if (limit === -1) {
     return { ok: true, current, limit: -1, remaining: Infinity, metric };
@@ -118,24 +133,6 @@ export async function checkQuotaOnly(
     remaining: Math.max(0, limit - current),
     metric,
   };
-}
-
-async function bumpCounter(orgId: string, metric: UsageMetric): Promise<void> {
-  const yearMonth = currentYearMonth();
-  await prisma.usageCounter.upsert({
-    where: {
-      orgId_yearMonth_metric: { orgId, yearMonth, metric },
-    },
-    create: {
-      orgId,
-      yearMonth,
-      metric,
-      count: 1,
-    },
-    update: {
-      count: { increment: 1 },
-    },
-  });
 }
 
 function metricToLimit(metric: UsageMetric): keyof PlanLimits {

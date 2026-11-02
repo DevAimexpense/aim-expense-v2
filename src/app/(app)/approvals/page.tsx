@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { trpc } from "@/lib/trpc/client";
 import { PaymentModal } from "../payments/payment-modal";
 import SearchableSelect, { type SearchableSelectOption } from "@/components/searchable-select";
-import { formatDate } from "@/lib/utils/date";
+import { formatDate, todayBangkok } from "@/lib/utils/date";
 import DateInput from "@/components/shared/date-input";
 
 export default function ApprovalsPage() {
@@ -517,5 +517,5 @@ function formatNumber(n: number): string {
 }
 
 function todayISO(): string {
-  return new Date().toISOString().slice(0, 10);
+  return todayBangkok();
 }

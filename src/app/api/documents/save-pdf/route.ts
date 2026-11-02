@@ -16,6 +16,8 @@ import { getOrgContext } from "@/lib/auth/middleware";
 import { getSheetsService, getDriveService, ensureTabsCached } from "@/server/lib/sheets-context";
 import { SHEET_TABS } from "@/server/services/google-sheets.service";
 import { prisma } from "@/lib/prisma";
+import { safeAuditLog } from "@/server/lib/audit";
+import { todayBangkok } from "@/lib/utils/date";
 
 const DOC_TYPE_LABEL: Record<string, string> = {
   "wht-cert": "หนังสือรับรองหัก ณ ที่จ่าย",
@@ -35,7 +37,7 @@ export async function POST(req: NextRequest) {
     const file = formData.get("file");
     const paymentId = formData.get("paymentId") as string | null;
     const docType = formData.get("docType") as string | null;
-    const docDate = (formData.get("docDate") as string) || new Date().toISOString().slice(0, 10);
+    const docDate = (formData.get("docDate") as string) || todayBangkok();
 
     if (!(file instanceof File)) {
       return NextResponse.json({ error: "ไม่พบไฟล์ PDF" }, { status: 400 });
@@ -102,7 +104,7 @@ export async function POST(req: NextRequest) {
       UpdatedAt: new Date().toISOString(),
     });
 
-    await prisma.auditLog.create({
+    await safeAuditLog({
       data: {
         orgId: org.orgId,
         userId: session.userId,

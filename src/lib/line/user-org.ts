@@ -81,15 +81,22 @@ export async function getUserActiveOrgs(
   return members.map((m) => ({ orgId: m.org.id, orgName: m.org.name }));
 }
 
+/** Why a group could not be resolved to a usable context. */
+export interface GroupResolveError {
+  error: "unbound" | "binder_inactive";
+}
+
 /**
  * Resolve a LINE group → its bound Organization + the admin who bound it.
  * Group submissions are attributed to that admin (`boundBy`) since group
  * members may not have their own Aim Expense account.
- * Returns null if the group isn't bound to any org.
+ * Returns `{ error: "unbound" }` if the group isn't bound to any org, and
+ * `{ error: "binder_inactive" }` when the admin who bound it is no longer an
+ * active member — the binding must not keep writing in their name (LINE-07).
  */
 export async function resolveGroupContext(
   groupId: string
-): Promise<LineUserContext | null> {
+): Promise<LineUserContext | GroupResolveError> {
   const group = await prisma.lineGroup.findUnique({
     where: { groupId },
     include: {
@@ -105,7 +112,13 @@ export async function resolveGroupContext(
       },
     },
   });
-  if (!group) return null;
+  if (!group) return { error: "unbound" };
+
+  const binderMembership = await prisma.orgMember.findFirst({
+    where: { userId: group.boundBy.id, orgId: group.org.id, status: "active" },
+    select: { id: true },
+  });
+  if (!binderMembership) return { error: "binder_inactive" };
 
   return {
     user: group.boundBy,

@@ -14,6 +14,7 @@ import {
   type SubscriptionState,
 } from "@/lib/plans";
 import { getSheetsService } from "../lib/sheets-context";
+import { safeAuditLog } from "@/server/lib/audit";
 
 /** Verify the user is an admin of the given org (only admins may bind groups). */
 async function assertOrgAdmin(userId: string, orgId: string): Promise<void> {
@@ -125,7 +126,7 @@ export const lineGroupRouter = router({
           code: "FORBIDDEN",
           message:
             quota.limit === 0
-              ? "แผนของคุณยังไม่รองรับการเชื่อม LINE กลุ่ม — อัปเกรดเป็น Pro ขึ้นไป"
+              ? "แผนของคุณยังไม่รองรับการเชื่อม LINE กลุ่ม — อัปเกรดเป็น Basic ขึ้นไป"
               : `แผนนี้เชื่อมได้สูงสุด ${quota.limit} กลุ่ม (ใช้ไปแล้ว ${current}) — อัปเกรดเพื่อเพิ่ม`,
         });
       }
@@ -141,7 +142,7 @@ export const lineGroupRouter = router({
         },
       });
 
-      await prisma.auditLog.create({
+      await safeAuditLog({
         data: {
           orgId: input.orgId,
           userId,
@@ -169,7 +170,7 @@ export const lineGroupRouter = router({
 
       await prisma.lineGroup.delete({ where: { id: group.id } });
 
-      await prisma.auditLog.create({
+      await safeAuditLog({
         data: {
           orgId: group.orgId,
           userId: ctx.session.userId,

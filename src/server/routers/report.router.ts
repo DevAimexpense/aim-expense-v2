@@ -27,6 +27,8 @@
 import { z } from "zod";
 import { router, orgProcedure } from "../trpc";
 import { scopedEventIds } from "@/lib/permissions";
+import { isSettled } from "@/lib/payment-status";
+import { getPndForm } from "@/lib/wht-doc-utils";
 import { getSheetsService } from "../lib/sheets-context";
 import { SHEET_TABS } from "../services/google-sheets.service";
 
@@ -727,6 +729,9 @@ export const reportRouter = router({
       const eventMap = new Map(events.map((e) => [e.EventID, e.EventName]));
       const payeeMap = new Map(payees.map((p) => [p.PayeeID, p.PayeeName]));
 
+      // Project-scoped roles only see their assigned events (CO-07)
+      const scope = scopedEventIds(ctx.org);
+
       /** Use PaymentDate (preferred) → PaidAt slice → empty */
       function paidDateOf(p: Record<string, string>): string {
         if (p.PaymentDate) return p.PaymentDate;
@@ -785,6 +790,7 @@ export const reportRouter = router({
       const cleared: ClearedRow[] = [];
 
       for (const p of payments) {
+        if (scope !== null && !scope.includes((p.EventID || "").trim())) continue;
         // Only Team Expenses qualify for clearance
         if ((p.ExpenseType || "account") !== "team") continue;
         // Apply project filter
@@ -821,6 +827,7 @@ export const reportRouter = router({
         }
 
         // ----- Pending bucket: must be paid + NOT cleared -----
+        // (จงใจเทียบ "paid" ตรง ๆ — "cleared" ถูกจัดเข้า bucket cleared ด้านบนแล้ว)
         if (p.Status !== "paid") continue;
         if (!paidDate) continue;
         if (paidDate < input.from || paidDate > input.to) continue;
@@ -933,6 +940,9 @@ export const reportRouter = router({
         sheets.getPayees(),
       ]);
 
+      // Project-scoped roles only see their assigned events (CO-07)
+      const scope = scopedEventIds(ctx.org);
+
       const eventMap = new Map(events.map((e) => [e.EventID, e.EventName]));
       const payeeMap = new Map(
         payees.map((p) => [
@@ -960,11 +970,11 @@ export const reportRouter = router({
        *   - Juristic (นิติบุคคล) → 13-digit TaxID starting with "0" → ภงด.53
        *   - Personal (บุคคลธรรมดา) → anything else (incl. empty TaxID) → ภงด.3
        */
-      function vendorTypeOf(taxId: string): "pnd3" | "pnd53" {
-        if (taxId && taxId.length === 13 && taxId.startsWith("0")) {
-          return "pnd53";
-        }
-        return "pnd3";
+      // ใช้กฎเดียวกับหนังสือรับรอง 50 ทวิ (getPndForm: TaxID 13 หลักขึ้นต้น 0 = นิติบุคคล,
+      // ไม่มีเลข → ดู BranchType HQ/Branch) — ไม่เช่นนั้นผู้รับเงินคนเดียวเป็น ภ.ง.ด.3 ในรายงาน
+      // แต่ ภ.ง.ด.53 บนใบ (DOC-07)
+      function vendorTypeOf(taxId: string, branchType?: string): "pnd3" | "pnd53" {
+        return getPndForm(taxId, branchType) === "53" ? "pnd53" : "pnd3";
       }
 
       /**
@@ -992,6 +1002,7 @@ export const reportRouter = router({
         payeeId: string;
         payeeName: string;
         taxId: string;
+        branchType: string; // HQ / Branch / "" — ใช้ตัดสิน ภ.ง.ด.3/53 เมื่อไม่มี TaxID (DOC-07)
         branchLabel: string; // "00000" / "00001" / ""
         address: string;
         // Project context
@@ -1011,8 +1022,9 @@ export const reportRouter = router({
       const rowsAll: WHTRow[] = [];
 
       for (const p of payments) {
-        // Status filter — paid only
-        if (p.Status !== "paid") continue;
+        if (scope !== null && !scope.includes((p.EventID || "").trim())) continue;
+        // Status filter — จ่ายแล้วจริง (paid | cleared) — DOC-02
+        if (!isSettled(p.Status)) continue;
 
         const wth = num(p.WTHAmount);
         if (wth <= 0) continue;
@@ -1040,6 +1052,7 @@ export const reportRouter = router({
           payeeId: p.PayeeID,
           payeeName: info?.name || p.PayeeID || "—",
           taxId,
+          branchType: info?.branchType || "",
           branchLabel: branchLabelOf(
             info?.branchType || "",
             info?.branchNumber || "",
@@ -1061,7 +1074,7 @@ export const reportRouter = router({
       const pnd3Rows: WHTRow[] = [];
       const pnd53Rows: WHTRow[] = [];
       for (const r of rowsAll) {
-        if (vendorTypeOf(r.taxId) === "pnd53") {
+        if (vendorTypeOf(r.taxId, r.branchType) === "pnd53") {
           pnd53Rows.push(r);
         } else {
           pnd3Rows.push(r);
@@ -1164,6 +1177,9 @@ export const reportRouter = router({
         sheets.getPayees(),
       ]);
 
+      // Project-scoped roles only see their assigned events (CO-07)
+      const scope = scopedEventIds(ctx.org);
+
       const eventMap = new Map(events.map((e) => [e.EventID, e.EventName]));
       const payeeMap = new Map(
         payees.map((p) => [
@@ -1198,8 +1214,11 @@ export const reportRouter = router({
           if (p.PaidAt && p.PaidAt.length >= 10) return p.PaidAt.slice(0, 10);
           return "";
         }
-        // default: receiptDate
+        // default: receiptDate — ไม่มีวันที่ใบเสร็จ → fallback วันที่จ่าย (ให้ตรงกับ vat30
+        // ไม่เช่นนั้นยอดภาษีซื้อเดือนเดียวกันของ 2 รายงานต่างกัน) — DOC-07
         if (p.ReceiptDate) return p.ReceiptDate;
+        if (p.PaymentDate) return p.PaymentDate;
+        if (p.PaidAt && p.PaidAt.length >= 10) return p.PaidAt.slice(0, 10);
         return "";
       }
 
@@ -1232,8 +1251,9 @@ export const reportRouter = router({
       const rows: VatRow[] = [];
 
       for (const p of payments) {
-        // Status filter — paid only
-        if (p.Status !== "paid") continue;
+        if (scope !== null && !scope.includes((p.EventID || "").trim())) continue;
+        // Status filter — จ่ายแล้วจริง (paid | cleared) — DOC-02
+        if (!isSettled(p.Status)) continue;
 
         // Document type filter — only tax invoices qualify for input VAT credit
         if (p.DocumentType !== "tax_invoice") continue;
@@ -1331,6 +1351,8 @@ export const reportRouter = router({
       ]);
       const headers = batch[SHEET_TABS.TAX_INVOICES] || [];
       const allLines = batch[SHEET_TABS.TAX_INVOICE_LINES] || [];
+      // Project-scoped roles only see their assigned events (CO-07)
+      const scope = scopedEventIds(ctx.org);
 
       type SalesRow = {
         taxInvoiceId: string;
@@ -1351,6 +1373,7 @@ export const reportRouter = router({
       const rows: SalesRow[] = [];
 
       for (const h of headers) {
+        if (scope !== null && !scope.includes((h.EventID || "").trim())) continue;
         if (h.Status !== "issued") continue;
         if (!h.DocDate) continue;
         if (h.DocDate < input.from || h.DocDate > input.to) continue;
@@ -1453,6 +1476,9 @@ export const reportRouter = router({
         ]),
       );
 
+      // Project-scoped roles only see their assigned events (CO-07)
+      const scope = scopedEventIds(ctx.org);
+
       // ===== INPUT VAT (purchases) =====
       // Mirrors `report.vat` logic — status=paid + DocumentType=tax_invoice + VAT>0
       const inputDateOf = (p: Record<string, string>): string => {
@@ -1475,7 +1501,8 @@ export const reportRouter = router({
       };
       const inputRows: InputRow[] = [];
       for (const p of payments) {
-        if (p.Status !== "paid") continue;
+        if (scope !== null && !scope.includes((p.EventID || "").trim())) continue;
+        if (!isSettled(p.Status)) continue; // paid | cleared — DOC-02
         if (p.DocumentType !== "tax_invoice") continue;
         const vat = num(p.VATAmount);
         if (vat <= 0) continue;
@@ -1512,6 +1539,7 @@ export const reportRouter = router({
       };
       const outputRows: OutputRow[] = [];
       for (const h of tiHeaders) {
+        if (scope !== null && !scope.includes((h.EventID || "").trim())) continue;
         if (h.Status !== "issued") continue;
         if (!h.DocDate) continue;
         if (h.DocDate < input.from || h.DocDate > input.to) continue;

@@ -25,9 +25,11 @@ export default async function AppLayout({
   }
 
   // 3. Get org context (respect the active org so multi-business switching works)
+  //    CO-06: ไม่มี membership ที่ active → ไป /select-org (หน้าที่ render ได้จริง)
+  //    เดิม → "/" → /dashboard → กลับมาที่นี่ = ERR_TOO_MANY_REDIRECTS
   const org = await getOrgContext(session.userId, session.activeOrgId);
   if (!org) {
-    redirect("/");
+    redirect("/select-org");
   }
 
   return (

@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { trpc } from "@/lib/trpc/client";
 import DateInput from "@/components/shared/date-input";
-import { formatDate } from "@/lib/utils/date";
+import { formatDate, todayBangkok } from "@/lib/utils/date";
 
 type Status = "draft" | "sent" | "accepted" | "rejected" | "void" | "converted";
 
@@ -48,7 +48,7 @@ export function StatusBadge({ status }: { status: Status }) {
 function isExpired(validUntil: string, status: Status): boolean {
   if (status !== "sent") return false;
   if (!validUntil) return false;
-  return validUntil < new Date().toISOString().slice(0, 10);
+  return validUntil < todayBangkok();
 }
 
 export function QuotationsClient() {

@@ -7,9 +7,12 @@
 //   { "path": "/api/cron/trial-reminders", "schedule": "30 1 * * *" }
 // (runs at 01:30 UTC = 08:30 Bangkok — just after expire-trials)
 //
-// De-dup: the cron runs once daily and only fires at exact day thresholds
-// {7,3,1}, so each subscription hits each threshold at most once. No extra
-// DB field needed.
+// De-dup (BIL-11): each stage {7,3,1} fires once per subscription, as a
+// WINDOW (`daysLeft <= stage`) rather than an exact-day hit, so a cron run
+// that is late or skipped still sends the reminder the next day instead of
+// never. "Already sent" is recorded as an AuditLog row
+// (entityType=subscription, summary=`trial-reminder:<stage>`) — no schema
+// change needed.
 //
 // Auth: requires `Authorization: Bearer ${CRON_SECRET}` (matches Vercel Cron).
 // ===========================================
@@ -22,11 +25,21 @@ export const dynamic = "force-dynamic";
 
 const REMINDER_DAYS = [7, 3, 1];
 const DAY_MS = 86_400_000;
+const REMINDER_MARK = "trial-reminder:";
 
 export async function GET(req: NextRequest) {
+  // Fail CLOSED when CRON_SECRET is missing — otherwise anyone could spam
+  // every trial owner on LINE.
   const authHeader = req.headers.get("authorization");
   const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
+  if (!cronSecret) {
+    console.error("[cron/trial-reminders] CRON_SECRET is not set — refusing to run");
+    return NextResponse.json(
+      { error: "CRON_SECRET not configured — cron disabled" },
+      { status: 500 },
+    );
+  }
+  if (authHeader !== `Bearer ${cronSecret}`) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -39,6 +52,9 @@ export async function GET(req: NextRequest) {
       trialEndsAt: { gt: now },
     },
     select: {
+      id: true,
+      orgId: true,
+      trialStartedAt: true,
       trialEndsAt: true,
       org: {
         select: {
@@ -49,6 +65,29 @@ export async function GET(req: NextRequest) {
     },
   });
 
+  // Stages already sent for THIS trial (one query for all orgs). Marks older
+  // than the trial start belong to a previous trial and are ignored.
+  const marks = subs.length
+    ? await prisma.auditLog.findMany({
+        where: {
+          orgId: { in: subs.map((s) => s.orgId) },
+          entityType: "subscription",
+          summary: { startsWith: REMINDER_MARK },
+        },
+        select: { orgId: true, summary: true, createdAt: true },
+      })
+    : [];
+  const sentStages = new Map<string, Set<number>>();
+  for (const m of marks) {
+    const sub = subs.find((s) => s.orgId === m.orgId);
+    if (!sub) continue;
+    if (sub.trialStartedAt && m.createdAt < sub.trialStartedAt) continue;
+    const stage = Number(m.summary?.slice(REMINDER_MARK.length));
+    if (!Number.isFinite(stage)) continue;
+    if (!sentStages.has(m.orgId)) sentStages.set(m.orgId, new Set());
+    sentStages.get(m.orgId)!.add(stage);
+  }
+
   let sent = 0;
   let skipped = 0;
 
@@ -57,7 +96,11 @@ export async function GET(req: NextRequest) {
     const daysLeft = Math.ceil(
       (sub.trialEndsAt.getTime() - now.getTime()) / DAY_MS,
     );
-    if (!REMINDER_DAYS.includes(daysLeft)) {
+    // Stages whose window we are inside and have not sent yet. If several are
+    // due at once (cron was down), send ONE message and mark them all.
+    const done = sentStages.get(sub.orgId) ?? new Set<number>();
+    const due = REMINDER_DAYS.filter((d) => daysLeft <= d && !done.has(d));
+    if (due.length === 0) {
       skipped++;
       continue;
     }
@@ -71,8 +114,21 @@ export async function GET(req: NextRequest) {
       daysLeft,
       trialEndsAt: sub.trialEndsAt,
     });
-    if (ok) sent++;
-    else skipped++;
+    if (!ok) {
+      skipped++;
+      continue; // not marked → retried on the next run
+    }
+    sent++;
+    await prisma.auditLog.createMany({
+      data: due.map((stage) => ({
+        orgId: sub.orgId,
+        userId: "system",
+        action: "update",
+        entityType: "subscription",
+        entityRef: sub.id,
+        summary: `${REMINDER_MARK}${stage}`,
+      })),
+    });
   }
 
   return NextResponse.json({

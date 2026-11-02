@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { yearMonthBangkok } from "@/lib/utils/date";
 import { trpc } from "@/lib/trpc/client";
 import DateInput from "@/components/shared/date-input";
 
@@ -10,14 +11,15 @@ const formatTHB = (n: number) =>
     maximumFractionDigits: 2,
   });
 
+// เดือนปัจจุบันตามเวลาไทย (เดิม toISOString = UTC → วันสิ้นเดือนเพี้ยนเป็นวันก่อนหน้า) DOC-05
 function firstOfThisMonth() {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
+  return `${yearMonthBangkok()}-01`;
 }
 function lastOfThisMonth() {
-  const d = new Date();
-  const last = new Date(d.getFullYear(), d.getMonth() + 1, 0);
-  return last.toISOString().slice(0, 10);
+  const ym = yearMonthBangkok();
+  const [y, m] = ym.split("-").map(Number);
+  const days = new Date(y, m, 0).getDate(); // วันที่ 0 ของเดือนถัดไป = วันสุดท้ายของเดือนนี้
+  return `${ym}-${String(days).padStart(2, "0")}`;
 }
 
 type Tab = "input" | "output" | "summary";

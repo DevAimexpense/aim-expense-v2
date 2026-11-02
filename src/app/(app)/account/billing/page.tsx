@@ -50,9 +50,20 @@ const PLAN_ICON: Record<string, string> = {
   enterprise: "🏢",
 };
 
-export default async function AccountBillingPage() {
+export default async function AccountBillingPage({
+  searchParams,
+}: {
+  searchParams?: { stripe?: string };
+}) {
   const session = await getSession();
   if (!session?.activeOrgId) redirect("/");
+
+  // Back from Stripe (checkout success / in-place plan change): the DB is
+  // updated by the webhook a few seconds later, so what renders below may
+  // still be the old plan — tell the user instead of looking broken.
+  const stripeReturn = searchParams?.stripe;
+  const syncingFromStripe =
+    stripeReturn === "success" || stripeReturn === "updated";
 
   const sub = await prisma.subscription.findUnique({
     where: { orgId: session.activeOrgId },
@@ -98,6 +109,23 @@ export default async function AccountBillingPage() {
           </p>
         </div>
       </div>
+
+      {syncingFromStripe && (
+        <div
+          role="status"
+          style={{
+            marginBottom: "1rem",
+            padding: "0.75rem 1rem",
+            background: "var(--color-accent-50)",
+            border: "1px solid var(--color-accent-200)",
+            borderRadius: "0.5rem",
+            fontSize: "0.875rem",
+            color: "var(--color-accent-800)",
+          }}
+        >
+          ⏳ กำลังอัปเดตสถานะจาก Stripe… แพ็กเกจใหม่จะแสดงในอีกสักครู่ — รีเฟรชหน้านี้ได้เลย
+        </div>
+      )}
 
       {/* Hero plan card — soft brand colors */}
       <div className="app-card" style={{ marginBottom: "1rem", overflow: "hidden" }}>

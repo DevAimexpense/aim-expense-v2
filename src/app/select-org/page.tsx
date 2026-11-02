@@ -19,13 +19,15 @@ export default function SelectOrgPage() {
   const setActiveMut = trpc.org.setActive.useMutation();
 
   const orgs = orgsQuery.data || [];
+  // CO-06: ไม่มี org ที่ active (ถูกถอด/ระงับ/org ถูกลบ) → แสดงหน้านี้ ไม่ redirect
+  // (เดิม → /onboarding/company → onboarding layout เห็น done → /dashboard → (app) layout → กลับมา = วนไม่รู้จบ)
+  const hasNoOrg = !orgsQuery.isLoading && !orgsQuery.isError && orgs.length === 0;
 
-  // Auto-redirect if user has no orgs → onboarding
+  // ไม่มี session → /login (หน้านี้อยู่นอก (app) layout จึงต้องเช็กเอง)
+  const unauthorized = orgsQuery.isError && orgsQuery.error.data?.code === "UNAUTHORIZED";
   useEffect(() => {
-    if (!orgsQuery.isLoading && orgs.length === 0) {
-      router.replace("/onboarding/company");
-    }
-  }, [orgsQuery.isLoading, orgs.length, router]);
+    if (unauthorized) router.replace("/login");
+  }, [unauthorized, router]);
 
   const handleSelect = async (orgId: string) => {
     try {
@@ -63,9 +65,13 @@ export default function SelectOrgPage() {
         }}
       >
         <div style={{ textAlign: "center", marginBottom: "1.5rem" }}>
-          <h1 style={{ margin: "0 0 0.25rem 0", fontSize: "1.5rem" }}>สลับพื้นที่ทำงาน</h1>
+          <h1 style={{ margin: "0 0 0.25rem 0", fontSize: "1.5rem" }}>
+            {hasNoOrg ? "ยังไม่มีบริษัทที่ใช้งานได้" : "สลับพื้นที่ทำงาน"}
+          </h1>
           <p style={{ margin: 0, color: "#64748b", fontSize: "0.875rem" }}>
-            เลือกพื้นที่ทำงานที่ต้องการใช้งานก่อนเข้าสู่ระบบ
+            {hasNoOrg
+              ? "บัญชีของคุณยังไม่ได้อยู่ในบริษัทใด หรือถูกนำออก/ระงับจากบริษัทเดิม — สร้างบริษัทใหม่ หรือขอให้ผู้ดูแลส่งคำเชิญอีกครั้ง"
+              : "เลือกพื้นที่ทำงานที่ต้องการใช้งานก่อนเข้าสู่ระบบ"}
           </p>
         </div>
 

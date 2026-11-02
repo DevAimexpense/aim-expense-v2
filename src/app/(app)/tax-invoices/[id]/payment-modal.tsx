@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { todayBangkok } from "@/lib/utils/date";
 import { trpc } from "@/lib/trpc/client";
 import DateInput from "@/components/shared/date-input";
 
@@ -12,7 +13,7 @@ const formatTHB = (n: number) =>
     maximumFractionDigits: 2,
   });
 
-const todayISO = () => new Date().toISOString().slice(0, 10);
+const todayISO = () => todayBangkok();
 
 const PAYMENT_METHODS: { value: "cash" | "transfer" | "cheque"; label: string }[] = [
   { value: "cash", label: "เงินสด" },

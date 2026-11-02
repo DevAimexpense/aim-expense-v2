@@ -6,7 +6,7 @@ import { trpc } from "@/lib/trpc/client";
 import { PaymentModal } from "../payments/payment-modal";
 import SearchableSelect, { type SearchableSelectOption } from "@/components/searchable-select";
 import { fireAutoGenDoc, resolveDocTypeForPayment } from "@/lib/utils/auto-gen-doc";
-import { formatDate } from "@/lib/utils/date";
+import { formatDate, todayBangkok } from "@/lib/utils/date";
 import DateInput from "@/components/shared/date-input";
 
 type PaymentRow = {
@@ -326,7 +326,7 @@ export default function PaymentPrepPage() {
     try {
       await markPaidMut.mutateAsync({
         paymentIds: ids,
-        paymentDate: firstDate || new Date().toISOString().slice(0, 10),
+        paymentDate: firstDate || todayBangkok(),
       });
 
       // Auto-generate + save PDF เอกสารระบบ (background, fire-and-forget)
@@ -352,7 +352,7 @@ export default function PaymentPrepPage() {
   // ===== Export to Excel =====
   const handleExportExcel = () => {
     const wb = XLSX.utils.book_new();
-    const dateLabel = paymentDateFrom || paymentDateTo || new Date().toISOString().slice(0, 10);
+    const dateLabel = paymentDateFrom || paymentDateTo || todayBangkok();
 
     if (activeTab === "overview" || activeTab === "summary") {
       // Summary sheet

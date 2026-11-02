@@ -54,10 +54,10 @@ const FEATURES: Record<Lang, Feature[]> = {
       id: "reports",
       photo: "reports",
       title: "รายงานและงบรายโปรเจกต์",
-      lead: "เห็นค่าใช้จ่าย รายรับ และกำไรของแต่ละโปรเจกต์ได้ทันที โดยไม่ต้องรอปิดงวด",
+      lead: "เห็นค่าใช้จ่ายและงบคงเหลือของแต่ละโปรเจกต์ได้ทันที โดยไม่ต้องรอปิดงวด",
       paras: [
         "หน้ารายงานมีภาพรวมทั้งบริษัท แยกตามโปรเจกต์ แยกตามผู้รับเงิน สรุปค่าใช้จ่ายตามหมวดและช่วงเวลา รายการที่รอเคลียร์ รายงานภาษีซื้อ และรายงานภาษีหัก ณ ที่จ่าย กรองตามสถานะและประเภทการจ่ายได้",
-        "แต่ละโปรเจกต์ตั้งงบประมาณได้ ระบบแสดงงบคงเหลือทุกครั้งที่มีรายการใหม่ และเทียบรายรับจากเอกสารที่ออกกับค่าใช้จ่ายจริงเป็นกำไร/ขาดทุนต่อโปรเจกต์",
+        "แต่ละโปรเจกต์ตั้งงบประมาณได้ ระบบคำนวณงบคงเหลือและเปอร์เซ็นต์ที่ใช้ไปจากรายการที่บันทึก และเตือนเมื่อเกินงบ ส่วนบัญชีบุคคลธรรมดาจะเห็นรายรับที่เข้าโปรเจกต์เทียบกับที่เบิกใช้",
       ],
     },
     {
@@ -118,10 +118,10 @@ const FEATURES: Record<Lang, Feature[]> = {
       id: "reports",
       photo: "reports",
       title: "Reports and project budgets",
-      lead: "See expenses, revenue and profit per project immediately, without waiting for month-end.",
+      lead: "See expenses and the remaining budget per project immediately, without waiting for month-end.",
       paras: [
         "The reports page covers a company overview, breakdowns by project and by payee, expense summaries by category and period, items awaiting clearance, an input-VAT report and a withholding-tax report, all filterable by status and payment type.",
-        "Each project can carry a budget. The system shows the remaining balance whenever a new entry arrives and compares revenue from issued documents with actual spending as a per-project profit or loss.",
+        "Each project can carry a budget. The system computes the remaining balance and percentage used from recorded entries and flags overspend. Individual accounts see income received into the project against what was drawn.",
       ],
     },
     {

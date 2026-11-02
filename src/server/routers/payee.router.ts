@@ -8,6 +8,7 @@ import { router, orgProcedure, permissionProcedure } from "../trpc";
 import { getSheetsService } from "../lib/sheets-context";
 import { GoogleSheetsService, SHEET_TABS } from "../services/google-sheets.service";
 import { prisma } from "@/lib/prisma";
+import { safeAuditLog } from "@/server/lib/audit";
 
 const PayeeInputSchema = z.object({
   payeeName: z.string().min(1, "กรุณากรอกชื่อผู้รับเงิน").max(200),
@@ -86,7 +87,7 @@ export const payeeRouter = router({
         Address: input.address || "",
       });
 
-      await prisma.auditLog.create({
+      await safeAuditLog({
         data: {
           orgId: ctx.org.orgId,
           userId: ctx.session.userId,
@@ -125,7 +126,7 @@ export const payeeRouter = router({
       );
       if (!ok) throw new Error("ไม่พบผู้รับเงิน");
 
-      await prisma.auditLog.create({
+      await safeAuditLog({
         data: {
           orgId: ctx.org.orgId,
           userId: ctx.session.userId,
@@ -158,7 +159,7 @@ export const payeeRouter = router({
       );
       if (!ok) throw new Error("ไม่พบผู้รับเงิน");
 
-      await prisma.auditLog.create({
+      await safeAuditLog({
         data: {
           orgId: ctx.org.orgId,
           userId: ctx.session.userId,
