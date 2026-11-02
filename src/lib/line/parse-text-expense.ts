@@ -43,8 +43,12 @@ const NUMBER_RE = /\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?/g;
 /** Currency unit right after the number (optional whitespace). */
 const UNIT_AFTER_RE = /^\s*(?:บาท|บ\.|฿|thb)/i;
 /** Words that mark the number as a count / time, not money. */
+// LINE-28: ภาษาไทยไม่มีช่องว่างระหว่างคำ → คำนับต้องจบคำพอดี (ตามด้วยช่องว่าง/จบข้อความ/เครื่องหมาย)
+// ไม่งั้น "วัน" จะกิน "วันนี้", "ที่" กิน "ที่ร้าน", "ใบ" กิน "ใบเสร็จ" แล้วทิ้งยอดเงินจริง
 const NOT_MONEY_AFTER_RE =
-  /^\s*(?:โมง|น\.|นาฬิกา|ชม\.|ชั่วโมง|นาที|วัน|คืน|มื้อ|คน|ท่าน|ชิ้น|อัน|ขวด|แก้ว|ใบ|ชุด|กล่อง|ถุง|แผ่น|ที่|เที่ยว|ครั้ง|รอบ|กก\.|กิโล|ลิตร|%)/;
+  /^\s*(?:โมง|น\.|นาฬิกา|ชม\.|ชั่วโมง|นาที|วัน|คืน|มื้อ|คน|ท่าน|ชิ้น|อัน|ขวด|แก้ว|ใบ|ชุด|กล่อง|ถุง|แผ่น|ที่|เที่ยว|ครั้ง|รอบ|กก\.|กิโล|ลิตร|%)(?=\s|$|[.,!)\]])/;
+/** LINE-29: เลขที่นำหน้าด้วย "วันที่/เลขที่/ลำดับที่/No./#" คือลำดับหรือวันที่ ไม่ใช่เงิน */
+const NOT_MONEY_BEFORE_RE = /(?:วันที่|เลขที่|ลำดับที่|งวดที่|ครั้งที่|no\.?|#)\s*$/i;
 /** Only whitespace / closing punctuation may follow the last token. */
 const TRAILING_RE = /^[\s.,!)\]]*$/;
 const THAI_CHAR_RE = /[฀-๿]/;
@@ -126,6 +130,7 @@ export function extractAmount(
     const hasUnitAfter = UNIT_AFTER_RE.test(after);
     if (!hasUnitAfter) {
       if (NOT_MONEY_AFTER_RE.test(after)) continue;
+      if (NOT_MONEY_BEFORE_RE.test(before)) continue; // "วันที่ 5", "เลขที่ 12"
       if (next !== "" && LATIN_RE.test(next)) continue; // "15pro"
     }
 
