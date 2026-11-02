@@ -15,7 +15,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { PLAN_LABELS, normalisePlan } from "@/lib/plans";
 import { quotaCacheFor } from "@/lib/comp";
-import { safeAuditLog } from "@/server/lib/audit";
+import { safeAuditLog, systemActorFor } from "@/server/lib/audit";
 
 export const dynamic = "force-dynamic";
 
@@ -70,7 +70,7 @@ export async function GET(req: NextRequest) {
     await safeAuditLog({
       data: {
         orgId: sub.orgId,
-        userId: "system", // synthetic — cron runs without user context
+        userId: (await systemActorFor(sub.orgId)) || "", // BIL-24: ไม่มี user "system" → ใช้เจ้าของ org
         action: "update",
         entityType: "subscription",
         entityRef: sub.id,

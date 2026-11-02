@@ -59,6 +59,7 @@ export async function GET(req: NextRequest) {
       org: {
         select: {
           name: true,
+          ownerId: true,
           owner: { select: { lineUserId: true } },
         },
       },
@@ -119,10 +120,11 @@ export async function GET(req: NextRequest) {
       continue; // not marked → retried on the next run
     }
     sent++;
+    // BIL-24: ไม่มี users.id="system" (FK) → ลงชื่อเจ้าของ org · mark ล้ม = ส่งซ้ำวันถัดไป จึงต้องไม่ล้ม
     await prisma.auditLog.createMany({
       data: due.map((stage) => ({
         orgId: sub.orgId,
-        userId: "system",
+        userId: sub.org!.ownerId,
         action: "update",
         entityType: "subscription",
         entityRef: sub.id,

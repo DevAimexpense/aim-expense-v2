@@ -10,6 +10,15 @@ import { prisma } from "@/lib/prisma";
 
 type Args = Prisma.AuditLogCreateArgs | Prisma.AuditLogUncheckedCreateInput;
 
+/**
+ * BIL-24: ไม่มี users.id = "system" ใน prod (AuditLog.userId มี FK) → งานของระบบ (Stripe webhook, cron)
+ * ให้ลงชื่อเจ้าของ org แทน · ถ้าหา org ไม่เจอคืน null แล้วผู้เรียกควรข้ามการ log
+ */
+export async function systemActorFor(orgId: string): Promise<string | null> {
+  const org = await prisma.organization.findUnique({ where: { id: orgId }, select: { ownerId: true } });
+  return org?.ownerId ?? null;
+}
+
 export async function safeAuditLog(args: Args): Promise<void> {
   // AuditLog ไม่มีคอลัมน์ชื่อ data → ถ้ามี key "data" คือรูป { data: {...} } ของ prisma.create
   const createArgs: Prisma.AuditLogCreateArgs =

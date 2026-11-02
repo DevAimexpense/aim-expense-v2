@@ -29,7 +29,7 @@ import {
   type PlanTier,
 } from "@/lib/plans";
 import { quotaCacheFor } from "@/lib/comp";
-import { safeAuditLog } from "@/server/lib/audit";
+import { safeAuditLog, systemActorFor } from "@/server/lib/audit";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs"; // Stripe webhook signature verify needs node, not edge
@@ -162,7 +162,7 @@ async function handleCheckoutCompleted(s: Stripe.Checkout.Session) {
   await safeAuditLog({
     data: {
       orgId,
-      userId: s.metadata?.ownerUserId || "system",
+      userId: s.metadata?.ownerUserId || (await systemActorFor(orgId)) || "",
       action: "update",
       entityType: "subscription",
       entityRef: s.id,
@@ -251,7 +251,7 @@ async function updateSubscriptionRow(orgId: string, s: Stripe.Subscription) {
   await safeAuditLog({
     data: {
       orgId,
-      userId: "system",
+      userId: (await systemActorFor(orgId)) || "",
       action: "update",
       entityType: "subscription",
       entityRef: s.id,
@@ -300,7 +300,7 @@ async function handleSubscriptionDeleted(s: Stripe.Subscription) {
   await safeAuditLog({
     data: {
       orgId: sub.orgId,
-      userId: "system",
+      userId: (await systemActorFor(sub.orgId)) || "",
       action: "update",
       entityType: "subscription",
       entityRef: s.id,
@@ -329,7 +329,7 @@ async function handleInvoicePaid(invoice: Stripe.Invoice) {
   await safeAuditLog({
     data: {
       orgId,
-      userId: "system",
+      userId: (await systemActorFor(orgId)) || "",
       action: "update",
       entityType: "invoice",
       entityRef: invoice.id || "",
@@ -480,7 +480,7 @@ async function handlePaymentFailed(invoice: Stripe.Invoice) {
   await safeAuditLog({
     data: {
       orgId: sub.orgId,
-      userId: "system",
+      userId: (await systemActorFor(sub.orgId)) || "",
       action: "update",
       entityType: "invoice",
       entityRef: invoice.id || "",
