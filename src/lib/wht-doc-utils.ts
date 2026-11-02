@@ -85,10 +85,11 @@ export function getPndForm(payeeTaxId: string, payeeBranchType?: string): "3" | 
     // บุคคลธรรมดา: เลขบัตร ปชช เริ่มด้วย 1-8
     return "3";
   }
-  // Fallback: ใช้ branchType
-  //   - ถ้ามี branchType (HQ/Branch) → นิติบุคคล
-  if (payeeBranchType === "HQ" || payeeBranchType === "Branch") return "53";
-  return "3"; // default = บุคคล
+  // Fallback เมื่อไม่มีเลข 13 หลัก: ค่าเริ่มต้นของผู้รับเงินทุกคนคือ "HQ" (payee.router / หน้า payees)
+  // จึงใช้ HQ เป็นหลักฐานนิติบุคคลไม่ได้ (DOC-20 — ฟรีแลนซ์ที่ไม่กรอกเลขบัตรเคยถูกย้ายไป ภ.ง.ด.53)
+  // นับเป็นนิติบุคคลเฉพาะที่ผู้ใช้ระบุ "สาขา" ไว้ชัดเจน นอกนั้น = บุคคลธรรมดา (ภ.ง.ด.3) เหมือนรายงานเดิม
+  if (payeeBranchType === "Branch") return "53";
+  return "3";
 }
 
 /**

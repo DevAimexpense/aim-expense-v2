@@ -4,7 +4,7 @@
 // API /api/documents/wht-cert/[paymentId] (สร้าง PDF)
 // ===========================================
 
-import { getSheetsService } from "@/server/lib/sheets-context";
+import { getSheetsService, ensureTabsCached } from "@/server/lib/sheets-context";
 import { SHEET_TABS } from "@/server/services/google-sheets.service";
 import { prisma } from "@/lib/prisma";
 import { findWthTypeByRate } from "@/lib/wth-types";
@@ -72,6 +72,8 @@ export async function loadWhtCertData(
   paymentId: string
 ): Promise<WhtCertData | null> {
   const sheets = await getSheetsService(orgId);
+  // CO-23: route นี้เข้าตรงได้โดยไม่ผ่าน router → ต้องให้ Sheet มีคอลัมน์ WhtCertNo ก่อนเขียนเลข
+  await ensureTabsCached(sheets, orgId);
   const payment = await getPaymentWithRetry(sheets, paymentId);
   if (!payment) return null;
 

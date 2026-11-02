@@ -30,15 +30,22 @@ export async function withLock<T>(
   const deadline = Date.now() + waitMs;
   let acquired = false;
   try {
-    while (Date.now() < deadline) {
-      const ok = await redis.set(lockKey, token, { nx: true, px: ttlMs });
-      if (ok) {
-        acquired = true;
-        break;
+    // CO-20: Redis ที่ "พัง" (timeout/5xx/429) ต้องไม่ทำให้งานผู้ใช้ล้ม — ทำงานต่อโดยไม่มี lock
+    // เหมือนกรณีไม่ได้ตั้งค่า Redis (cache.ts ก็กลืน error ของ Redis แบบเดียวกัน)
+    try {
+      while (Date.now() < deadline) {
+        const ok = await redis.set(lockKey, token, { nx: true, px: ttlMs });
+        if (ok) {
+          acquired = true;
+          break;
+        }
+        await new Promise((r) => setTimeout(r, 120 + Math.random() * 120));
       }
-      await new Promise((r) => setTimeout(r, 120 + Math.random() * 120));
+      if (!acquired) console.warn(`[lock] timeout waiting for ${lockKey} — proceeding without lock`);
+    } catch (e) {
+      acquired = false;
+      console.warn(`[lock] redis error on ${lockKey} — proceeding without lock`, e);
     }
-    if (!acquired) console.warn(`[lock] timeout waiting for ${lockKey} — proceeding without lock`);
     return await fn();
   } finally {
     if (acquired) {

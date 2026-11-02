@@ -43,7 +43,8 @@ const NUMBER_RE = /\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?/g;
 /** Currency unit right after the number (optional whitespace). */
 const UNIT_AFTER_RE = /^\s*(?:บาท|บ\.|฿|thb)/i;
 /** Words that mark the number as a count / time, not money. */
-const NOT_MONEY_AFTER_RE = /^\s*(?:โมง|น\.|นาฬิกา|ชม\.|ชั่วโมง|นาที|คน|ชิ้น|ครั้ง|%)/;
+const NOT_MONEY_AFTER_RE =
+  /^\s*(?:โมง|น\.|นาฬิกา|ชม\.|ชั่วโมง|นาที|วัน|คืน|มื้อ|คน|ท่าน|ชิ้น|อัน|ขวด|แก้ว|ใบ|ชุด|กล่อง|ถุง|แผ่น|ที่|เที่ยว|ครั้ง|รอบ|กก\.|กิโล|ลิตร|%)/;
 /** Only whitespace / closing punctuation may follow the last token. */
 const TRAILING_RE = /^[\s.,!)\]]*$/;
 const THAI_CHAR_RE = /[฀-๿]/;

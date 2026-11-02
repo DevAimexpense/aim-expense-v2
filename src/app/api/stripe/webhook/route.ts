@@ -195,8 +195,18 @@ async function updateSubscriptionRow(orgId: string, s: Stripe.Subscription) {
   // ฟรีตลอดชีพ (comped จากหลังบ้าน) → เก็บสถานะ Stripe ไว้ แต่ไม่ทับ plan/quota ที่ทีมงานให้
   const existing = await prisma.subscription.findUnique({
     where: { orgId },
-    select: { isBetaTester: true },
+    select: { isBetaTester: true, stripeSubscriptionId: true },
   });
+  // BIL-21: subscription เก่า (เช่น incomplete → incomplete_expired หลังลูกค้าสร้างใบใหม่สำเร็จ)
+  // ต้องไม่ทับ org ที่จ่ายอยู่ด้วยอันใหม่ให้เป็น Free
+  if (
+    !ENTITLED_STATUSES.has(s.status) &&
+    existing?.stripeSubscriptionId &&
+    existing.stripeSubscriptionId !== s.id
+  ) {
+    console.warn(`[stripe-webhook] ignore ${s.status} for stale subscription ${s.id} (org ${orgId} tracks ${existing.stripeSubscriptionId})`);
+    return;
+  }
   if (existing?.isBetaTester) {
     await prisma.subscription.update({
       where: { orgId },
@@ -332,7 +342,31 @@ async function handleInvoicePaid(invoice: Stripe.Invoice) {
   // - "subscription_create" = first invoice (skip — no commission yet, we wait until month 2)
   // - "subscription_cycle" = recurring renewal — month-2+ → confirm + create commission rows
   if (invoice.billing_reason === "subscription_cycle") {
-    await maybeConfirmReferral(orgId, invoice);
+    // BIL-20: เมื่อ checkout ส่ง trial_end ใบแรกที่เก็บเงินจริงก็เป็น "subscription_cycle" แล้ว
+    // → ต้องนับใบที่จ่ายจริง (amount_paid > 0) ของ subscription นี้ ให้ครบ 2 ใบก่อนยืนยันค่าคอม
+    if (await hasPaidAtLeast(invoice, 2)) {
+      await maybeConfirmReferral(orgId, invoice);
+    }
+  }
+}
+
+/** จำนวนใบแจ้งหนี้ที่ "จ่ายจริง" (amount_paid > 0, รวมใบนี้) ของ subscription เดียวกัน ≥ n หรือไม่ */
+async function hasPaidAtLeast(invoice: Stripe.Invoice, n: number): Promise<boolean> {
+  const subRef = (invoice as Stripe.Invoice & { subscription?: string | { id: string } | null }).subscription
+    ?? (invoice.parent as { subscription_details?: { subscription?: string | { id: string } } } | null)
+      ?.subscription_details?.subscription;
+  const subscriptionId = typeof subRef === "string" ? subRef : subRef?.id;
+  if (!subscriptionId) return (invoice.amount_paid || 0) > 0 && n <= 1;
+  try {
+    const list = await stripe.invoices.list({ subscription: subscriptionId, status: "paid", limit: 24 });
+    const paidReal = list.data.filter((inv) => (inv.amount_paid || 0) > 0).length;
+    // ใบปัจจุบันอาจยังไม่อยู่ในลิสต์ (eventual consistency) → นับรวมถ้าจ่ายจริงและยังไม่ถูกนับ
+    const includesCurrent = list.data.some((inv) => inv.id === invoice.id);
+    const total = paidReal + (!includesCurrent && (invoice.amount_paid || 0) > 0 ? 1 : 0);
+    return total >= n;
+  } catch (e) {
+    console.error("[stripe-webhook] invoices.list failed — referral confirmation deferred", e);
+    return false; // ปล่อยให้ใบถัดไปยืนยัน ดีกว่าจ่ายคอมก่อนเวลา
   }
 }
 

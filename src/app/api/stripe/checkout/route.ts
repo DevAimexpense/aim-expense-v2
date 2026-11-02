@@ -142,9 +142,20 @@ export async function POST(req: NextRequest) {
     let existing: Stripe.Subscription | null = null;
     try {
       existing = await stripe.subscriptions.retrieve(sub.stripeSubscriptionId);
-    } catch {
-      // Stale id (e.g. created under test keys, or deleted) → fresh checkout below
-      existing = null;
+    } catch (err) {
+      // BIL-22: เฉพาะ id ที่ไม่มีจริง (สร้างใต้ test key / ถูกลบ) เท่านั้นที่ไปเปิด Checkout ใหม่ได้
+      // error อื่น (timeout/5xx/429) ต้องหยุด — ไม่งั้น org ที่จ่ายอยู่จะได้ subscription ที่ 2
+      const code = (err as { code?: string; statusCode?: number })?.code;
+      const status = (err as { statusCode?: number })?.statusCode;
+      if (code === "resource_missing" || status === 404) {
+        existing = null;
+      } else {
+        console.error("[stripe-checkout] subscriptions.retrieve failed", err);
+        return NextResponse.json(
+          { error: "เชื่อมต่อ Stripe ไม่สำเร็จชั่วคราว กรุณาลองใหม่อีกครั้ง" },
+          { status: 503 },
+        );
+      }
     }
     if (existing && ENTITLED_STATUSES.has(existing.status)) {
       const item = existing.items.data[0];
@@ -162,6 +173,7 @@ export async function POST(req: NextRequest) {
         await stripe.subscriptions.update(existing.id, {
           items: [{ id: item.id, price: priceId }],
           proration_behavior: "create_prorations",
+          cancel_at_period_end: false, // BIL-23: เลือกแพ็กเกจใหม่ = ยกเลิกคำสั่ง "ยกเลิกสิ้นรอบ" ที่ค้างอยู่
           metadata: {
             ...existing.metadata,
             orgId,
