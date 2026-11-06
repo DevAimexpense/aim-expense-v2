@@ -273,7 +273,7 @@ model Referral {
   signedUpAt      DateTime  @default(now()) @map("signed_up_at")
   firstPaymentAt  DateTime? @map("first_payment_at")
   confirmedAt     DateTime? @map("confirmed_at")
-  discountApplied String    @default("20pct_first_month_plus_100ocr") @map("discount_applied")
+  discountApplied String    @default("20pct_first_month") @map("discount_applied") // BIL-09: "+100 OCR" ไม่เคยทำ — ตัดออกจากค่าเริ่มต้น
 
   partner     AffiliatePartner @relation(fields: [partnerId], references: [id], onDelete: Cascade)
   commissions Commission[]
@@ -297,6 +297,8 @@ model Commission {
   partner  AffiliatePartner @relation(fields: [partnerId], references: [id], onDelete: Cascade)
   referral Referral         @relation(fields: [referralId], references: [id], onDelete: Cascade)
 
+  // BIL-10: webhook ส่งซ้ำ/พร้อมกัน 2 ตัว → ห้ามมีคอมเดือนเดียวกันซ้ำ (webhook ใช้ createMany skipDuplicates)
+  @@unique([referralId, monthIndex])
   @@map("commissions")
 }
 

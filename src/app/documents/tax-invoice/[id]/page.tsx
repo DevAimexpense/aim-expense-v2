@@ -3,13 +3,14 @@
 // (window.print() + html2canvas-based PDF download)
 // ===========================================
 
-import { redirect } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { getSession } from "@/lib/auth/session";
 import { getOrgContext } from "@/lib/auth/middleware";
 import { requireCompanyOrg } from "@/lib/auth/require-plan";
 import { getSheetsService, ensureTabsCached } from "@/server/lib/sheets-context";
 import { SHEET_TABS } from "@/server/services/google-sheets.service";
 import { prisma } from "@/lib/prisma";
+import { isDocInScope } from "@/server/lib/doc-scope";
 import { readReceiptMode } from "@/lib/org-settings";
 import { TaxInvoiceDocument } from "./document";
 
@@ -64,6 +65,9 @@ export default async function TaxInvoiceDocumentPage({
       </div>
     );
   }
+
+  // CO-07b: project_manager เห็นเฉพาะเอกสารในขอบเขต หรือที่ตัวเองสร้าง — นอกนั้น = ไม่พบ (กฎเดียวกับ tRPC getById)
+  if (!isDocInScope(orgCtx, session.userId, header.EventID, header.PreparedByUserId)) notFound();
 
   const lines = (batch[SHEET_TABS.TAX_INVOICE_LINES] || [])
     .filter((r) => r.TaxInvoiceID === id)

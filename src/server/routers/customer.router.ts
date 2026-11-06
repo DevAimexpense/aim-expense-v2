@@ -4,7 +4,7 @@
 // ===========================================
 
 import { z } from "zod";
-import { router, orgProcedure, permissionProcedure } from "../trpc";
+import { router, featureProcedure } from "../trpc";
 import { getSheetsService, ensureTabsCached } from "../lib/sheets-context";
 import { GoogleSheetsService, SHEET_TABS } from "../services/google-sheets.service";
 import { prisma } from "@/lib/prisma";
@@ -27,7 +27,7 @@ const CustomerInputSchema = z.object({
 });
 
 export const customerRouter = router({
-  list: orgProcedure.query(async ({ ctx }) => {
+  list: featureProcedure("revenueModule").query(async ({ ctx }) => {
     const sheets = await getSheetsService(ctx.org.orgId);
     await ensureTabsCached(sheets, ctx.org.orgId); // Auto-migrate Customers tab on first load
     const customers = await sheets.getCustomers();
@@ -55,7 +55,7 @@ export const customerRouter = router({
       .sort((a, b) => a.customerName.localeCompare(b.customerName, "th"));
   }),
 
-  getById: orgProcedure
+  getById: featureProcedure("revenueModule")
     .input(z.object({ customerId: z.string() }))
     .query(async ({ ctx, input }) => {
       const sheets = await getSheetsService(ctx.org.orgId);
@@ -81,7 +81,7 @@ export const customerRouter = router({
       };
     }),
 
-  create: permissionProcedure("manageCustomers")
+  create: featureProcedure("revenueModule", "manageCustomers")
     .input(CustomerInputSchema)
     .mutation(async ({ ctx, input }) => {
       const sheets = await getSheetsService(ctx.org.orgId);
@@ -124,7 +124,7 @@ export const customerRouter = router({
       return { success: true, customerId };
     }),
 
-  update: permissionProcedure("manageCustomers")
+  update: featureProcedure("revenueModule", "manageCustomers")
     .input(
       z.object({ customerId: z.string() }).merge(CustomerInputSchema.partial())
     )
@@ -177,7 +177,7 @@ export const customerRouter = router({
       return { success: true };
     }),
 
-  delete: permissionProcedure("manageCustomers")
+  delete: featureProcedure("revenueModule", "manageCustomers")
     .input(z.object({ customerId: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const sheets = await getSheetsService(ctx.org.orgId);

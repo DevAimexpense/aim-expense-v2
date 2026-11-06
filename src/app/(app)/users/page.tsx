@@ -27,6 +27,11 @@ export default function UsersPage() {
 
   const members = usersQuery.data?.members || [];
   const invitations = usersQuery.data?.invitations || [];
+  // CO-01 mirror: API ปฏิเสธ non-admin ตั้ง/เชิญ admin และห้ามแก้ role/status ของตัวเอง/เจ้าของ —
+  // ซ่อน control เหล่านั้นใน UI ด้วย ไม่ให้ผู้ใช้กดแล้วเจอ error
+  const me = usersQuery.data?.me;
+  const ownerId = usersQuery.data?.ownerId ?? null;
+  const isAdmin = me?.role === "admin";
 
   return (
     <div className="app-page">
@@ -95,6 +100,14 @@ export default function UsersPage() {
                 key={m.memberId}
                 member={m}
                 events={events}
+                canAssignAdmin={isAdmin}
+                // ตัวเอง / เจ้าของ org: ทุกคนแก้ role+status ไม่ได้ · admin คนอื่น: เฉพาะ admin แก้ได้
+                canEditRoleStatus={
+                  !!me &&
+                  m.userId !== me.userId &&
+                  m.userId !== ownerId &&
+                  (isAdmin || m.role !== "admin")
+                }
                 onChange={() => utils.user.list.invalidate()}
               />
             ))}
@@ -113,6 +126,7 @@ export default function UsersPage() {
       {showInvite && (
         <InviteModal
           events={events}
+          canAssignAdmin={isAdmin}
           onClose={() => {
             setShowInvite(false);
             setInvitedLink(null);
@@ -206,6 +220,8 @@ function InvitationRow({
 function MemberRow({
   member,
   events,
+  canAssignAdmin,
+  canEditRoleStatus,
   onChange,
 }: {
   member: {
@@ -220,6 +236,8 @@ function MemberRow({
     email: string;
   };
   events: Array<{ eventId: string; eventName: string }>;
+  canAssignAdmin: boolean;
+  canEditRoleStatus: boolean;
   onChange: () => void;
 }) {
   const updateMut = trpc.user.updateMember.useMutation();
@@ -314,6 +332,8 @@ function MemberRow({
             <MemberEditForm
               member={member}
               events={events}
+              canAssignAdmin={canAssignAdmin}
+              canEditRoleStatus={canEditRoleStatus}
               onSave={async (patch) => {
                 try {
                   await updateMut.mutateAsync({ memberId: member.memberId, ...patch });
@@ -335,32 +355,66 @@ function MemberRow({
 function MemberEditForm({
   member,
   events,
+  canAssignAdmin,
+  canEditRoleStatus,
   onSave,
   onCancel,
 }: {
-  member: { role: Role; eventScope: string[] };
+  member: { role: Role; status: string; eventScope: string[] };
   events: Array<{ eventId: string; eventName: string }>;
-  onSave: (patch: { role?: Role; eventScope?: string[] }) => void;
+  canAssignAdmin: boolean;
+  canEditRoleStatus: boolean;
+  onSave: (patch: { role?: Role; status?: "active" | "suspended"; eventScope?: string[] }) => void;
   onCancel: () => void;
 }) {
   const [role, setRole] = useState<Role>(member.role);
+  const [status, setStatus] = useState<"active" | "suspended">(
+    member.status === "active" ? "active" : "suspended",
+  );
   const [scope, setScope] = useState<string[]>(member.eventScope);
   const [scopeAll, setScopeAll] = useState(member.eventScope.length === 0);
+
+  // non-admin เห็นเฉพาะ role ที่ API ให้ตั้งได้ (ไม่มี admin) — แต่ถ้าสมาชิกเป็น admin อยู่แล้วให้แสดงค่าเดิม
+  const roleOptions = (Object.keys(ROLE_LABEL) as Role[]).filter(
+    (r) => r !== "admin" || canAssignAdmin || r === member.role,
+  );
 
   return (
     <div style={{ display: "grid", gap: "0.75rem" }}>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
         <div>
-          <label className="app-label">Role</label>
-          <SearchableSelect
-            options={(Object.keys(ROLE_LABEL) as Role[]).map((r) => ({
-              value: r,
-              label: `${ROLE_LABEL[r].label} — ${ROLE_LABEL[r].desc}`,
-            }))}
-            value={role}
-            onChange={(val) => setRole(val as Role)}
-            className="app-select"
-          />
+          {canEditRoleStatus ? (
+            <>
+              <label className="app-label">Role</label>
+              <SearchableSelect
+                options={roleOptions.map((r) => ({
+                  value: r,
+                  label: `${ROLE_LABEL[r].label} — ${ROLE_LABEL[r].desc}`,
+                }))}
+                value={role}
+                onChange={(val) => setRole(val as Role)}
+                className="app-select"
+              />
+              <label className="app-label" style={{ marginTop: "0.5rem" }}>
+                สถานะ
+              </label>
+              <select
+                className="app-select"
+                value={status}
+                onChange={(e) => setStatus(e.target.value as "active" | "suspended")}
+              >
+                <option value="active">Active — ใช้งานได้ (นับโควตาผู้ใช้ของแพ็กเกจ)</option>
+                <option value="suspended">Suspended — ระงับชั่วคราว</option>
+              </select>
+            </>
+          ) : (
+            <>
+              <label className="app-label">Role</label>
+              <p style={{ fontSize: "0.8125rem", color: "#64748b", margin: "0.25rem 0 0" }}>
+                {ROLE_LABEL[member.role].label} — เปลี่ยน role/สถานะของตัวเอง เจ้าของ หรือ admin ไม่ได้จากหน้านี้
+              </p>
+            </>
+          )}
         </div>
         <div>
           <label className="app-label">Event Scope</label>
@@ -412,7 +466,16 @@ function MemberEditForm({
           ยกเลิก
         </button>
         <button
-          onClick={() => onSave({ role, eventScope: scopeAll ? [] : scope })}
+          onClick={() =>
+            onSave({
+              // ส่ง role/status เฉพาะตอนแก้ได้และเปลี่ยนจริง — API ปฏิเสธ role/status ของตัวเอง/เจ้าของแม้ค่าเท่าเดิม
+              ...(canEditRoleStatus && role !== member.role ? { role } : {}),
+              ...(canEditRoleStatus && status !== (member.status === "active" ? "active" : "suspended")
+                ? { status }
+                : {}),
+              eventScope: scopeAll ? [] : scope,
+            })
+          }
           className="app-btn app-btn-primary app-btn-sm"
         >
           บันทึก
@@ -425,11 +488,13 @@ function MemberEditForm({
 // ===== Invite Modal =====
 function InviteModal({
   events,
+  canAssignAdmin,
   onClose,
   onSuccess,
   invitedLink,
 }: {
   events: Array<{ eventId: string; eventName: string }>;
+  canAssignAdmin: boolean;
   onClose: () => void;
   onSuccess: (link: string) => void;
   invitedLink: string | null;
@@ -454,7 +519,8 @@ function InviteModal({
       const link = `${window.location.origin}/invite/${result.token}`;
       onSuccess(link);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "เกิดข้อผิดพลาด");
+      // TRPCClientError.message = ข้อความไทยจาก server (เช่น โควตาผู้ใช้ของแพ็กเกจเต็ม) → แสดงตรง ๆ
+      setError(e instanceof Error && e.message ? e.message : "เกิดข้อผิดพลาด");
     }
   };
 
@@ -496,7 +562,9 @@ function InviteModal({
               <div className="app-form-group">
                 <label className="app-label app-label-required">Role</label>
                 <div style={{ display: "grid", gap: "0.5rem" }}>
-                  {(Object.keys(ROLE_LABEL) as Role[]).map((r) => (
+                  {(Object.keys(ROLE_LABEL) as Role[])
+                    .filter((r) => r !== "admin" || canAssignAdmin)
+                    .map((r) => (
                     <label
                       key={r}
                       style={{
@@ -520,7 +588,7 @@ function InviteModal({
                         — {ROLE_LABEL[r].desc}
                       </span>
                     </label>
-                  ))}
+                    ))}
                 </div>
               </div>
               <div

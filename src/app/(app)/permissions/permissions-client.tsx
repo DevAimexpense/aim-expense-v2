@@ -122,7 +122,7 @@ export function PermissionsClient({ orgName }: { orgName: string }) {
         >
           /users
         </a>{" "}
-        • หน้านี้สำหรับ override ราย key. กด "รีเซ็ต" = กลับ default ของ role
+        • หน้านี้สำหรับ override ราย key. กด &quot;รีเซ็ต&quot; = กลับ default ของ role
       </div>
 
       {listQuery.isLoading ? (

@@ -3,6 +3,15 @@
 // Helpers สำหรับ: generate เลขเล่มที่/เลขที่, map WHT type → income type, ภ.ง.ด. form
 // ===========================================
 
+/** ดึงลำดับ (SSS) จากเลขที่ที่เก็บไว้ "เล่มที่|MMDD/SSS" หรือ "MMDD/SSS" — null ถ้า parse ไม่ได้ */
+export function parseWhtCertSeq(certNo: string | undefined | null): number | null {
+  if (!certNo) return null;
+  const m = /\/(\d+)\s*$/.exec(certNo);
+  if (!m) return null;
+  const n = parseInt(m[1], 10);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
 /**
  * Generate เลขเล่มที่ + เลขที่เอกสาร ของหนังสือรับรองหัก ณ ที่จ่าย
  *
@@ -14,11 +23,12 @@
  *
  * @param docDate - วันที่ออกเอกสาร (ISO YYYY-MM-DD)
  * @param allMonthPayments - รายการ payment ทั้งเดือนที่มี WHT > 0 (เรียงตาม CreatedAt)
+ *   ถ้ามี WhtCertNo ("เล่มที่|MMDD/SSS") ที่เก็บไว้แล้ว เลขใหม่จะไม่ต่ำกว่า max(SSS)+1 (DOC-21)
  * @param thisPaymentId - paymentId ของรายการปัจจุบัน (หาตำแหน่งใน list)
  */
 export function generateWhtDocNumber(
   docDate: string,
-  allMonthPayments: Array<{ PaymentID: string; CreatedAt?: string }>,
+  allMonthPayments: Array<{ PaymentID: string; CreatedAt?: string; WhtCertNo?: string }>,
   thisPaymentId: string
 ): { book: string; number: string } {
   const d = new Date(docDate);
@@ -35,7 +45,13 @@ export function generateWhtDocNumber(
     return c !== 0 ? c : a.PaymentID.localeCompare(b.PaymentID);
   });
   const idx = sorted.findIndex((p) => p.PaymentID === thisPaymentId);
-  const seq = idx >= 0 ? idx + 1 : 1;
+  // DOC-21: ลิสต์ของเดือนเปลี่ยนได้ (รายการก่อนหน้าถูกยกเลิก/ปฏิเสธ) → ตำแหน่งอย่างเดียวซ้ำกับเลขที่
+  // ออกไปแล้วได้ — เลขใหม่ต้องมากกว่าทุกเลขที่เก็บไว้แล้วของเดือนนั้นด้วย
+  const maxStoredSeq = allMonthPayments.reduce(
+    (m, p) => (p.PaymentID === thisPaymentId ? m : Math.max(m, parseWhtCertSeq(p.WhtCertNo) ?? 0)),
+    0
+  );
+  const seq = Math.max(idx >= 0 ? idx + 1 : 1, maxStoredSeq + 1);
   const seqStr = String(seq).padStart(3, "0");
 
   return {

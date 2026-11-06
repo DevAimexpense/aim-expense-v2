@@ -7,6 +7,8 @@
 import { getSheetsService, ensureTabsCached } from "@/server/lib/sheets-context";
 import { SHEET_TABS } from "@/server/services/google-sheets.service";
 import { prisma } from "@/lib/prisma";
+import { withLock } from "./lock";
+import { isDocInScope } from "./doc-scope";
 import { findWthTypeByRate } from "@/lib/wth-types";
 import {
   generateWhtDocNumber,
@@ -66,16 +68,29 @@ async function getPaymentWithRetry(
   return null;
 }
 
-/** คืน null เมื่อไม่พบ payment หรือ org */
+/** ผู้เปิดเอกสาร — ใช้กั้นขอบเขต project_manager (CO-07b); ไม่ส่ง = ไม่กั้น (ผู้เรียกฝั่ง server ที่เช็คเองแล้ว) */
+export interface WhtCertViewer {
+  role: string;
+  eventScope: string[];
+  userId: string;
+}
+
+/** คืน null เมื่อไม่พบ payment หรือ org (หรือ viewer ไม่มีสิทธิ์เห็นรายการนี้) */
 export async function loadWhtCertData(
   orgId: string,
-  paymentId: string
+  paymentId: string,
+  viewer?: WhtCertViewer
 ): Promise<WhtCertData | null> {
   const sheets = await getSheetsService(orgId);
   // CO-23: route นี้เข้าตรงได้โดยไม่ผ่าน router → ต้องให้ Sheet มีคอลัมน์ WhtCertNo ก่อนเขียนเลข
   await ensureTabsCached(sheets, orgId);
   const payment = await getPaymentWithRetry(sheets, paymentId);
   if (!payment) return null;
+  // CO-07b: project_manager เปิดได้เฉพาะรายการในโปรเจกต์ที่ได้รับมอบหมาย หรือรายการที่ตัวเองสร้าง
+  // (เช็คก่อนออกเลข — ผู้ที่ไม่มีสิทธิ์ต้องไม่ทำให้เลข 50 ทวิ ถูกออก/บันทึก)
+  if (viewer && !isDocInScope(viewer, viewer.userId, payment.EventID, payment.CreatedByUserId)) {
+    return null;
+  }
 
   let event = null;
   let payee = null;
@@ -108,50 +123,61 @@ export async function loadWhtCertData(
   // ตัดสิน ภ.ง.ด. form: 3 (บุคคล) หรือ 53 (นิติบุคคล)
   const pndForm = getPndForm(payee?.TaxID || "", payee?.BranchType);
 
-  // Generate เลขเล่มที่/เลขที่ — ต้อง query payment ทั้งเดือนที่มี WHT > 0
-  let monthPayments: Array<{ PaymentID: string; CreatedAt: string }> = [];
-  try {
-    const allPayments = await sheets.getPayments();
+  // DOC-04: เลขที่ออกไปแล้วต้องคงที่ — ใช้ค่าที่เก็บใน Payments.WhtCertNo ("เล่มที่|เลขที่") ถ้ามี
+  // DOC-21: ออกเลขใหม่ภายใต้ lock ต่อ org+เดือน และอ่าน Sheet สดในนั้น — seq ใหม่ = max(เลขที่เก็บไว้
+  // ของทุกใบในเดือน, ตำแหน่งในลิสต์) + 1 จึงไม่ซ้ำแม้รายการก่อนหน้าถูกยกเลิก · เลขที่บันทึกแล้วไม่ถูกแก้
+  // การบันทึกล้มเหลวไม่ทำให้ใบออกไม่ได้
+  const parseStored = (raw: string | undefined): { book: string; number: string } | null => {
+    const v = String(raw || "");
+    if (!v.includes("|")) return null;
+    const [book, number] = v.split("|");
+    return { book, number };
+  };
+  let docNumber = parseStored(payment.WhtCertNo);
+  if (!docNumber) {
     const docDate = new Date(paymentDate);
     const docYear = docDate.getFullYear();
     const docMonth = docDate.getMonth() + 1;
-    monthPayments = allPayments
-      .filter((p) => {
-        // รายการที่ยกเลิก/ถูกปฏิเสธไม่อยู่ในลำดับเลขหนังสือรับรอง — ไม่เช่นนั้นเลขของใบที่พิมพ์ไปแล้ว
-        // จะเลื่อนเมื่อรายการก่อนหน้าถูกยกเลิก (DOC-04)
-        if (p.Status === "cancelled" || p.Status === "rejected") return false;
-        const pDateStr = resolveWhtCertDate(p);
-        if (!pDateStr) return false;
-        const d = new Date(pDateStr);
-        return (
-          d.getFullYear() === docYear &&
-          d.getMonth() + 1 === docMonth &&
-          parseFloat(p.WTHAmount || "0") > 0
-        );
-      })
-      .map((p) => ({ PaymentID: p.PaymentID, CreatedAt: p.CreatedAt || "" }));
-  } catch (e) {
-    console.error(`[wht-cert] getPayments() failed:`, e);
-    // ถ้า query ล้มเหลว → fallback ใช้รายการเดียว (seq = 1)
-    monthPayments = [{ PaymentID: payment.PaymentID, CreatedAt: payment.CreatedAt || "" }];
-  }
-
-  // DOC-04: เลขที่ออกไปแล้วต้องคงที่ — ใช้ค่าที่เก็บใน Payments.WhtCertNo ("เล่มที่|เลขที่") ถ้ามี
-  // ถ้ายังไม่มี (ออกครั้งแรก) คำนวณแล้วบันทึกกลับทันที การบันทึกล้มเหลวไม่ทำให้ใบออกไม่ได้
-  const storedCertNo = String((payment as Record<string, string | undefined>).WhtCertNo || "");
-  let docNumber: { book: string; number: string };
-  if (storedCertNo.includes("|")) {
-    const [book, number] = storedCertNo.split("|");
-    docNumber = { book, number };
-  } else {
-    docNumber = generateWhtDocNumber(paymentDate, monthPayments, payment.PaymentID);
-    try {
-      await sheets.updateById(SHEET_TABS.PAYMENTS, "PaymentID", payment.PaymentID, {
-        WhtCertNo: `${docNumber.book}|${docNumber.number}`,
-      });
-    } catch (e) {
-      console.error("[wht-cert] persist WhtCertNo failed:", e);
-    }
+    const lockKey = `whtno:${orgId}:${docYear}-${String(docMonth).padStart(2, "0")}`;
+    docNumber = await withLock(lockKey, async () => {
+      // อ่านทั้งเดือนสดใต้ lock (updateById ของ request ก่อนหน้า invalidate cache แล้ว)
+      let monthPayments: Array<{ PaymentID: string; CreatedAt: string; WhtCertNo?: string }> = [];
+      try {
+        const allPayments = await sheets.getPayments();
+        // ถ้ามี request อื่นออกเลขให้ใบนี้ไปแล้วระหว่างรอ lock → ใช้เลขนั้น ไม่ออกใหม่
+        const latest = allPayments.find((p) => p.PaymentID === payment.PaymentID);
+        const already = parseStored(latest?.WhtCertNo);
+        if (already) return already;
+        monthPayments = allPayments
+          .filter((p) => {
+            // รายการที่ยกเลิก/ถูกปฏิเสธไม่อยู่ในลำดับเลขหนังสือรับรอง — ไม่เช่นนั้นเลขของใบที่พิมพ์ไปแล้ว
+            // จะเลื่อนเมื่อรายการก่อนหน้าถูกยกเลิก (DOC-04)
+            if (p.Status === "cancelled" || p.Status === "rejected") return false;
+            const pDateStr = resolveWhtCertDate(p);
+            if (!pDateStr) return false;
+            const d = new Date(pDateStr);
+            return (
+              d.getFullYear() === docYear &&
+              d.getMonth() + 1 === docMonth &&
+              parseFloat(p.WTHAmount || "0") > 0
+            );
+          })
+          .map((p) => ({ PaymentID: p.PaymentID, CreatedAt: p.CreatedAt || "", WhtCertNo: p.WhtCertNo || "" }));
+      } catch (e) {
+        console.error(`[wht-cert] getPayments() failed:`, e);
+        // ถ้า query ล้มเหลว → fallback ใช้รายการเดียว (seq = 1)
+        monthPayments = [{ PaymentID: payment.PaymentID, CreatedAt: payment.CreatedAt || "" }];
+      }
+      const generated = generateWhtDocNumber(paymentDate, monthPayments, payment.PaymentID);
+      try {
+        await sheets.updateById(SHEET_TABS.PAYMENTS, "PaymentID", payment.PaymentID, {
+          WhtCertNo: `${generated.book}|${generated.number}`,
+        });
+      } catch (e) {
+        console.error("[wht-cert] persist WhtCertNo failed:", e);
+      }
+      return generated;
+    });
   }
 
   // Branch info (สำหรับชื่อผู้มีหน้าที่หัก)

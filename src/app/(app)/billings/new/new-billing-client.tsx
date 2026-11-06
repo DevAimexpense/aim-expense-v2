@@ -307,8 +307,8 @@ export function NewBillingClient({
     };
     try {
       if (isReceipt) {
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        const { dueDate, terms, ...receiptPayload } = payload;
+        // ใบเสร็จไม่มี dueDate/terms — ตัดออกจาก payload (ตัวแปรที่ไม่ใช้ตั้งใจทิ้ง)
+        const { dueDate: _dueDate, terms: _terms, ...receiptPayload } = payload;
         const result =
           mode === "edit" && initial
             ? await receiptUpdateMut.mutateAsync({
@@ -319,14 +319,18 @@ export function NewBillingClient({
             : await receiptMut.mutateAsync({ ...receiptPayload, paymentMethod });
         utils.billing.list.invalidate();
         utils.billing.getById.invalidate({ billingId: result.billingId });
+        // DOC-25: ย้ายวันที่ข้ามเดือนหลังมีเลขแล้ว → แจ้งว่าเลขยังเป็นของเดือนเดิม
+        if ("warning" in result && result.warning) alert(result.warning);
         window.open(`/documents/receipt/${result.billingId}`, "_blank", "noopener");
         router.push("/receipts");
         return;
       }
       if (mode === "edit" && initial) {
-        await updateMut.mutateAsync({ billingId: initial.billingId, ...payload });
+        const res = await updateMut.mutateAsync({ billingId: initial.billingId, ...payload });
         utils.billing.list.invalidate();
         utils.billing.getById.invalidate({ billingId: initial.billingId });
+        // DOC-25: ย้ายวันที่ข้ามเดือนหลังมีเลขแล้ว → แจ้งว่าเลขยังเป็นของเดือนเดิม
+        if (res.warning) alert(res.warning);
         router.push(`/billings/${initial.billingId}`);
       } else {
         const result = await createMut.mutateAsync(payload);

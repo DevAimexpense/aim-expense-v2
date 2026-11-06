@@ -4,24 +4,7 @@ import { useMemo, useState } from "react";
 import { trpc } from "@/lib/trpc/client";
 import SearchableSelect, { type SearchableSelectOption } from "@/components/searchable-select";
 import { StatCard } from "@/components/shared";
-
-const PLAN_FEATURES: Record<string, { revenue: boolean; vat: boolean; pl: boolean }> = {
-  free: { revenue: false, vat: false, pl: false },
-  basic: { revenue: false, vat: false, pl: false },
-  pro: { revenue: true, vat: true, pl: true },
-  business: { revenue: true, vat: true, pl: true },
-  max: { revenue: true, vat: true, pl: true },
-  enterprise: { revenue: true, vat: true, pl: true },
-};
-
-const PLAN_LABEL: Record<string, string> = {
-  free: "Free Forever",
-  basic: "Basic",
-  pro: "Pro",
-  business: "Business",
-  max: "Max",
-  enterprise: "Enterprise",
-};
+import { hasFeature, normalisePlan, PLAN_LABELS } from "@/lib/plans";
 
 export function DashboardClient({
   orgName,
@@ -34,7 +17,12 @@ export function DashboardClient({
   plan: string;
   entityType?: string;
 }) {
-  const features = PLAN_FEATURES[plan] || PLAN_FEATURES.free;
+  // BIL-07: ฟีเจอร์มาจาก plans.ts (แหล่งเดียวกับ require-plan/featureProcedure) — ไม่มีตารางเขียนมือ
+  const features = {
+    revenue: hasFeature(plan, "revenueModule"),
+    vat: hasFeature(plan, "vat30Report"),
+    pl: hasFeature(plan, "plPerProject"),
+  };
   // Personal: โปรเจกต์ = ก้อนเงิน → รายรับ/เบิกใช้/คงเหลือ (ไม่ใช่ งบ/คงงบ)
   const isPersonal = entityType === "personal";
   const [filterEvent, setFilterEvent] = useState<string>("all");
@@ -90,7 +78,7 @@ export function DashboardClient({
         <div>
           <h1 className="app-page-title">สวัสดี {userName} 👋</h1>
           <p className="app-page-subtitle">
-            สรุปภาพรวม {orgName} • Plan: {PLAN_LABEL[plan] || plan}
+            สรุปภาพรวม {orgName} • Plan: {PLAN_LABELS[normalisePlan(plan)]}
           </p>
         </div>
         <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>

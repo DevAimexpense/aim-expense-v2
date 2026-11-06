@@ -11,22 +11,83 @@ import { refreshAccessToken } from "@/lib/google/oauth";
 import { GoogleSheetsService } from "@/server/services/google-sheets.service";
 import { GoogleDriveService } from "@/server/services/google-drive.service";
 import { TRPCError } from "@trpc/server";
+import {
+  googleNotConnectedError,
+  googleRevokedError,
+  isGoogleAuthError,
+} from "@/lib/google/errors";
+
+/**
+ * CO-08 (revoked): Google ปฏิเสธ refresh token (invalid_grant / "Token has been
+ * expired or revoked") = เจ้าของยกเลิกสิทธิ์แอปแล้ว — ปิดการเชื่อมต่อ (isActive=false)
+ * และตั้ง tokenExpiry = epoch 0 ให้ request ถัดไปล้มแบบสะอาดด้วยข้อความไทยเดียวกัน
+ * (ไม่ลบ refreshToken — เจ้าของกด "เชื่อมต่อใหม่" ที่ /settings/google จะเขียนทับเอง)
+ */
+async function markGoogleConnectionRevoked(ownerId: string, cause: unknown): Promise<void> {
+  console.warn("[sheets-context] Google token revoked for owner", ownerId, cause);
+  await prisma.googleConnection
+    .updateMany({
+      where: { userId: ownerId, isActive: true },
+      data: { isActive: false, tokenExpiry: new Date(0) },
+    })
+    .catch((err) => console.error("[sheets-context] markRevoked failed", err));
+  // ทุก org ที่คนนี้เป็นเจ้าของ ต้องเลิกใช้ token ที่ cache ไว้บน instance นี้ทันที
+  for (const [orgId, info] of orgInfoCache) {
+    if (info.ownerId === ownerId) orgInfoCache.delete(orgId);
+  }
+}
+
+/**
+ * ขอ access token ใหม่ด้วย refresh token ของเจ้าของ — เก็บลง DB แล้วคืนค่า
+ * ถ้า Google ตอบ invalid_grant → mark revoked + โยน TRPCError ข้อความไทย
+ * ถ้าล้มด้วยเหตุอื่น (network ฯลฯ) → โยน PRECONDITION_FAILED แบบเดิม (ไม่ mark)
+ */
+async function refreshOwnerToken(
+  ownerId: string,
+  encryptedRefreshToken: string,
+): Promise<string> {
+  try {
+    const refreshToken = decryptToken(encryptedRefreshToken);
+    const { accessToken, expiryDate } = await refreshAccessToken(refreshToken);
+    await prisma.googleConnection.update({
+      where: { userId: ownerId },
+      data: {
+        accessToken: encryptToken(accessToken),
+        tokenExpiry: expiryDate ? new Date(expiryDate) : null,
+      },
+    });
+    return accessToken;
+  } catch (err) {
+    if (isGoogleAuthError(err)) {
+      await markGoogleConnectionRevoked(ownerId, err);
+      throw googleRevokedError(err);
+    }
+    console.warn("[sheets-context] refresh failed for owner", ownerId, err);
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: "Token หมดอายุ กรุณาเชื่อมต่อ Google ใหม่",
+      cause: err,
+    });
+  }
+}
 
 /**
  * Get a valid Google access token for the org owner
  * (Multi-user model: all writes go through owner's token)
+ *
+ * `forceRefresh` = token ที่ถืออยู่เพิ่งโดน Google ตอบ 401 → ขอใหม่เลยไม่ดู expiry
  */
-export async function getOrgAccessToken(ownerId: string): Promise<string> {
+export async function getOrgAccessToken(
+  ownerId: string,
+  opts: { forceRefresh?: boolean } = {},
+): Promise<string> {
   const conn = await prisma.googleConnection.findUnique({
     where: { userId: ownerId },
   });
 
-  if (!conn || !conn.isActive) {
-    throw new TRPCError({
-      code: "PRECONDITION_FAILED",
-      message: "ยังไม่ได้เชื่อมต่อ Google Account",
-    });
-  }
+  if (!conn) throw googleNotConnectedError();
+  // CO-08: เคยเชื่อมต่อแต่ถูกยกเลิก (revoke / disconnect) → บอกให้เจ้าของเชื่อมต่อใหม่
+  if (!conn.isActive) throw googleRevokedError();
 
   // Refresh token if expired (with 5min buffer)
   // CO-08: tokenExpiry == null = ไม่รู้ว่าหมดเมื่อไร → ถือว่าหมดอายุ (refresh เลย) แทนการใช้ token เก่าดื้อ ๆ
@@ -34,69 +95,60 @@ export async function getOrgAccessToken(ownerId: string): Promise<string> {
     !conn.tokenExpiry ||
     new Date(conn.tokenExpiry).getTime() < Date.now() + 5 * 60 * 1000;
 
-  if (isExpired && conn.refreshToken) {
-    try {
-      const refreshToken = decryptToken(conn.refreshToken);
-      const { accessToken, expiryDate } = await refreshAccessToken(refreshToken);
-      await prisma.googleConnection.update({
-        where: { userId: ownerId },
-        data: {
-          accessToken: encryptToken(accessToken),
-          tokenExpiry: expiryDate ? new Date(expiryDate) : null,
-        },
-      });
-      return accessToken;
-    } catch (err) {
-      console.warn("[sheets-context] refresh failed for owner", ownerId, err);
-      throw new TRPCError({
-        code: "PRECONDITION_FAILED",
-        message: "Token หมดอายุ กรุณาเชื่อมต่อ Google ใหม่",
-      });
-    }
+  if ((isExpired || opts.forceRefresh) && conn.refreshToken) {
+    return refreshOwnerToken(ownerId, conn.refreshToken);
+  }
+
+  if (opts.forceRefresh) {
+    // Google ตอบ 401 แต่ไม่มี refresh token ให้ลอง → ถือว่าถูกยกเลิก
+    await markGoogleConnectionRevoked(ownerId, "401 without refresh token");
+    throw googleRevokedError();
   }
 
   return decryptToken(conn.accessToken);
 }
 
 /**
- * CO-08: Google ตอบ 401 / invalid_grant / invalid token = token ที่ถือไว้ใช้ไม่ได้แล้ว
- * (owner revoke หรือ reconnect บัญชีอื่น) — ต้องทิ้งค่าที่ cache ไว้ ไม่ใช่รอ 4 นาที
+ * CO-08: ครอบ service ให้ทุก method ที่ reject ด้วย Google auth error (401 /
+ * invalid_grant) ทำดังนี้:
+ *   1. ล้าง orgInfoCache ของ org (ไม่รอ 4 นาที)
+ *   2. ลอง refresh token ของเจ้าของ 1 ครั้ง — 401 หมายถึง Google ไม่ได้ทำ
+ *      request นั้นเลย จึงเรียกซ้ำบน service ใหม่ได้ปลอดภัย (ทั้งอ่านและเขียน)
+ *   3. refresh ไม่ผ่าน (invalid_grant) → ปิดการเชื่อมต่อ + โยน TRPCError ข้อความไทย
+ *      (ไม่ใช่ error ดิบจาก googleapis) — ใช้ร่วมกันทั้ง tRPC, route handlers และ LINE
+ *      เพราะทุกทางเข้าถึง Sheets/Drive ของ org ผ่าน getSheetsService/getDriveService
  */
-function isGoogleAuthError(err: unknown): boolean {
-  const e = err as {
-    code?: number | string;
-    status?: number;
-    response?: { status?: number };
-    message?: string;
-  } | null;
-  const status = Number(e?.response?.status ?? e?.status ?? e?.code);
-  if (status === 401) return true;
-  return /invalid_grant|invalid_token|Invalid Credentials|Token has been expired or revoked/i.test(
-    e?.message || String(err),
-  );
-}
-
-/**
- * ครอบ service ให้ทุก method ที่ reject ด้วย auth error ล้าง orgInfoCache ของ org นั้น
- * ก่อนโยน error ต่อ — request ถัดไปจะอ่าน token ใหม่จาก DB (หรือ refresh) แทนค่าเก่า
- */
-function withAuthErrorEviction<T extends object>(service: T, orgId: string): T {
+function withAuthRecovery<T extends object>(
+  service: T,
+  orgId: string,
+  ownerId: string,
+  rebuild: (accessToken: string) => T,
+): T {
   return new Proxy(service, {
     get(target, prop, receiver) {
       const value = Reflect.get(target, prop, receiver);
       if (typeof value !== "function") return value;
+      const method = value as (...a: unknown[]) => unknown;
       return (...args: unknown[]) => {
-        const result = (value as (...a: unknown[]) => unknown).apply(target, args);
-        if (result instanceof Promise) {
-          return result.catch((err: unknown) => {
-            if (isGoogleAuthError(err)) {
-              console.warn("[sheets-context] Google auth error → evict token cache for org", orgId);
-              invalidateOrgInfoCache(orgId);
-            }
-            throw err;
-          });
-        }
-        return result;
+        const result = method.apply(target, args);
+        if (!(result instanceof Promise)) return result;
+        return result.catch(async (err: unknown) => {
+          if (!isGoogleAuthError(err)) throw err;
+          console.warn("[sheets-context] Google auth error for org", orgId, "→ refresh + retry once");
+          invalidateOrgInfoCache(orgId);
+          // โยน googleRevokedError เองถ้า refresh ไม่ผ่าน
+          const freshToken = await getOrgAccessToken(ownerId, { forceRefresh: true });
+          const fresh = rebuild(freshToken);
+          const retryMethod = Reflect.get(fresh, prop, fresh) as (...a: unknown[]) => unknown;
+          try {
+            return await (retryMethod.apply(fresh, args) as Promise<unknown>);
+          } catch (retryErr) {
+            if (!isGoogleAuthError(retryErr)) throw retryErr;
+            // token ที่เพิ่ง refresh ก็ยังถูกปฏิเสธ → ถือว่าถูกยกเลิก
+            await markGoogleConnectionRevoked(ownerId, retryErr);
+            throw googleRevokedError(retryErr);
+          }
+        });
       };
     },
   });
@@ -116,6 +168,7 @@ const orgInfoCache = new Map<
   {
     accessToken: string;
     spreadsheetId: string;
+    ownerId: string;
     expiresAt: number;
   }
 >();
@@ -123,7 +176,7 @@ const ORG_INFO_TTL_MS = 4 * 60 * 1000;
 
 /**
  * ล้าง token/spreadsheet ที่ cache ไว้ของ org (instance นี้) — เรียกจาก Google OAuth callback
- * หลังเก็บ token ใหม่ และจาก withAuthErrorEviction เมื่อ Google ปฏิเสธ token
+ * หลังเก็บ token ใหม่ และจาก withAuthRecovery เมื่อ Google ปฏิเสธ token
  */
 export function invalidateOrgInfoCache(orgId: string): void {
   orgInfoCache.delete(orgId);
@@ -137,9 +190,12 @@ export async function getSheetsService(
 ): Promise<GoogleSheetsService> {
   const cached = orgInfoCache.get(orgId);
   if (cached && cached.expiresAt > Date.now()) {
-    return withAuthErrorEviction(
-      new GoogleSheetsService(cached.accessToken, cached.spreadsheetId),
+    const { spreadsheetId, ownerId } = cached;
+    return withAuthRecovery(
+      new GoogleSheetsService(cached.accessToken, spreadsheetId),
       orgId,
+      ownerId,
+      (token) => new GoogleSheetsService(token, spreadsheetId),
     );
   }
 
@@ -159,14 +215,18 @@ export async function getSheetsService(
   }
 
   const accessToken = await getOrgAccessToken(org.ownerId);
+  const spreadsheetId = org.googleSpreadsheetId;
   orgInfoCache.set(orgId, {
     accessToken,
-    spreadsheetId: org.googleSpreadsheetId,
+    spreadsheetId,
+    ownerId: org.ownerId,
     expiresAt: Date.now() + ORG_INFO_TTL_MS,
   });
-  return withAuthErrorEviction(
-    new GoogleSheetsService(accessToken, org.googleSpreadsheetId),
+  return withAuthRecovery(
+    new GoogleSheetsService(accessToken, spreadsheetId),
     orgId,
+    org.ownerId,
+    (token) => new GoogleSheetsService(token, spreadsheetId),
   );
 }
 
@@ -253,7 +313,13 @@ export async function getDriveService(orgId: string): Promise<{
 
   const accessToken = await getOrgAccessToken(org.ownerId);
   return {
-    drive: new GoogleDriveService(accessToken),
+    // CO-08: Drive ก็ใช้ token เจ้าของเหมือนกัน → refresh/retry/revoke แบบเดียวกับ Sheets
+    drive: withAuthRecovery(
+      new GoogleDriveService(accessToken),
+      orgId,
+      org.ownerId,
+      (token) => new GoogleDriveService(token),
+    ),
     rootFolderId: org.googleDriveFolderId,
     receiptsFolderId: org.driveReceiptsFolderId || org.googleDriveFolderId,
     documentsFolderId: org.driveDocumentsFolderId || org.googleDriveFolderId,

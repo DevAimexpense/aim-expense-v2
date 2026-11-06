@@ -10,6 +10,7 @@ import { getOrgContext } from "@/lib/auth/middleware";
 import { prisma } from "@/lib/prisma";
 import { isAffiliateAdmin } from "@/lib/affiliate";
 import type { Permissions, PermissionKey } from "@/types/permissions";
+import { effectivePlan, hasFeature, PLAN_LABELS, type FeatureKey, type SubscriptionState } from "@/lib/plans";
 
 /**
  * tRPC Context — ทุก request จะมี context นี้
@@ -168,6 +169,40 @@ export const orgProcedure = t.procedure.use(hasOrgContext);
 
 export function permissionProcedure(...permissions: PermissionKey[]) {
   return t.procedure.use(requirePermission(...permissions));
+}
+
+/**
+ * BIL-07: กั้นฟีเจอร์ตามแพ็กเกจที่ชั้น tRPC (เดิมกั้นแค่หน้าเว็บด้วย requireFeature → ยิง API ตรงข้ามได้)
+ * - ใช้ effectivePlan (trial/lifetime รวมแล้ว) ชุดเดียวกับ require-plan.ts
+ * - admin ข้าม "สิทธิ์" ได้ แต่ข้าม "แพ็กเกจ" ไม่ได้
+ */
+function requireFeature(feature: FeatureKey) {
+  return t.middleware(async ({ ctx, next }) => {
+    if (!ctx.session) {
+      throw new TRPCError({ code: "UNAUTHORIZED", message: "กรุณาเข้าสู่ระบบ" });
+    }
+    if (!ctx.org) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "กรุณาเลือกองค์กร" });
+    }
+    const sub = await prisma.subscription.findUnique({
+      where: { orgId: ctx.org.orgId },
+      select: { plan: true, trialPlan: true, trialEndsAt: true, isBetaTester: true },
+    });
+    const plan = effectivePlan(sub as SubscriptionState | null);
+    if (!hasFeature(plan, feature)) {
+      throw new TRPCError({
+        code: "FORBIDDEN",
+        message: `แพ็กเกจ ${PLAN_LABELS[plan]} ยังไม่รองรับฟีเจอร์นี้ — อัปเกรดแพ็กเกจเพื่อใช้งาน`,
+      });
+    }
+    return next({ ctx: { ...ctx, session: ctx.session, org: ctx.org } });
+  });
+}
+
+/** org + ฟีเจอร์ตามแพ็กเกจ + (ถ้าระบุ) สิทธิ์ — ใช้แทน permissionProcedure/orgProcedure ใน router ที่เป็นฟีเจอร์ Pro ขึ้นไป */
+export function featureProcedure(feature: FeatureKey, ...permissions: PermissionKey[]) {
+  const base = permissions.length > 0 ? t.procedure.use(requirePermission(...permissions)) : t.procedure.use(hasOrgContext);
+  return base.use(requireFeature(feature));
 }
 
 /**

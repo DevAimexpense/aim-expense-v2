@@ -115,7 +115,8 @@ export function withDocNumberLock<T>(
   fn: () => Promise<T>
 ): Promise<T> {
   const { yyyy, mm } = docPeriod(docDate);
-  return withLock(`docno:${orgId}:${type}:${yyyy}-${mm}`, fn, { ttlMs: 15000, waitMs: 10000 });
+  // DOC-23: อ่านแท็บทั้งหมด (max+1) + append ใต้ 429 retry ได้ถึง ~10 วิ → ttl 20 วิ กันหมดอายุก่อน append
+  return withLock(`docno:${orgId}:${type}:${yyyy}-${mm}`, fn, { ttlMs: 20000, waitMs: 10000 });
 }
 
 /**

@@ -4,6 +4,8 @@ import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { Permissions, PermissionKey } from "@/types/permissions";
+import { trpc } from "@/lib/trpc/client";
+import { hasFeature, minPlanFor, PLAN_LABELS, type FeatureKey } from "@/lib/plans";
 
 // ===== Navigation Structure (All Thai) =====
 interface NavItem {
@@ -16,6 +18,7 @@ interface NavItem {
   personalLabel?: string; // ชื่อเมนูทางเลือกเมื่อ org เป็นบุคคลธรรมดา
   hideForPersonal?: boolean; // ซ่อนสำหรับบุคคลธรรมดา (ไม่ขึ้นกับสถานะจด VAT)
   backofficeOnly?: boolean; // เฉพาะ admin ของบริษัทหลังบ้าน (ทีมงาน Aim Expense)
+  feature?: FeatureKey; // BIL-07: ฟีเจอร์ตามแพ็กเกจ (plans.ts) — แพ็กเกจต่ำกว่าเห็นเมนูพร้อม 🔒 "Pro ขึ้นไป" แทนหายไปเฉย ๆ
 }
 
 interface NavGroup {
@@ -91,12 +94,14 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       {
         label: "ใบเสนอราคา",
+        feature: "revenueModule",
         href: "/quotations",
         icon: "📜",
         permission: "manageQuotations",
       },
       {
         label: "ใบวางบิล",
+        feature: "revenueModule",
         href: "/billings",
         icon: "🧾",
         permission: "manageBillings",
@@ -104,6 +109,7 @@ const NAV_GROUPS: NavGroup[] = [
       },
       {
         label: "ใบเสร็จรับเงิน",
+        feature: "revenueModule",
         href: "/receipts",
         icon: "💵",
         permission: "manageBillings",
@@ -111,6 +117,7 @@ const NAV_GROUPS: NavGroup[] = [
       },
       {
         label: "ใบกำกับภาษี",
+        feature: "revenueModule",
         href: "/tax-invoices",
         icon: "🧮",
         permission: "manageTaxInvoices",
@@ -129,6 +136,7 @@ const NAV_GROUPS: NavGroup[] = [
       },
       {
         label: "ลูกค้า",
+        feature: "revenueModule",
         href: "/customers",
         icon: "🏢",
         permission: "manageCustomers",
@@ -268,6 +276,18 @@ export function Sidebar({
   const [isCollapsed, setIsCollapsed] = useState(false);
   const isPersonal = entityType === "personal";
 
+  // BIL-07: แพ็กเกจที่ใช้ได้จริง (trial/lifetime รวมแล้ว) จาก subscription.current
+  // undefined = ยังโหลด → ไม่แสดงล็อก (กันกระพริบ) · null = ไม่มี subscription row → free
+  const subQuery = trpc.subscription.current.useQuery(undefined, { staleTime: 60_000 });
+  const plan: string | undefined = subQuery.isSuccess ? (subQuery.data?.plan ?? "free") : undefined;
+
+  function lockedHint(item: NavItem): string | null {
+    if (!item.feature || plan === undefined) return null;
+    if (hasFeature(plan, item.feature)) return null;
+    const min = minPlanFor(item.feature);
+    return min ? `${PLAN_LABELS[min]} ขึ้นไป` : "ไม่รองรับในแพ็กเกจนี้";
+  }
+
   function isVisible(item: NavItem): boolean {
     // companyOnly: ซ่อนเมนู VAT/นิติบุคคลสำหรับบุคคลธรรมดา (ยังไม่จด VAT)
     if (item.backofficeOnly) return isBackoffice && isAdmin;
@@ -324,15 +344,26 @@ export function Sidebar({
               const isActive = pathname === item.href || pathname.startsWith(item.href + "/");
               const label =
                 isPersonal && item.personalLabel ? item.personalLabel : item.label;
+              const hint = lockedHint(item);
               return (
                 <Link
                   key={item.href + item.label}
                   href={item.href}
                   className={isActive ? "sidebar-link sidebar-link-active" : "sidebar-link"}
-                  title={isCollapsed ? label : undefined}
+                  title={hint ? `${label} — ${hint}` : isCollapsed ? label : undefined}
+                  style={hint ? { opacity: 0.6 } : undefined}
                 >
-                  <span className="sidebar-link-icon">{item.icon}</span>
-                  {!isCollapsed && <span className="sidebar-link-label">{label}</span>}
+                  <span className="sidebar-link-icon">{hint ? "🔒" : item.icon}</span>
+                  {!isCollapsed && (
+                    <span className="sidebar-link-label">
+                      {label}
+                      {hint && (
+                        <span style={{ marginLeft: "0.4rem", fontSize: "0.7em", opacity: 0.8 }}>
+                          {hint}
+                        </span>
+                      )}
+                    </span>
+                  )}
                 </Link>
               );
             })}

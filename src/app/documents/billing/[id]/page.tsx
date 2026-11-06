@@ -3,12 +3,13 @@
 // ใช้ window.print() ของ browser
 // ===========================================
 
-import { redirect } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { getSession } from "@/lib/auth/session";
 import { getOrgContext } from "@/lib/auth/middleware";
 import { getSheetsService, ensureTabsCached } from "@/server/lib/sheets-context";
 import { SHEET_TABS } from "@/server/services/google-sheets.service";
 import { prisma } from "@/lib/prisma";
+import { isDocInScope } from "@/server/lib/doc-scope";
 import { BillingDocument } from "./document";
 
 export const metadata = {
@@ -23,7 +24,7 @@ export default async function BillingDocumentPage({
   const session = await getSession();
   if (!session) redirect("/login");
 
-  const orgCtx = await getOrgContext(session.userId);
+  const orgCtx = await getOrgContext(session.userId, session.activeOrgId); // multi-org: ต้องส่ง activeOrgId ไม่งั้นได้ org เก่าสุด
   if (!orgCtx) redirect("/");
 
   const { id } = await params;
@@ -60,6 +61,9 @@ export default async function BillingDocumentPage({
       </div>
     );
   }
+
+  // CO-07b: project_manager เห็นเฉพาะเอกสารในขอบเขต หรือที่ตัวเองสร้าง — นอกนั้น = ไม่พบ (กฎเดียวกับ tRPC getById)
+  if (!isDocInScope(orgCtx, session.userId, header.EventID, header.PreparedByUserId)) notFound();
 
   const lines = (batch[SHEET_TABS.BILLING_LINES] || [])
     .filter((r) => r.BillingID === id)

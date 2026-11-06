@@ -206,7 +206,7 @@ export function PND3SummaryDocument({ period, periodInfo, org, stats }: Props) {
                 เดือนที่จ่ายเงินได้พึงประเมิน
               </div>
               <div className="field-sub">
-                (ให้ทำเครื่องหมาย "✓" ลงใน "☐" หน้าชื่อเดือน) พ.ศ. <u className="u-cell">{formatBuddhistYear(periodInfo.year)}</u>
+                (ให้ทำเครื่องหมาย &quot;✓&quot; ลงใน &quot;☐&quot; หน้าชื่อเดือน) พ.ศ. <u className="u-cell">{formatBuddhistYear(periodInfo.year)}</u>
               </div>
               <div className="months-grid">
                 {[

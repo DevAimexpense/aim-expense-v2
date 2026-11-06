@@ -7,7 +7,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session";
 import { getOrgContext } from "@/lib/auth/middleware";
-import { parseReceipt, type DocumentType } from "@/lib/ocr";
+import { parseReceipt, OcrFailedError, type DocumentType } from "@/lib/ocr";
 import { validateUploadedFile } from "@/lib/security/file-validation";
 import { checkQuotaOnly, incrementAndCheckQuota } from "@/server/lib/usage";
 
@@ -62,7 +62,19 @@ export async function POST(req: NextRequest) {
 
     // Count this scan against the monthly quota — only after a successful
     // parse, so a failed OCR never costs the user a credit.
+    // LINE-23: การเพิ่มเป็น atomic (`count < limit`) — ถ้าสแกนพร้อมกันจนเต็มพอดี ok=false
+    // ต้องไม่ส่งผล OCR กลับไปให้บันทึก (ค่า OCR ที่จ่ายไปแล้วยอมเสีย ดีกว่าให้ใช้เกินโควตา)
     const usage = await incrementAndCheckQuota(org.orgId, "ocr");
+    if (!usage.ok) {
+      console.warn(`[ocr/receipt] quota exhausted after scan org=${org.orgId} (${usage.current}/${usage.limit}) — result discarded`);
+      return NextResponse.json(
+        {
+          error: `OCR quota หมดแล้วเดือนนี้ (${usage.current}/${usage.limit}) — อัปเกรดแพ็คเกจหรือซื้อ OCR เพิ่ม`,
+          quota: usage,
+        },
+        { status: 429 },
+      );
+    }
 
     return NextResponse.json({
       success: true,
@@ -75,6 +87,11 @@ export async function POST(req: NextRequest) {
     });
   } catch (err) {
     console.error("[ocr/receipt] ERROR:", err);
+    if (err instanceof OcrFailedError) {
+      // LINE-24: message เป็นภาษาไทยแล้ว — รายละเอียด provider อยู่ใน log เท่านั้น
+      console.error("[ocr/receipt] provider errors:", err.providerErrors);
+      return NextResponse.json({ error: err.message }, { status: err.timedOut ? 504 : 502 });
+    }
     if (err instanceof Error) {
       console.error("[ocr/receipt] Stack:", err.stack);
     }

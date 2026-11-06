@@ -18,6 +18,7 @@ import {
   sheetsTabKeys,
 } from "@/server/lib/cache";
 import { withLock } from "@/server/lib/lock";
+import { isGoogleAuthError } from "@/lib/google/errors";
 
 // ===== Sheet Tab Names =====
 export const SHEET_TABS = {
@@ -873,7 +874,8 @@ export class GoogleSheetsService {
    * พร้อมกันแล้วแถวเลื่อน → เขียน/ลบผิดแถว  ไม่มี Redis = รันตรง ๆ (dev)
    */
   private withTabLock<T>(tabName: string, fn: () => Promise<T>): Promise<T> {
-    return withLock(`sheet:${this.spreadsheetId}:${tabName}`, fn);
+    // CO-24: หา index แถว (อ่าน 1-2 ครั้ง, ใต้ 429 retry ~5 วิ/ครั้ง) แล้วค่อยเขียน → ttl 20 วิ
+    return withLock(`sheet:${this.spreadsheetId}:${tabName}`, fn, { ttlMs: 20000, waitMs: 8000 });
   }
 
   /**
@@ -1167,7 +1169,9 @@ export class GoogleSheetsService {
           range: `${SHEET_TABS.CONFIG}!A:B`,
         });
         rows = (response.data.values as string[][] | undefined) || [];
-      } catch {
+      } catch (err) {
+        // CO-08: 401/invalid_grant ไม่ใช่ "tab ไม่มี" — โยนต่อให้ sheets-context refresh/ปิดการเชื่อมต่อ
+        if (isGoogleAuthError(err)) throw err;
         // tab ไม่มี — ปล่อยให้ ensureAllTabsExist() เรียกก่อน (caller responsibility)
         throw new Error(`Sheet "${SHEET_TABS.CONFIG}" not found`);
       }
@@ -1233,6 +1237,8 @@ export class GoogleSheetsService {
       }
       return map;
     } catch (err) {
+      // CO-08: token ถูกยกเลิกต้องไม่กลายเป็น config ว่าง ๆ เงียบ ๆ
+      if (isGoogleAuthError(err)) throw err;
       console.warn("[Sheets] getConfigMap failed (tab missing/no access):", err);
       return {};
     }

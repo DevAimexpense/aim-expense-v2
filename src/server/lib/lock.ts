@@ -23,8 +23,11 @@ export async function withLock<T>(
     }
     return fn();
   }
-  const ttlMs = opts.ttlMs ?? 8000;
-  const waitMs = opts.waitMs ?? 6000;
+  // CO-24/DOC-23: ค่าเริ่มต้นต้องยาวกว่า "อ่าน Sheet 2 ครั้งใต้ 429 retry" (~5 วิ/ครั้ง)
+  // เดิม 8 วิ → lock หมดอายุก่อนเขียน = คนที่สองอ่าน index/เลขเก่าแล้วเขียนทับ
+  // ttl 20 วิ ครอบ read→write ทั้งรอบ; รอได้ 8 วิ แล้ว fail-open (งานผู้ใช้ต้องไม่ค้าง)
+  const ttlMs = opts.ttlMs ?? 20000;
+  const waitMs = opts.waitMs ?? 8000;
   const lockKey = `lock:${key}`;
   const token = randomUUID();
   const deadline = Date.now() + waitMs;

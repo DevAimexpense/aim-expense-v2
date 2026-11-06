@@ -37,8 +37,19 @@ async function getOrgOwnerId(db: Db, orgId: string): Promise<string | null> {
 }
 
 /**
+ * CO-21: ล็อกแถว org (SELECT … FOR UPDATE) ต้น transaction ที่นับโควตา —
+ * `$transaction` ค่าเริ่มต้น READ COMMITTED ทำให้ 2 คำเชิญ/accept พร้อมกันที่ N-1
+ * นับได้ N-1 ทั้งคู่แล้วผ่านเป็น N+1 · ล็อกแถวเดียวกันบังคับให้ทำทีละ tx
+ * (ตาราง `organizations` ตาม @@map ใน schema.prisma)
+ */
+async function lockOrgForQuota(tx: Prisma.TransactionClient, orgId: string): Promise<void> {
+  await tx.$queryRaw`SELECT id FROM organizations WHERE id = ${orgId} FOR UPDATE`;
+}
+
+/**
  * BIL-08: บังคับจำนวนผู้ใช้ตามแพ็กเกจ — นับสมาชิก active + คำเชิญที่ยังค้าง
  * `excludeInvitationId` = คำเชิญที่กำลัง accept (คนนั้นกำลังกลายเป็นสมาชิก ไม่นับซ้ำ)
+ * ต้องเรียกหลัง lockOrgForQuota ใน tx เดียวกัน (CO-21) ไม่งั้นนับแข่งกันได้
  */
 async function assertUserQuota(
   db: Db,
@@ -92,16 +103,23 @@ export const userRouter = router({
       orderBy: { createdAt: "asc" },
     });
 
-    const invitations = await prisma.invitation.findMany({
-      where: {
-        orgId: ctx.org.orgId,
-        status: "pending",
-        expiresAt: { gt: new Date() },
-      },
-      orderBy: { createdAt: "desc" },
-    });
+    const [invitations, ownerId] = await Promise.all([
+      prisma.invitation.findMany({
+        where: {
+          orgId: ctx.org.orgId,
+          status: "pending",
+          expiresAt: { gt: new Date() },
+        },
+        orderBy: { createdAt: "desc" },
+      }),
+      getOrgOwnerId(prisma, ctx.org.orgId),
+    ]);
 
     return {
+      // ให้ UI ซ่อน control ที่ API ปฏิเสธอยู่แล้ว (CO-01): role admin สำหรับ non-admin,
+      // role/status ของตัวเองและของเจ้าของ org
+      me: { userId: ctx.session.userId, role: ctx.org.role as OrgRole },
+      ownerId,
       members: members.map((m) => ({
         memberId: m.id,
         userId: m.userId,
@@ -149,7 +167,9 @@ export const userRouter = router({
       const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
       // BIL-08: นับโควตาและสร้างคำเชิญใน transaction เดียว (กันดับเบิลคลิกเกินแพ็กเกจ)
+      // CO-21: ล็อกแถว org ก่อนนับ — admin 2 คนเชิญพร้อมกันจะต่อคิว ไม่ใช่ผ่านทั้งคู่
       const invitation = await prisma.$transaction(async (tx) => {
+        await lockOrgForQuota(tx, ctx.org.orgId);
         await assertUserQuota(tx, ctx.org.orgId);
         return tx.invitation.create({
           data: {
@@ -250,14 +270,22 @@ export const userRouter = router({
         }
       }
 
-      const updated = await prisma.orgMember.update({
-        where: { id: member.id },
-        data: {
-          ...(input.role ? { role: input.role } : {}),
-          ...(input.eventScope !== undefined ? { eventScope: input.eventScope } : {}),
-          ...(input.status ? { status: input.status } : {}),
-        },
-      });
+      const data = {
+        ...(input.role ? { role: input.role } : {}),
+        ...(input.eventScope !== undefined ? { eventScope: input.eventScope } : {}),
+        ...(input.status ? { status: input.status } : {}),
+      };
+
+      // CO-22: เปิดใช้สมาชิกที่ถูกระงับ = เพิ่มคน active 1 คน → ต้องผ่านโควตาเหมือน invite
+      // (นับเฉพาะตอน suspended → active; org ที่เกินโควตาอยู่แล้วยังเก็บสมาชิกเดิมไว้ ไม่บังคับระงับ)
+      const reactivating = input.status === "active" && member.status !== "active";
+      const updated = reactivating
+        ? await prisma.$transaction(async (tx) => {
+            await lockOrgForQuota(tx, ctx.org.orgId);
+            await assertUserQuota(tx, ctx.org.orgId);
+            return tx.orgMember.update({ where: { id: member.id }, data });
+          })
+        : await prisma.orgMember.update({ where: { id: member.id }, data });
 
       // ถ้าเปลี่ยน role → อัปเดต permissions ด้วย (default ของ role ใหม่)
       if (input.role) {
@@ -373,6 +401,8 @@ export const userRouter = router({
       // CO-05: ทำทั้งหมดใน transaction เดียว — claim คำเชิญแบบ atomic (pending → accepted)
       // กัน accept ซ้ำ/พร้อมกัน แล้วค่อยสร้างสมาชิก + sync User.activeOrgId (LINE webhook ใช้ค่านี้)
       const user = await prisma.$transaction(async (tx) => {
+        // CO-21: ล็อกแถว org ก่อน claim/นับโควตา — accept 2 คำเชิญพร้อมกันจะต่อคิว
+        await lockOrgForQuota(tx, inv.orgId);
         const claimed = await tx.invitation.updateMany({
           where: { id: inv.id, status: "pending" },
           data: {

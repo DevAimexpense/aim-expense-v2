@@ -274,7 +274,7 @@ export function NewQuotationClient({ mode, initial }: Props) {
     };
     try {
       if (mode === "edit" && initial) {
-        await updateMut.mutateAsync({
+        const res = await updateMut.mutateAsync({
           quotationId: initial.quotationId,
           ...payload,
         });
@@ -282,6 +282,8 @@ export function NewQuotationClient({ mode, initial }: Props) {
         utils.quotation.getById.invalidate({
           quotationId: initial.quotationId,
         });
+        // DOC-25: ย้ายวันที่ข้ามเดือนหลังมีเลขแล้ว → แจ้งว่าเลขยังเป็นของเดือนเดิม
+        if (res.warning) alert(res.warning);
         router.push(`/quotations/${initial.quotationId}`);
       } else {
         const result = await createMut.mutateAsync(payload);

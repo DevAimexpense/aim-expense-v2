@@ -6,7 +6,7 @@
 
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { router, orgProcedure, permissionProcedure } from "../trpc";
+import { router, featureProcedure } from "../trpc";
 import { getSheetsService, ensureTabsCached } from "../lib/sheets-context";
 import {
   GoogleSheetsService,
@@ -16,7 +16,7 @@ import { computeNextDocNumber, withDocNumberLock, docPeriod } from "../lib/doc-n
 import { withLock } from "../lib/lock";
 import { invalidateTab } from "../lib/cache";
 import { assertVatAllowed } from "../lib/org-vat";
-import { scopedEventIds } from "@/lib/permissions";
+import { isDocInScope } from "../lib/doc-scope";
 import { todayBangkok } from "@/lib/utils/date";
 import { resolveIssuerBranch } from "../lib/issuer-branch";
 import { prisma } from "@/lib/prisma";
@@ -222,7 +222,7 @@ function monthMoveWarning(
 // ===== Router =====
 
 export const billingRouter = router({
-  list: orgProcedure
+  list: featureProcedure("revenueModule")
     .input(
       z
         .object({
@@ -239,11 +239,10 @@ export const billingRouter = router({
       const sheets = await getSheetsService(ctx.org.orgId);
       await ensureTabsCached(sheets, ctx.org.orgId);
       const all = await sheets.getBillings();
-      // project_manager เห็นเฉพาะเอกสารของโปรเจกต์ในขอบเขตตัวเอง (CO-07)
-      const scope = scopedEventIds(ctx.org);
+      // project_manager เห็นเฉพาะเอกสารของโปรเจกต์ในขอบเขตตัวเอง หรือที่ตัวเองสร้าง (CO-07/CO-07b)
 
       const filtered = all.filter((r) => {
-        if (scope !== null && !scope.includes((r.EventID || "").trim())) return false;
+        if (!isDocInScope(ctx.org, ctx.session.userId, r.EventID, r.PreparedByUserId)) return false;
         if (input?.kind) {
           const k = r.DocKind === "receipt" ? "receipt" : "billing";
           if (k !== input.kind) return false;
@@ -265,7 +264,7 @@ export const billingRouter = router({
       return filtered.map(shapeHeader);
     }),
 
-  getById: orgProcedure
+  getById: featureProcedure("revenueModule")
     .input(z.object({ billingId: z.string() }))
     .query(async ({ ctx, input }) => {
       const sheets = await getSheetsService(ctx.org.orgId);
@@ -278,9 +277,8 @@ export const billingRouter = router({
         (r) => r.BillingID === input.billingId
       );
       if (!header) return null;
-      // project_manager: นอกขอบเขต = ไม่พบ (CO-07)
-      const scope = scopedEventIds(ctx.org);
-      if (scope !== null && !scope.includes((header.EventID || "").trim())) {
+      // project_manager: นอกขอบเขตและไม่ใช่ของตัวเอง = ไม่พบ (CO-07/CO-07b)
+      if (!isDocInScope(ctx.org, ctx.session.userId, header.EventID, header.PreparedByUserId)) {
         throw new TRPCError({ code: "NOT_FOUND", message: "ไม่พบใบวางบิล" });
       }
       const lines = (batch[SHEET_TABS.BILLING_LINES] || [])
@@ -296,7 +294,7 @@ export const billingRouter = router({
       };
     }),
 
-  create: permissionProcedure("manageBillings")
+  create: featureProcedure("revenueModule", "manageBillings")
     .input(BillingCreateInput)
     .mutation(async ({ ctx, input }) => {
       // org ไม่จด VAT ออกเอกสารมี VAT ไม่ได้ — บังคับฝั่ง server (DOC-06)
@@ -428,7 +426,7 @@ export const billingRouter = router({
    * - recorded as already-paid (income received), net of WHT
    * WHTCertUrl is attached afterwards via /api/billings/upload.
    */
-  quickIncome: permissionProcedure("manageBillings")
+  quickIncome: featureProcedure("revenueModule", "manageBillings")
     .input(
       z.object({
         payerName: z.string().trim().min(1, "กรุณากรอกชื่อผู้จ่าย").max(200),
@@ -562,7 +560,7 @@ export const billingRouter = router({
       return { success: true, billingId, docNumber };
     }),
 
-  update: permissionProcedure("manageBillings")
+  update: featureProcedure("revenueModule", "manageBillings")
     .input(z.object({ billingId: z.string() }).merge(BillingCreateInput))
     .mutation(async ({ ctx, input }) => {
       await assertVatAllowed(ctx.org.orgId, input.isVat, "ใบวางบิล"); // DOC-06
@@ -685,7 +683,7 @@ export const billingRouter = router({
 
   // ===== State transitions =====
 
-  send: permissionProcedure("manageBillings")
+  send: featureProcedure("revenueModule", "manageBillings")
     .input(z.object({ billingId: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const sheets = await getSheetsService(ctx.org.orgId);
@@ -721,7 +719,7 @@ export const billingRouter = router({
       return { success: true };
     }),
 
-  void: permissionProcedure("manageBillings")
+  void: featureProcedure("revenueModule", "manageBillings")
     .input(z.object({ billingId: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const sheets = await getSheetsService(ctx.org.orgId);
@@ -770,7 +768,7 @@ export const billingRouter = router({
    *   Status = paid, PaidAmount = GrandTotal (นิยามเดียวกับ recordPayment)
    * ใช้เลขรัน RC ชุดเดียวกับใบเสร็จที่ออกจากใบวางบิล
    */
-  createReceipt: permissionProcedure("manageBillings")
+  createReceipt: featureProcedure("revenueModule", "manageBillings")
     .input(
       BillingCreateInput.omit({ dueDate: true, sourceQuotationId: true, terms: true }).extend({
         paymentMethod: PaymentMethod.default("transfer"),
@@ -901,7 +899,7 @@ export const billingRouter = router({
    * แก้ไขใบเสร็จรับเงินที่ออกโดยตรง — เลขที่ใบเสร็จคงเดิม
    * (ใบเสร็จที่ออกจากใบวางบิลแก้ที่นี่ไม่ได้ — เนื้อหามาจากใบวางบิล)
    */
-  updateReceipt: permissionProcedure("manageBillings")
+  updateReceipt: featureProcedure("revenueModule", "manageBillings")
     .input(
       BillingCreateInput.omit({ dueDate: true, sourceQuotationId: true, terms: true }).extend({
         billingId: z.string(),
@@ -1002,7 +1000,7 @@ export const billingRouter = router({
     }),
 
   /** ยกเลิกใบเสร็จรับเงินที่ออกโดยตรง (เลขที่ยังคงอยู่ ไม่นำกลับมาใช้ซ้ำ) */
-  voidReceipt: permissionProcedure("manageBillings")
+  voidReceipt: featureProcedure("revenueModule", "manageBillings")
     .input(z.object({ billingId: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const sheets = await getSheetsService(ctx.org.orgId);
@@ -1036,7 +1034,7 @@ export const billingRouter = router({
    * ใช้ได้ทั้งธุรกิจจด VAT และไม่จด VAT (ไม่จด VAT = เอกสารรับเงินหลักแทนใบกำกับภาษี)
    * เรียกซ้ำได้ — ถ้าออกแล้วจะคืนเลขเดิม
    */
-  issueReceipt: permissionProcedure("manageBillings")
+  issueReceipt: featureProcedure("revenueModule", "manageBillings")
     .input(
       z.object({
         billingId: z.string(),
@@ -1097,7 +1095,7 @@ export const billingRouter = router({
       return { success: true, receiptNumber };
     }),
 
-  recordPayment: permissionProcedure("manageBillings")
+  recordPayment: featureProcedure("revenueModule", "manageBillings")
     .input(
       z.object({
         billingId: z.string(),

@@ -32,6 +32,16 @@ const CASES: Array<[string, number | null, number | null]> = [
   ["ค่าเช่า 3000 วันที่ 5", 3000, null],
   ["ค่าบริการ 2500 เลขที่ 12", 2500, null],
   ["โอน 12,000,000", null, null],
+  // LINE-30: "no"/"#" ต้องเป็น token แยก — ชื่อร้านละตินที่ลงท้าย no ต้องผ่าน
+  ["Domino 450", 450, 450],
+  ["Casino 300", 300, 300],
+  ["Techno 1,200", 1200, 1200],
+  ["Domino 450 บาท", 450, 450],
+  ["ค่ารถ no 300", null, null],
+  ["ค่ารถ No. 300", null, null],
+  ["สั่ง #12 350", 350, 350],
+  ["no 300", null, null],
+  ["วันที่ 5", null, null],
   ["100", 100, 100], // กลุ่มตัด "เลขล้วน" ด้วย hasDescriptionWord ใน handlers ไม่ใช่ที่ parser
 ];
 

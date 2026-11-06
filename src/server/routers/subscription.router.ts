@@ -8,6 +8,7 @@ import { router, orgProcedure } from "../trpc";
 import { prisma } from "@/lib/prisma";
 import {
   effectivePlan,
+  featuresFor,
   PLAN_LIMITS,
   type SubscriptionState,
 } from "@/lib/plans";
@@ -38,7 +39,11 @@ export const subscriptionRouter = router({
         : 0;
 
     return {
+      /** แพ็กเกจที่ใช้ได้จริงตอนนี้ (trial/lifetime รวมแล้ว) — ชุดเดียวกับ require-plan/featureProcedure */
       plan,
+      effectivePlan: plan,
+      /** BIL-07: ฟีเจอร์ของแพ็กเกจนี้ — ให้ sidebar/dashboard ใช้แทนตารางที่เขียนมือ */
+      features: featuresFor(plan),
       status: sub.status,
       maxMembers: sub.maxMembers,
       maxEvents: sub.maxEvents,

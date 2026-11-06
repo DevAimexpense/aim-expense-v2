@@ -484,7 +484,7 @@ function ConvertToBillingModal({
               }}
             >
               สร้างใบวางบิลจากใบเสนอราคา <strong>{docNumber}</strong> —
-              ใบเสนอราคาจะถูกล็อกเป็น "converted" หลัง convert
+              ใบเสนอราคาจะถูกล็อกเป็น &quot;converted&quot; หลัง convert
             </p>
             <div className="app-form-grid cols-2">
               <div className="app-form-group">

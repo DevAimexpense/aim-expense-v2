@@ -13,7 +13,7 @@ import {
   type LineMessage,
   type LineQuickReplyItem,
 } from "@/lib/line/messaging";
-import { parseReceipt, type OcrParsedReceipt } from "@/lib/ocr";
+import { parseReceipt, OcrFailedError, isTimeoutError, type OcrParsedReceipt } from "@/lib/ocr";
 import { findBestMatch, similarity } from "@/lib/ocr/text-similarity";
 import {
   resolveLineContext,
@@ -23,6 +23,14 @@ import {
   type GroupResolveError,
 } from "@/lib/line/user-org";
 import { ensureLineDefaults } from "@/lib/line/defaults";
+import {
+  SAVING_PREFIX,
+  SAVING_STALE_MS,
+  savingStatus,
+  isSavingStatus,
+  isSavingStale,
+  savingClaimedAt,
+} from "@/lib/line/draft-status";
 import {
   buildOcrConfirmFlex,
   buildSavedFlex,
@@ -54,6 +62,22 @@ const DRAFT_TTL_HOURS = 24;
 
 /** ปัดทศนิยม 2 ตำแหน่ง (สูตรเดียวกับ calculations.ts ซึ่งไม่ได้ export) */
 const roundTwo = (v: number): number => Math.round(v * 100) / 100;
+
+const THAI_RE = /[\u0E00-\u0E7F]/;
+
+/**
+ * LINE-24: ข้อความ error ที่ push ให้ผู้ใช้ต้องเป็นภาษาไทยสั้น ๆ เสมอ
+ * - OcrFailedError → message ภาษาไทยอยู่แล้ว ("อ่านใบเสร็จนานเกินไป…" / "อ่านใบเสร็จไม่สำเร็จ…")
+ * - TimeoutError/AbortError อื่น (LINE content, Google API) → "ใช้เวลานานเกินไป…"
+ * - error ของเราที่เป็นภาษาไทย (เช่น sheets-context "กรุณาเชื่อมต่อ Google ใหม่") → ส่งตามเดิม
+ * - อย่างอื่น (ข้อความอังกฤษดิบจาก API/stack) → fallback; รายละเอียดอยู่ใน console.error ของผู้เรียกแล้ว
+ */
+function userFacingError(err: unknown, fallback = "เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง"): string {
+  if (err instanceof OcrFailedError) return err.message;
+  if (isTimeoutError(err)) return "ใช้เวลานานเกินไป กรุณาลองใหม่อีกครั้ง";
+  const msg = err instanceof Error ? err.message : "";
+  return msg && THAI_RE.test(msg) ? msg : fallback;
+}
 
 // คำที่ถือเป็นคำสั่งเปิดเมนู (case-insensitive — รับ lower มาแล้ว)
 const MENU_WORDS = new Set(["เมนู", "เมนูหลัก", "menu", "/menu", "/เมนู", "mainmenu"]);
@@ -246,7 +270,7 @@ export async function handleText(event: LineWebhookEvent): Promise<void> {
     }).catch((err) => {
       console.error("[LINE webhook] group text failed:", err);
       void pushMessage(groupId!, [
-        text("ไม่สามารถบันทึกรายการได้\n" + (err instanceof Error ? err.message : "เกิดข้อผิดพลาด")),
+        text("ไม่สามารถบันทึกรายการได้\n" + userFacingError(err)),
       ]).catch(() => {});
     });
     return;
@@ -314,7 +338,7 @@ export async function handleText(event: LineWebhookEvent): Promise<void> {
     await processTextExpenseAsync(lineUserId, parsed, ctx).catch((err) => {
       console.error("[LINE webhook] text expense processing failed:", err);
       void pushMessage(lineUserId, [
-        text("ไม่สามารถบันทึกรายการได้\n" + (err instanceof Error ? err.message : "เกิดข้อผิดพลาด")),
+        text("ไม่สามารถบันทึกรายการได้\n" + userFacingError(err)),
       ]).catch(() => {});
     });
     return;
@@ -383,7 +407,7 @@ export async function handleMedia(event: LineWebhookEvent): Promise<void> {
     }).catch((err) => {
       console.error("[LINE webhook] group media failed:", err);
       void pushMessage(groupId!, [
-        text("ไม่สามารถอ่าน" + displayKind + "ได้\n" + (err instanceof Error ? err.message : "เกิดข้อผิดพลาด")),
+        text("ไม่สามารถอ่าน" + displayKind + "ได้\n" + userFacingError(err)),
       ]).catch(() => {});
     });
     return;
@@ -413,7 +437,7 @@ export async function handleMedia(event: LineWebhookEvent): Promise<void> {
   await processMediaAsync(lineUserId!, messageId, mimeType, ctx).catch((err) => {
     console.error("[LINE webhook] media processing failed:", err);
     void pushMessage(lineUserId!, [
-      text("ไม่สามารถอ่าน" + displayKind + "ได้\n" + (err instanceof Error ? err.message : "เกิดข้อผิดพลาด")),
+      text("ไม่สามารถอ่าน" + displayKind + "ได้\n" + userFacingError(err)),
     ]).catch(() => {});
   });
 }
@@ -629,7 +653,20 @@ async function processMediaAsync(
   const ocr = await parseReceipt(buffer, mimeType, "receipt");
 
   // ตัดเครดิตหลัง OCR สำเร็จเท่านั้น (OCR ล้มเหลวไม่เสียเครดิต)
-  await incrementAndCheckQuota(ctx.orgId, "ocr");
+  // LINE-23: การเพิ่มเป็น atomic (`count < limit`) — สแกนพร้อมกันหลายใบจนเต็มพอดี → ok=false
+  // ต้องไม่สร้าง draft/แถว (ค่า OCR ที่จ่ายไปแล้วยอมเสีย ดีกว่าให้ใช้เกินโควตา)
+  const usage = await incrementAndCheckQuota(ctx.orgId, "ocr");
+  if (!usage.ok) {
+    console.warn(
+      `[LINE] OCR quota exhausted after scan org=${ctx.orgId} (${usage.current}/${usage.limit}) — draft not created (LINE-23)`,
+    );
+    await pushMessage(lineUserId, [
+      text(
+        `โควตา OCR เดือนนี้หมดแล้ว (${usage.current}/${usage.limit}) — ยังไม่ได้บันทึกรายการค่ะ\nอัปเกรดได้ที่ ${APP_BASE_URL}/account/billing`,
+      ),
+    ]);
+    return;
+  }
 
   // กลุ่ม: บันทึกอัตโนมัติเฉพาะใบเสร็จที่อ่านได้ชัด (มีร้าน + ยอด > 0) —
   // รูปอื่น ๆ (มีม/รูปอาหาร) ต้องไม่กลายเป็นแถวรายจ่าย (LINE-02)
@@ -829,16 +866,39 @@ export async function handlePostback(event: LineWebhookEvent): Promise<void> {
   if (!action || !draftId) return;
 
   const draft = await prisma.lineDraft.findUnique({ where: { id: draftId } });
-  if (!draft || draft.lineUserId !== event.source.userId) {
-    await replyMessage(event.replyToken, [text("ไม่พบรายการ หรือไม่ใช่รายการของคุณ")]);
+  if (!draft) {
+    // บันทึก/ยกเลิก/หมดอายุ = ลบแถวทิ้ง (LINE-06) → ปุ่มบนการ์ดเก่ามาถึงตรงนี้ ไม่ใช่ "ไม่พบรายการ" (LINE-22)
+    await replyMessage(event.replyToken, [text("รายการนี้บันทึกหรือยกเลิกไปแล้ว หรือหมดอายุ")]);
     return;
   }
-  if (draft.status !== "pending") {
-    const statusLabel =
-      draft.status === "saving" ? "กำลังบันทึก"
-      : draft.status === "confirmed" ? "บันทึกไปแล้ว"
-      : "ถูกยกเลิกแล้ว";
-    await replyMessage(event.replyToken, [text(`รายการนี้ ${statusLabel}`)]);
+  if (draft.lineUserId !== event.source.userId) {
+    await replyMessage(event.replyToken, [text("ไม่ใช่รายการของคุณ")]);
+    return;
+  }
+  if (isSavingStatus(draft.status)) {
+    // LINE-25: function ตายกลางทาง → draft ค้าง saving ตลอดไป ผู้ใช้กดอะไรไม่ได้จนหมดอายุ
+    // เวลาที่ claim ฝังอยู่ใน status ("saving:<ms>", แถวเก่าใช้ createdAt — ดู draft-status.ts)
+    // ค้างเกิน 3 นาที → คืนเป็น pending แล้วทำ action ต่อ (บันทึกจริงใช้ < 30 วิ จึงไม่ชน LINE-04)
+    if (!isSavingStale(draft, SAVING_STALE_MS)) {
+      await replyMessage(event.replyToken, [text("รายการนี้กำลังบันทึกอยู่ กรุณารอสักครู่")]);
+      return;
+    }
+    // guard ด้วยค่า status ที่เห็น — สอง request ที่เจอ draft ค้างพร้อมกัน มีแค่คนเดียวที่ reset ได้
+    const reset = await prisma.lineDraft.updateMany({
+      where: { id: draftId, status: draft.status },
+      data: { status: "pending" },
+    });
+    if (reset.count === 0) {
+      await replyMessage(event.replyToken, [text("รายการนี้กำลังบันทึกอยู่ กรุณารอสักครู่")]);
+      return;
+    }
+    console.warn(
+      `[LINE] draft ${draftId} stuck in saving since ${new Date(savingClaimedAt(draft)).toISOString()} — reset to pending (LINE-25)`,
+    );
+    draft.status = "pending";
+  } else if (draft.status !== "pending") {
+    // ไม่มี confirmed/cancelled แล้ว (ลบแถวแทน) — ค่าอื่นถือว่าจบไปแล้ว
+    await replyMessage(event.replyToken, [text("รายการนี้บันทึกหรือยกเลิกไปแล้ว หรือหมดอายุ")]);
     return;
   }
   if (draft.expiresAt < new Date()) {
@@ -982,7 +1042,7 @@ export async function handlePostback(event: LineWebhookEvent): Promise<void> {
     } catch (err) {
       console.error("[LINE webhook] confirm failed:", err);
       await pushMessage(event.source.userId, [
-        text("บันทึกไม่สำเร็จ\n" + (err instanceof Error ? err.message : "เกิดข้อผิดพลาด")),
+        text("บันทึกไม่สำเร็จ\n" + userFacingError(err)),
       ]).catch(() => {});
     }
   }
@@ -1011,18 +1071,19 @@ async function confirmDraftAsync(draft: {
   const eventId = draftFull?.eventId || "";
   const eventName = draftFull?.eventName || "";
 
+  // LINE-25: ฝังเวลาที่ claim ไว้ใน status ("saving:<ms>") เพื่อให้ตรวจ "ค้าง saving" ได้ (ดู draft-status.ts)
   const claim = await prisma.lineDraft.updateMany({
     where: { id: draft.id, status: "pending" },
-    data: { status: "saving" },
+    data: { status: savingStatus() },
   });
   if (claim.count === 0) return false;
 
   try {
     await writeDraftToSheets(draft, eventId, eventName);
   } catch (err) {
-    // คืนเป็น pending ให้กดบันทึกใหม่ได้ (ถ้าแถวยังอยู่)
+    // คืนเป็น pending ให้กดบันทึกใหม่ได้ (ถ้าแถวยังอยู่ — แถวถูกลบแล้วเมื่อ append สำเร็จ ดู LINE-21)
     await prisma.lineDraft
-      .updateMany({ where: { id: draft.id, status: "saving" }, data: { status: "pending" } })
+      .updateMany({ where: { id: draft.id, status: { startsWith: SAVING_PREFIX } }, data: { status: "pending" } })
       .catch(() => {});
     throw err;
   }
@@ -1238,7 +1299,12 @@ async function writeDraftToSheets(
 
   // บันทึกแล้ว → ลบ draft (ocrJson มีเลขภาษี/ยอด — เก็บไว้แค่ชั่วคราวตาม Zero Data Retention)
   // ข้อมูลที่ต้องใช้ต่อ (ocr, eventName) อยู่ในหน่วยความจำแล้ว ไม่มีใครอ่าน draft หลังจากนี้
-  await prisma.lineDraft.deleteMany({ where: { id: draft.id } });
+  // LINE-21: แถวลง Sheet แล้ว — ตั้งแต่จุดนี้ห้าม throw (ผู้เรียกจะบอก "บันทึกไม่สำเร็จ" ทั้งที่ลงแล้ว
+  // และ revert status หาแถว draft ที่ไม่มีแล้ว) → ทุกอย่างหลัง append = best-effort, log แทน
+  await prisma.lineDraft.deleteMany({ where: { id: draft.id } }).catch((err) => {
+    // cron cleanup-line-drafts เก็บกวาดให้เมื่อหมดอายุ (LINE-06)
+    console.error(`[LINE] draft ${draft.id} saved as ${paymentId} but delete failed (cron will expire it):`, err);
+  });
 
   // Audit log — distinguish OCR vs manual text entry
   const auditPrefix = isTextEntry ? "LINE Text" : "LINE OCR";
@@ -1246,16 +1312,20 @@ async function writeDraftToSheets(
     ? (ocr.rawText?.slice(0, 60) || "")
     : (ocr.vendorName || "");
 
-  await safeAuditLog({
-    data: {
-      orgId: draft.orgId,
-      userId: draft.userId,
-      action: "create",
-      entityType: "payment",
-      entityRef: paymentId,
-      summary: `${auditPrefix}: ${auditLabel} ฿${gttlAmount} | ${eventName || "ไม่ระบุโปรเจกต์"}`,
-    },
-  });
+  try {
+    await safeAuditLog({
+      data: {
+        orgId: draft.orgId,
+        userId: draft.userId,
+        action: "create",
+        entityType: "payment",
+        entityRef: paymentId,
+        summary: `${auditPrefix}: ${auditLabel} ฿${gttlAmount} | ${eventName || "ไม่ระบุโปรเจกต์"}`,
+      },
+    });
+  } catch (err) {
+    console.error(`[LINE] audit log failed for ${paymentId} (row already saved):`, err);
+  }
 
   // Notify user — saved Flex card. For text entries, use the typed message
   // (truncated) as the "vendor" label so the user recognizes the entry.
@@ -1263,13 +1333,21 @@ async function writeDraftToSheets(
     ? (ocr.rawText?.slice(0, 40) || "บันทึกจาก LINE")
     : (ocr.vendorName || "บันทึกจาก LINE");
 
-  await pushMessage(draft.lineUserId, [
-    buildSavedFlex({
-      paymentId,
-      vendor: savedLabel,
-      amount: gttlAmount,
-      projectName: eventName || "ไม่ระบุ",
-      webUrl: `${APP_BASE_URL}/expenses`,
-    }),
-  ]);
+  try {
+    await pushMessage(draft.lineUserId, [
+      buildSavedFlex({
+        paymentId,
+        vendor: savedLabel,
+        amount: gttlAmount,
+        projectName: eventName || "ไม่ระบุ",
+        webUrl: `${APP_BASE_URL}/expenses`,
+      }),
+    ]);
+  } catch (err) {
+    // การ์ดไม่ถึงผู้ใช้ แต่แถวอยู่ใน Sheet แล้ว — ส่งข้อความสั้นแทน (best-effort) แล้วจบแบบสำเร็จ
+    console.error(`[LINE] saved-card push failed for ${paymentId} (row already saved):`, err);
+    await pushMessage(draft.lineUserId, [
+      text(`บันทึกแล้ว ฿${gttlAmount} (${savedLabel}) — ดูได้ที่ ${APP_BASE_URL}/expenses`),
+    ]).catch(() => {});
+  }
 }

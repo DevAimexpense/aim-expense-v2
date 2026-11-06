@@ -201,6 +201,16 @@ const FEATURE_SETS: Record<PlanTier, Set<FeatureKey>> = Object.fromEntries(
   PLAN_TIERS.map((t) => [t, new Set(FEATURES_BY_TIER[t])]),
 ) as Record<PlanTier, Set<FeatureKey>>;
 
+/** รายการฟีเจอร์ทั้งหมดของแพ็กเกจ (ส่งให้ client ผ่าน subscription.current — BIL-07) */
+export function featuresFor(plan: PlanTier | string | null | undefined): FeatureKey[] {
+  return [...FEATURES_BY_TIER[normalisePlan(plan ?? "free")]];
+}
+
+/** แพ็กเกจต่ำสุดที่มีฟีเจอร์นี้ (สำหรับ hint "Pro ขึ้นไป" ในเมนู) — null = ไม่มีแพ็กเกจไหนมี */
+export function minPlanFor(feature: FeatureKey): PlanTier | null {
+  return PLAN_TIERS.find((t) => FEATURE_SETS[t].has(feature)) ?? null;
+}
+
 // ===== Trial-aware subscription =====
 
 /**
@@ -296,15 +306,17 @@ export const SELF_SERVE_PLANS: PlanTier[] = ["basic", "pro", "business", "max"];
 /**
  * Discount applied to the first invoice when a valid referral code is used.
  * NOTE: the "+100 OCR first month" bonus was never implemented (BIL-09) —
- * removed from here so no UI/FAQ can promise it. The Prisma default on
- * `Referral.discountApplied` still says `..._plus_100ocr` (schema change
- * pending); treat that string as legacy, not as a promise.
+ * removed from here so no UI/FAQ can promise it. `Referral.discountApplied`
+ * now defaults to `discountAppliedCode` below (old rows may still carry the
+ * legacy `..._plus_100ocr` string — treat it as the same 20% discount).
  */
 export const REFERRAL_DISCOUNT = {
   /** First-invoice discount percentage. */
   firstInvoicePercentOff: 20,
   /** Stripe coupon ID we'll create in Stripe dashboard. */
   stripeCouponId: "ref-20pct-month1",
+  /** Value written to `Referral.discountApplied` (matches the Prisma default). */
+  discountAppliedCode: "20pct_first_month",
 } as const;
 
 /**

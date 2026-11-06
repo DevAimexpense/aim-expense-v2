@@ -371,10 +371,26 @@ async function hasPaidAtLeast(invoice: Stripe.Invoice, n: number): Promise<boole
 }
 
 /**
+ * BIL-11: บวกเดือนแบบปลอดภัย — `setMonth` ของ JS ล้นวัน (31 ม.ค. + 1 เดือน = 3 มี.ค.)
+ * ถ้าเดือนปลายทางสั้นกว่า ให้ clamp เป็นวันสุดท้ายของเดือนนั้น (31 ม.ค. → 28/29 ก.พ.)
+ */
+function addMonthsClamped(base: Date, months: number): Date {
+  const d = new Date(base.getTime());
+  const day = d.getDate();
+  d.setDate(1);
+  d.setMonth(d.getMonth() + months);
+  const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+  d.setDate(Math.min(day, lastDay));
+  return d;
+}
+
+/**
  * BIL-10: idempotent + atomic. Commissions are created BEFORE the referral is
  * flipped to `confirmed`, inside one transaction, and any monthIndex that
  * already exists is skipped — so a Stripe retry after a partial failure
  * fills in the missing rows instead of leaving the partner short forever.
+ * สอง webhook พร้อมกัน (ทั้งคู่เห็น commissions = []) → `@@unique([referralId, monthIndex])`
+ * + `skipDuplicates` ทำให้ตัวที่สองไม่สร้างซ้ำ แทนที่จะได้ 6 แถว
  */
 async function maybeConfirmReferral(orgId: string, invoice: Stripe.Invoice) {
   const referral = await prisma.referral.findUnique({
@@ -409,8 +425,7 @@ async function maybeConfirmReferral(orgId: string, invoice: Stripe.Invoice) {
     ? AFFILIATE_COMMISSION_SCHEDULE.filter(
         (e) => e.percent > 0 && !already.has(e.monthIndex),
       ).map((entry) => {
-        const scheduledFor = new Date(now);
-        scheduledFor.setMonth(scheduledFor.getMonth() + (entry.monthIndex - 2));
+        const scheduledFor = addMonthsClamped(now, entry.monthIndex - 2);
         return {
           partnerId: referral.partnerId,
           referralId: referral.id,
@@ -424,7 +439,8 @@ async function maybeConfirmReferral(orgId: string, invoice: Stripe.Invoice) {
 
   await prisma.$transaction(async (tx) => {
     if (rows.length > 0) {
-      await tx.commission.createMany({ data: rows });
+      // BIL-10: ชน unique (referralId, monthIndex) จาก webhook คู่ขนาน → ข้ามแถวนั้น ไม่ throw
+      await tx.commission.createMany({ data: rows, skipDuplicates: true });
     }
     // Flip status LAST, and only if still pending (guards concurrent retries).
     await tx.referral.updateMany({

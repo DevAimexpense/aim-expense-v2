@@ -16,7 +16,8 @@
 //   3. Org already has a live Stripe subscription → update its price in place
 //      (one subscription per org, prorated) and return to /account/billing
 //   4. Find/create Stripe Customer for the org (idempotent)
-//   5. Apply ref-coupon: Referral row first, `aim_ref` cookie second
+//   5. Apply ref-coupon: Referral row first; `aim_ref` cookie/body code only
+//      after creating the Referral row for this org (BIL-09)
 //   6. Create checkout.session with success/cancel URLs back to /account/billing
 //      (keeping remaining trial days via subscription_data.trial_end)
 // ===========================================
@@ -36,6 +37,7 @@ import {
   PLAN_TIERS,
   PLAN_PRICING_THB,
   PLAN_LABELS,
+  REFERRAL_DISCOUNT,
   isInTrial,
   type PlanTier,
 } from "@/lib/plans";
@@ -242,8 +244,10 @@ export async function POST(req: NextRequest) {
 
   // BIL-09: the discount must follow the same record the partner's commission
   // follows — the Referral row written at signup — not the 30-day `aim_ref`
-  // cookie (which expires exactly when the trial does). Cookie/body code is
-  // only a secondary path for an org that has no Referral row.
+  // cookie (which expires exactly when the trial does).
+  // Org ที่ยังไม่มี Referral row แต่มีโค้ด (cookie/body): ต้อง "สร้าง Referral row ก่อน"
+  // แล้วค่อยให้คูปอง — ไม่งั้นลูกค้าได้ส่วนลดแต่พาร์ตเนอร์ไม่ได้คอม (ไม่มี row ให้ webhook ยืนยัน)
+  // กติกาเดียวกับ create-company: พาร์ตเนอร์ active, ไม่ใช่ตัวเอง, org ยังไม่เคยถูกแนะนำ
   // Self-referral is blocked in both paths as defence-in-depth.
   let discounts: { coupon: string }[] | undefined;
   let validRefPartnerId: string | null = null;
@@ -253,22 +257,22 @@ export async function POST(req: NextRequest) {
     where: { referredOrgId: orgId },
     include: { partner: { select: { id: true, code: true, isActive: true, userId: true } } },
   });
-  if (
-    referral &&
-    (referral.status === "pending" || referral.status === "confirmed") &&
-    referral.partner.isActive &&
-    referral.partner.userId !== session.userId
-  ) {
-    discounts = [{ coupon: REFERRAL_COUPON_ID }];
-    validRefPartnerId = referral.partner.id;
-    appliedRefCode = referral.partner.code;
-  } else if (refCode) {
-    const partner = await prisma.affiliatePartner.findUnique({
-      where: { code: refCode },
-    });
-    if (partner && partner.isActive && partner.userId !== session.userId) {
+  if (referral) {
+    // org เคยถูกแนะนำแล้ว (ไม่ว่าสถานะใด) → ไม่สร้างซ้ำ ให้คูปองเฉพาะ row ที่ยังใช้ได้
+    if (
+      (referral.status === "pending" || referral.status === "confirmed") &&
+      referral.partner.isActive &&
+      referral.partner.userId !== session.userId
+    ) {
       discounts = [{ coupon: REFERRAL_COUPON_ID }];
-      validRefPartnerId = partner.id;
+      validRefPartnerId = referral.partner.id;
+      appliedRefCode = referral.partner.code;
+    }
+  } else if (refCode && /^[A-Za-z0-9-]{4,16}$/.test(refCode)) {
+    const created = await createReferralAtCheckout(orgId, refCode, session.userId);
+    if (created) {
+      discounts = [{ coupon: REFERRAL_COUPON_ID }];
+      validRefPartnerId = created.partnerId;
       appliedRefCode = refCode;
     }
   }
@@ -329,5 +333,56 @@ export async function POST(req: NextRequest) {
       { error: err instanceof Error ? err.message : "Stripe error" },
       { status: 500 },
     );
+  }
+}
+
+/**
+ * BIL-09: สร้าง Referral row ตอน checkout ให้ org ที่ยังไม่มี (เช่น สมัครก่อนมีโค้ด แล้วค่อยกดลิงก์พาร์ตเนอร์)
+ * ใช้เงื่อนไขเดียวกับ create-company: พาร์ตเนอร์มีจริง + active + ไม่ใช่ผู้ใช้คนเดียวกัน
+ * คืน `{ partnerId }` เมื่อมี row (สร้างใหม่ หรือมีคนสร้างพร้อมกันพอดี) · null = ไม่ให้คูปอง
+ */
+async function createReferralAtCheckout(
+  orgId: string,
+  refCode: string,
+  userId: string,
+): Promise<{ partnerId: string } | null> {
+  const partner = await prisma.affiliatePartner.findUnique({
+    where: { code: refCode },
+    select: { id: true, isActive: true, userId: true },
+  });
+  if (!partner || !partner.isActive || partner.userId === userId) return null;
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      await tx.referral.create({
+        data: {
+          partnerId: partner.id,
+          referredOrgId: orgId,
+          code: refCode,
+          status: "pending",
+          discountApplied: REFERRAL_DISCOUNT.discountAppliedCode,
+        },
+      });
+      await tx.affiliatePartner.update({
+        where: { id: partner.id },
+        data: { totalReferrals: { increment: 1 } },
+      });
+    });
+    return { partnerId: partner.id };
+  } catch (e) {
+    // P2002 = มี row โผล่มาระหว่างนั้น (ดับเบิลคลิก checkout) → ใช้ row นั้นถ้าเป็นพาร์ตเนอร์เดียวกัน
+    const code = (e as { code?: string })?.code;
+    if (code === "P2002") {
+      const existing = await prisma.referral.findUnique({
+        where: { referredOrgId: orgId },
+        select: { partnerId: true, status: true },
+      });
+      if (existing?.partnerId === partner.id && existing.status === "pending") {
+        return { partnerId: partner.id };
+      }
+      return null;
+    }
+    console.warn("[stripe-checkout] referral capture failed — no coupon applied:", e);
+    return null;
   }
 }

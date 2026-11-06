@@ -420,7 +420,7 @@ export function WhtClient({ orgName }: { orgName: string }) {
             <>
               📄 <strong>ดาวน์โหลด PDF ตามฟอร์มกรมสรรพากร</strong> (เดือน{" "}
               {formatMonthYear(`${period}-15`)}) — เปิดในแท็บใหม่
-              เลือก "พิมพ์/บันทึกเป็น PDF"
+              เลือก &quot;พิมพ์/บันทึกเป็น PDF&quot;
             </>
           ) : (
             <>

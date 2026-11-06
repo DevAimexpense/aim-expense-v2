@@ -6,7 +6,7 @@
 
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { router, orgProcedure, permissionProcedure } from "../trpc";
+import { router, featureProcedure } from "../trpc";
 import { getSheetsService, ensureTabsCached } from "../lib/sheets-context";
 import {
   GoogleSheetsService,
@@ -14,7 +14,7 @@ import {
 } from "../services/google-sheets.service";
 import { computeNextDocNumber, withDocNumberLock, docPeriod } from "../lib/doc-number";
 import { assertVatAllowed } from "../lib/org-vat";
-import { scopedEventIds } from "@/lib/permissions";
+import { isDocInScope } from "../lib/doc-scope";
 import { todayBangkok } from "@/lib/utils/date";
 import { resolveIssuerBranch } from "../lib/issuer-branch";
 import { prisma } from "@/lib/prisma";
@@ -183,7 +183,7 @@ function monthMoveWarning(
 // ===== Router =====
 
 export const quotationRouter = router({
-  list: orgProcedure
+  list: featureProcedure("revenueModule")
     .input(
       z
         .object({
@@ -198,11 +198,10 @@ export const quotationRouter = router({
       const sheets = await getSheetsService(ctx.org.orgId);
       await ensureTabsCached(sheets, ctx.org.orgId);
       const all = await sheets.getQuotations();
-      // project_manager เห็นเฉพาะเอกสารของโปรเจกต์ในขอบเขตตัวเอง (CO-07)
-      const scope = scopedEventIds(ctx.org);
+      // project_manager เห็นเฉพาะเอกสารของโปรเจกต์ในขอบเขตตัวเอง หรือที่ตัวเองสร้าง (CO-07/CO-07b)
 
       const filtered = all.filter((r) => {
-        if (scope !== null && !scope.includes((r.EventID || "").trim())) return false;
+        if (!isDocInScope(ctx.org, ctx.session.userId, r.EventID, r.PreparedByUserId)) return false;
         if (input?.status && r.Status !== input.status) return false;
         if (input?.customerId && r.CustomerID !== input.customerId)
           return false;
@@ -221,7 +220,7 @@ export const quotationRouter = router({
       return filtered.map(shapeHeader);
     }),
 
-  getById: orgProcedure
+  getById: featureProcedure("revenueModule")
     .input(z.object({ quotationId: z.string() }))
     .query(async ({ ctx, input }) => {
       const sheets = await getSheetsService(ctx.org.orgId);
@@ -234,9 +233,8 @@ export const quotationRouter = router({
         (r) => r.QuotationID === input.quotationId
       );
       if (!header) return null;
-      // project_manager: นอกขอบเขต = ไม่พบ (CO-07)
-      const scope = scopedEventIds(ctx.org);
-      if (scope !== null && !scope.includes((header.EventID || "").trim())) {
+      // project_manager: นอกขอบเขตและไม่ใช่ของตัวเอง = ไม่พบ (CO-07/CO-07b)
+      if (!isDocInScope(ctx.org, ctx.session.userId, header.EventID, header.PreparedByUserId)) {
         throw new TRPCError({ code: "NOT_FOUND", message: "ไม่พบใบเสนอราคา" });
       }
       const lines = (batch[SHEET_TABS.QUOTATION_LINES] || [])
@@ -252,7 +250,7 @@ export const quotationRouter = router({
       };
     }),
 
-  create: permissionProcedure("manageQuotations")
+  create: featureProcedure("revenueModule", "manageQuotations")
     .input(QuotationCreateInput)
     .mutation(async ({ ctx, input }) => {
       // org ไม่จด VAT ออกเอกสารมี VAT ไม่ได้ — บังคับฝั่ง server (DOC-06)
@@ -382,7 +380,7 @@ export const quotationRouter = router({
    * Update — only allowed when Status === "draft"
    * Replace strategy: header update + delete-and-reinsert lines (simpler than diff)
    */
-  update: permissionProcedure("manageQuotations")
+  update: featureProcedure("revenueModule", "manageQuotations")
     .input(
       z.object({ quotationId: z.string() }).merge(QuotationCreateInput)
     )
@@ -477,13 +475,13 @@ export const quotationRouter = router({
 
   // ===== State transitions =====
 
-  send: permissionProcedure("manageQuotations")
+  send: featureProcedure("revenueModule", "manageQuotations")
     .input(z.object({ quotationId: z.string() }))
     .mutation(async ({ ctx, input }) => {
       return transitionStatus(ctx, input.quotationId, "draft", "sent", "ส่ง");
     }),
 
-  accept: permissionProcedure("manageQuotations")
+  accept: featureProcedure("revenueModule", "manageQuotations")
     .input(z.object({ quotationId: z.string() }))
     .mutation(async ({ ctx, input }) => {
       return transitionStatus(
@@ -495,7 +493,7 @@ export const quotationRouter = router({
       );
     }),
 
-  reject: permissionProcedure("manageQuotations")
+  reject: featureProcedure("revenueModule", "manageQuotations")
     .input(z.object({ quotationId: z.string() }))
     .mutation(async ({ ctx, input }) => {
       return transitionStatus(
@@ -507,7 +505,7 @@ export const quotationRouter = router({
       );
     }),
 
-  void: permissionProcedure("manageQuotations")
+  void: featureProcedure("revenueModule", "manageQuotations")
     .input(z.object({ quotationId: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const sheets = await getSheetsService(ctx.org.orgId);
@@ -560,7 +558,7 @@ export const quotationRouter = router({
    * Permission: manageBillings (ไม่ใช่ manageQuotations) — เพราะคนที่ทำ billing
    * จะเป็นคนตัดสินใจค่าจ่าย แม้ quotation อาจจะถูกสร้างโดยคนอื่น
    */
-  convertToBilling: permissionProcedure("manageBillings")
+  convertToBilling: featureProcedure("revenueModule", "manageBillings")
     .input(
       z.object({
         quotationId: z.string(),

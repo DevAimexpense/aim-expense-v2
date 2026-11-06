@@ -11,7 +11,7 @@
 
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { router, orgProcedure, permissionProcedure } from "../trpc";
+import { router, featureProcedure } from "../trpc";
 import { getSheetsService, ensureTabsCached } from "../lib/sheets-context";
 import {
   GoogleSheetsService,
@@ -21,7 +21,7 @@ import { computeNextDocNumber, withDocNumberLock } from "../lib/doc-number";
 import { withLock } from "../lib/lock";
 import { invalidateTab } from "../lib/cache";
 import { assertVatAllowed } from "../lib/org-vat";
-import { scopedEventIds } from "@/lib/permissions";
+import { isDocInScope } from "../lib/doc-scope";
 import { todayBangkok } from "@/lib/utils/date";
 import { resolveIssuerBranch } from "../lib/issuer-branch";
 import { prisma } from "@/lib/prisma";
@@ -196,7 +196,7 @@ function shapeLine(r: Record<string, string>) {
 // ===== Router =====
 
 export const taxInvoiceRouter = router({
-  list: orgProcedure
+  list: featureProcedure("revenueModule")
     .input(
       z
         .object({
@@ -211,11 +211,10 @@ export const taxInvoiceRouter = router({
       const sheets = await getSheetsService(ctx.org.orgId);
       await ensureTabsCached(sheets, ctx.org.orgId);
       const all = await sheets.getTaxInvoices();
-      // project_manager เห็นเฉพาะเอกสารของโปรเจกต์ในขอบเขตตัวเอง (CO-07)
-      const scope = scopedEventIds(ctx.org);
+      // project_manager เห็นเฉพาะเอกสารของโปรเจกต์ในขอบเขตตัวเอง หรือที่ตัวเองสร้าง (CO-07/CO-07b)
 
       const filtered = all.filter((r) => {
-        if (scope !== null && !scope.includes((r.EventID || "").trim())) return false;
+        if (!isDocInScope(ctx.org, ctx.session.userId, r.EventID, r.PreparedByUserId)) return false;
         if (input?.status && r.Status !== input.status) return false;
         if (input?.customerId && r.CustomerID !== input.customerId) return false;
         if (input?.from && r.DocDate < input.from) return false;
@@ -236,7 +235,7 @@ export const taxInvoiceRouter = router({
       return filtered.map(shapeHeader);
     }),
 
-  getById: orgProcedure
+  getById: featureProcedure("revenueModule")
     .input(z.object({ taxInvoiceId: z.string() }))
     .query(async ({ ctx, input }) => {
       const sheets = await getSheetsService(ctx.org.orgId);
@@ -249,9 +248,8 @@ export const taxInvoiceRouter = router({
         (r) => r.TaxInvoiceID === input.taxInvoiceId,
       );
       if (!header) return null;
-      // project_manager: นอกขอบเขต = ไม่พบ (CO-07)
-      const scope = scopedEventIds(ctx.org);
-      if (scope !== null && !scope.includes((header.EventID || "").trim())) {
+      // project_manager: นอกขอบเขตและไม่ใช่ของตัวเอง = ไม่พบ (CO-07/CO-07b)
+      if (!isDocInScope(ctx.org, ctx.session.userId, header.EventID, header.PreparedByUserId)) {
         throw new TRPCError({ code: "NOT_FOUND", message: "ไม่พบใบกำกับภาษี" });
       }
       const lines = (batch[SHEET_TABS.TAX_INVOICE_LINES] || [])
@@ -267,7 +265,7 @@ export const taxInvoiceRouter = router({
       };
     }),
 
-  create: permissionProcedure("manageTaxInvoices")
+  create: featureProcedure("revenueModule", "manageTaxInvoices")
     .input(TaxInvoiceCreateInput)
     .mutation(async ({ ctx, input }) => {
       validateDocDate(input.docDate);
@@ -380,7 +378,7 @@ export const taxInvoiceRouter = router({
   /**
    * Update a draft tax invoice. Issued/void TIs are locked.
    */
-  update: permissionProcedure("manageTaxInvoices")
+  update: featureProcedure("revenueModule", "manageTaxInvoices")
     .input(z.object({ taxInvoiceId: z.string() }).merge(TaxInvoiceCreateInput))
     .mutation(async ({ ctx, input }) => {
       validateDocDate(input.docDate);
@@ -479,7 +477,7 @@ export const taxInvoiceRouter = router({
    * - DocNumber computed from MAX of issued+year+1 → strictly sequential
    * - Once issued, only `void` action is allowed; all fields immutable
    */
-  issue: permissionProcedure("manageTaxInvoices")
+  issue: featureProcedure("revenueModule", "manageTaxInvoices")
     .input(z.object({ taxInvoiceId: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const sheets = await getSheetsService(ctx.org.orgId);
@@ -559,7 +557,7 @@ export const taxInvoiceRouter = router({
    * Per RD: voided numbers stay in the sequence (do not re-use).
    * Phase 2 (future): link to a credit-note that replaces it.
    */
-  void: permissionProcedure("manageTaxInvoices")
+  void: featureProcedure("revenueModule", "manageTaxInvoices")
     .input(
       z.object({
         taxInvoiceId: z.string(),
@@ -615,7 +613,7 @@ export const taxInvoiceRouter = router({
   /**
    * Delete a draft tax invoice (only drafts — issued/void are immutable per RD).
    */
-  delete: permissionProcedure("manageTaxInvoices")
+  delete: featureProcedure("revenueModule", "manageTaxInvoices")
     .input(z.object({ taxInvoiceId: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const sheets = await getSheetsService(ctx.org.orgId);
@@ -660,7 +658,7 @@ export const taxInvoiceRouter = router({
    * Convert from a Billing → create a draft Tax Invoice with snapshots.
    * Billing remains untouched (TI is the tax doc; billing was just the demand-for-payment).
    */
-  convertFromBilling: permissionProcedure("manageTaxInvoices")
+  convertFromBilling: featureProcedure("revenueModule", "manageTaxInvoices")
     .input(z.object({ billingId: z.string(), docDate: z.string().optional() }))
     .mutation(async ({ ctx, input }) => {
       const sheets = await getSheetsService(ctx.org.orgId);
@@ -797,7 +795,7 @@ export const taxInvoiceRouter = router({
    * Convert from a Quotation → create a draft Tax Invoice (skip Billing).
    * Quotation status is NOT modified (a quotation may convert to multiple TIs over time).
    */
-  convertFromQuotation: permissionProcedure("manageTaxInvoices")
+  convertFromQuotation: featureProcedure("revenueModule", "manageTaxInvoices")
     .input(z.object({ quotationId: z.string(), docDate: z.string().optional() }))
     .mutation(async ({ ctx, input }) => {
       const sheets = await getSheetsService(ctx.org.orgId);
@@ -947,7 +945,7 @@ export const taxInvoiceRouter = router({
    * Once recorded, status stays "issued" (TI compliance is on issuance, not on
    * settlement). To reverse, void the TI.
    */
-  recordPayment: permissionProcedure("manageTaxInvoices")
+  recordPayment: featureProcedure("revenueModule", "manageTaxInvoices")
     .input(
       z.object({
         taxInvoiceId: z.string(),
@@ -1020,7 +1018,7 @@ export const taxInvoiceRouter = router({
    * Attach uploaded URL (evidence or WHT cert) to a tax invoice.
    * Used by the upload API route after the file is on Drive.
    */
-  attachUploadedFile: permissionProcedure("manageTaxInvoices")
+  attachUploadedFile: featureProcedure("revenueModule", "manageTaxInvoices")
     .input(
       z.object({
         taxInvoiceId: z.string(),

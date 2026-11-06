@@ -13,6 +13,7 @@ import { getSession } from "@/lib/auth/session";
 import { getOrgContext } from "@/lib/auth/middleware";
 import { prisma } from "@/lib/prisma";
 import { formatDate as formatThaiDate } from "@/lib/utils/date";
+import { GoogleRevokedBanner } from "@/components/shared/google-revoked-banner";
 
 export const metadata = {
   title: "เชื่อมต่อ Google | Aim Expense",
@@ -81,6 +82,7 @@ export default async function GoogleSettingsPage({
     prisma.organization.findUnique({
       where: { id: orgCtx.orgId },
       select: {
+        ownerId: true,
         googleSpreadsheetId: true,
         googleDriveFolderId: true,
         driveReceiptsFolderId: true,
@@ -89,6 +91,21 @@ export default async function GoogleSettingsPage({
       },
     }),
   ]);
+
+  // CO-08: ข้อมูลของ org ทั้งหมดเขียน/อ่านผ่าน token ของ "เจ้าของ" — ถ้า token นั้นถูก
+  // ยกเลิก (sheets-context ตั้ง isActive=false) ทุกคนต้องเห็นแบนเนอร์ ไม่ใช่แค่เจ้าของ
+  const isOwner = org?.ownerId === session.userId;
+  const ownerConnection =
+    org && !isOwner
+      ? await prisma.googleConnection.findUnique({
+          where: { userId: org.ownerId },
+          select: { isActive: true, googleEmail: true },
+        })
+      : connection
+        ? { isActive: connection.isActive, googleEmail: connection.googleEmail }
+        : null;
+  // เคยเชื่อมต่อแล้วแต่ถูกยกเลิก (ไม่ใช่ "ยังไม่เคยเชื่อมต่อ")
+  const ownerRevoked = !!ownerConnection && !ownerConnection.isActive;
 
   const params = await searchParams;
   const justReconnected = params.reconnected === "1";
@@ -130,6 +147,10 @@ export default async function GoogleSettingsPage({
           </p>
         </div>
       </div>
+
+      {ownerRevoked && !justReconnected && (
+        <GoogleRevokedBanner isOwner={isOwner} ownerEmail={ownerConnection?.googleEmail} />
+      )}
 
       {justReconnected && (
         <div
@@ -189,8 +210,10 @@ export default async function GoogleSettingsPage({
           </h2>
           {connection?.isActive ? (
             <span className="app-badge app-badge-success">เชื่อมต่ออยู่</span>
+          ) : connection ? (
+            <span className="app-badge app-badge-error">ถูกยกเลิก — ต้องเชื่อมต่อใหม่</span>
           ) : (
-            <span className="app-badge app-badge-error">ตัดการเชื่อมต่อ</span>
+            <span className="app-badge app-badge-error">ยังไม่ได้เชื่อมต่อ</span>
           )}
         </div>
 
