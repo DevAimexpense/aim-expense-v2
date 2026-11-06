@@ -30,7 +30,7 @@ export interface OrgContext {
   eventScope: string[]; // EventIDs this member is assigned to (for scoped roles)
   googleSpreadsheetId: string | null;
   googleDriveFolderId: string | null;
-  /** org นี้คือบริษัทหลังบ้านของทีมงาน (เข้า /admin/customers ได้ถ้าเป็น admin) */
+  /** org นี้คือบริษัทหลังบ้านของทีมงาน (ประตู /backoffice ดูจากสมาชิกภาพ — lib/auth/backoffice.ts) */
   isBackoffice: boolean;
   /** ธุรกิจจดทะเบียน VAT หรือไม่ — ไม่จด = ซ่อนใบกำกับภาษี / ภ.พ.30 */
   vatRegistered: boolean;

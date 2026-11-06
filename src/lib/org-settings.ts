@@ -18,7 +18,7 @@ export function readVatRegistered(settings: unknown): boolean {
 
 /**
  * org นี้คือ "บริษัทหลังบ้าน" ของทีมงาน Aim Expense หรือไม่
- * (admin ของ org นี้เข้าหน้า /admin/customers — จัดการลูกค้าข้ามบริษัทได้)
+ * (admin ของ org นี้เข้าหน้า /backoffice — จัดการลูกค้าข้ามบริษัทได้ ไม่ว่าจะเลือกบริษัทไหนอยู่)
  *
  * ตั้งได้จาก DB script เท่านั้น (scripts/setup-backoffice.ts) — ไม่มี API ไหน
  * เขียน key นี้ ลูกค้าจึงยกระดับตัวเองไม่ได้

@@ -6,6 +6,7 @@
 
 import { router, orgProcedure } from "../trpc";
 import { prisma } from "@/lib/prisma";
+import { isInvoicePlan } from "@/lib/comp";
 import {
   effectivePlan,
   featuresFor,
@@ -45,6 +46,9 @@ export const subscriptionRouter = router({
       /** BIL-07: ฟีเจอร์ของแพ็กเกจนี้ — ให้ sidebar/dashboard ใช้แทนตารางที่เขียนมือ */
       features: featuresFor(plan),
       status: sub.status,
+      /** ลูกค้าจ่ายแบบวางบิล/โอนกับทีมงาน (ไม่มี Stripe) — UI ไม่ควรชวนกดจ่ายในระบบ */
+      invoicePayment: isInvoicePlan(sub),
+      invoicePeriodEnd: isInvoicePlan(sub) ? sub.billingPeriodEnd : null,
       maxMembers: sub.maxMembers,
       maxEvents: sub.maxEvents,
       creditsUsed: ocrUsed,

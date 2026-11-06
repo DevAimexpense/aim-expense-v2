@@ -27,6 +27,7 @@ import { z } from "zod";
 import type Stripe from "stripe";
 import { getSession } from "@/lib/auth/session";
 import { prisma } from "@/lib/prisma";
+import { isInvoiceActive } from "@/lib/comp";
 import {
   stripe,
   getPriceByTierInterval,
@@ -90,6 +91,17 @@ export async function POST(req: NextRequest) {
   ]);
   if (!org) {
     return NextResponse.json({ error: "ไม่พบ org" }, { status: 404 });
+  }
+
+  // วางบิล/โอนกับทีมงาน (รอบยังไม่หมด) — ถ้าให้ผ่าน Stripe จะจ่ายสองทาง
+  if (isInvoiceActive(sub)) {
+    return NextResponse.json(
+      {
+        error:
+          "แพ็กเกจนี้ชำระผ่านการวางบิลกับทีมงานอยู่ — ไม่ต้องชำระผ่าน Stripe หากต้องการเปลี่ยนแพ็กเกจ กรุณาติดต่อทีมงาน",
+      },
+      { status: 400 },
+    );
   }
 
   // ฟรีตลอดชีพ (comped จากหลังบ้าน) — ไม่มีอะไรต้องจ่าย และ webhook จะไม่ทับ plan อยู่แล้ว

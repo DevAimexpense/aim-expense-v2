@@ -17,7 +17,8 @@ interface NavItem {
   companyOnly?: boolean; // ซ่อนสำหรับบุคคลธรรมดา (ใบกำกับภาษี, ภพ.30 — VAT/นิติบุคคลเท่านั้น)
   personalLabel?: string; // ชื่อเมนูทางเลือกเมื่อ org เป็นบุคคลธรรมดา
   hideForPersonal?: boolean; // ซ่อนสำหรับบุคคลธรรมดา (ไม่ขึ้นกับสถานะจด VAT)
-  backofficeOnly?: boolean; // เฉพาะ admin ของบริษัทหลังบ้าน (ทีมงาน Aim Expense)
+  backofficeOnly?: boolean; // เฉพาะ admin ของบริษัทหลังบ้าน (ทีมงาน Aim Expense) — ไม่ขึ้นกับบริษัทที่เลือก
+  exact?: boolean; // active เฉพาะ path ตรงกัน (เมนูแม่ที่มีเมนูลูกใต้ path เดียวกัน)
   feature?: FeatureKey; // BIL-07: ฟีเจอร์ตามแพ็กเกจ (plans.ts) — แพ็กเกจต่ำกว่าเห็นเมนูพร้อม 🔒 "Pro ขึ้นไป" แทนหายไปเฉย ๆ
 }
 
@@ -242,8 +243,15 @@ const NAV_GROUPS: NavGroup[] = [
     label: "หลังบ้านทีมงาน",
     items: [
       {
-        label: "จัดการลูกค้า",
-        href: "/admin/customers",
+        label: "ภาพรวมลูกค้า",
+        href: "/backoffice",
+        icon: "📊",
+        backofficeOnly: true,
+        exact: true,
+      },
+      {
+        label: "ลูกค้าทั้งหมด",
+        href: "/backoffice/customers",
         icon: "👥",
         backofficeOnly: true,
       },
@@ -258,7 +266,8 @@ interface SidebarProps {
   userName?: string;
   userAvatar?: string;
   isAdmin?: boolean;
-  isBackoffice?: boolean;
+  /** ผู้ใช้เป็น admin ของบริษัทหลังบ้าน (ตามสมาชิกภาพ ไม่ใช่บริษัทที่เลือก) */
+  isBackofficeAdmin?: boolean;
   vatRegistered?: boolean;
 }
 
@@ -269,7 +278,7 @@ export function Sidebar({
   userName = "",
   userAvatar,
   isAdmin = false,
-  isBackoffice = false,
+  isBackofficeAdmin = false,
   vatRegistered = true,
 }: SidebarProps) {
   const pathname = usePathname();
@@ -290,7 +299,7 @@ export function Sidebar({
 
   function isVisible(item: NavItem): boolean {
     // companyOnly: ซ่อนเมนู VAT/นิติบุคคลสำหรับบุคคลธรรมดา (ยังไม่จด VAT)
-    if (item.backofficeOnly) return isBackoffice && isAdmin;
+    if (item.backofficeOnly) return isBackofficeAdmin;
     if (item.hideForPersonal && isPersonal) return false;
     // และซ่อนเมื่อธุรกิจไม่จดทะเบียน VAT (ออกได้แต่ใบเสร็จรับเงิน ไม่มี ภ.พ.30)
     if (item.companyOnly && (isPersonal || !vatRegistered)) return false;
@@ -341,7 +350,9 @@ export function Sidebar({
               </p>
             )}
             {group.items.filter(isVisible).map((item) => {
-              const isActive = pathname === item.href || pathname.startsWith(item.href + "/");
+              const isActive =
+                pathname === item.href ||
+                (!item.exact && pathname.startsWith(item.href + "/"));
               const label =
                 isPersonal && item.personalLabel ? item.personalLabel : item.label;
               const hint = lockedHint(item);

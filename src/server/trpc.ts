@@ -9,6 +9,7 @@ import { getSession } from "@/lib/auth/session";
 import { getOrgContext } from "@/lib/auth/middleware";
 import { prisma } from "@/lib/prisma";
 import { isAffiliateAdmin } from "@/lib/affiliate";
+import { isBackofficeAdmin } from "@/lib/auth/backoffice";
 import type { Permissions, PermissionKey } from "@/types/permissions";
 import { hasFeature, PLAN_LABELS, type FeatureKey, type PlanTier } from "@/lib/plans";
 
@@ -228,17 +229,19 @@ const isAffiliateAdminMw = t.middleware(async ({ ctx, next }) => {
 
 /**
  * Backoffice middleware — เฉพาะ admin ของ "บริษัทหลังบ้าน" (org ที่มี
- * settings.backoffice = true) และต้องกำลังเลือกบริษัทนั้นอยู่ (active org)
+ * settings.backoffice = true) **ไม่ว่าจะกำลังเลือกบริษัทไหนอยู่** (กฎใน lib/auth/backoffice.ts)
  * ⚠️ procedure ที่ใช้ตัวนี้อ่าน/เขียนข้อมูล **ข้าม org** ได้
  */
-const isBackofficeMw = t.middleware(({ ctx, next }) => {
+const isBackofficeMw = t.middleware(async ({ ctx, next }) => {
   if (!ctx.session) {
     throw new TRPCError({ code: "UNAUTHORIZED", message: "กรุณาเข้าสู่ระบบ" });
   }
-  if (!ctx.org || !ctx.org.isBackoffice || ctx.org.role !== "admin") {
+  // ทางลัด: เลือกบริษัทหลังบ้านอยู่และเป็น admin → ไม่ต้องถาม DB เพิ่ม
+  const viaActiveOrg = !!ctx.org && ctx.org.isBackoffice && ctx.org.role === "admin";
+  if (!viaActiveOrg && !(await isBackofficeAdmin(ctx.session.userId))) {
     throw new TRPCError({ code: "FORBIDDEN", message: "ไม่มีสิทธิ์เข้าถึง" });
   }
-  return next({ ctx: { ...ctx, session: ctx.session, org: ctx.org } });
+  return next({ ctx: { ...ctx, session: ctx.session } });
 });
 
 /** Procedure สำหรับหลังบ้านทีมงาน (จัดการลูกค้าข้ามบริษัท) */

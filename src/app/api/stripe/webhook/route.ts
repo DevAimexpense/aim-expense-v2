@@ -28,7 +28,7 @@ import {
   PLAN_LIMITS,
   type PlanTier,
 } from "@/lib/plans";
-import { quotaCacheFor } from "@/lib/comp";
+import { INVOICE_STATUS, quotaCacheFor } from "@/lib/comp";
 import { safeAuditLog, systemActorFor } from "@/server/lib/audit";
 
 export const dynamic = "force-dynamic";
@@ -195,8 +195,19 @@ async function updateSubscriptionRow(orgId: string, s: Stripe.Subscription) {
   // ฟรีตลอดชีพ (comped จากหลังบ้าน) → เก็บสถานะ Stripe ไว้ แต่ไม่ทับ plan/quota ที่ทีมงานให้
   const existing = await prisma.subscription.findUnique({
     where: { orgId },
-    select: { isBetaTester: true, stripeSubscriptionId: true },
+    select: { isBetaTester: true, stripeSubscriptionId: true, status: true },
   });
+  // BO-01: ลูกค้าวางบิล/โอน (ไม่มี Stripe sub ที่เราติดตาม) — event ของ sub เก่าที่ไม่ entitled
+  // (incomplete_expired / canceled / unpaid หลังทีมตั้งวางบิลแล้ว) ต้องไม่ทับแผนที่ลูกค้าจ่ายเงินมาแล้ว
+  // event ที่ entitled (ลูกค้าไปจ่าย Stripe จริง) ให้ Stripe ชนะตามเดิม
+  if (
+    existing?.status === INVOICE_STATUS &&
+    !existing.stripeSubscriptionId &&
+    !ENTITLED_STATUSES.has(s.status)
+  ) {
+    console.warn(`[stripe-webhook] ignore ${s.status} for ${s.id} — org ${orgId} is on manual invoice plan`);
+    return;
+  }
   // BIL-21: subscription เก่า (เช่น incomplete → incomplete_expired หลังลูกค้าสร้างใบใหม่สำเร็จ)
   // ต้องไม่ทับ org ที่จ่ายอยู่ด้วยอันใหม่ให้เป็น Free
   if (
@@ -240,8 +251,15 @@ async function updateSubscriptionRow(orgId: string, s: Stripe.Subscription) {
       cancelAtPeriodEnd: s.cancel_at_period_end,
       // Trial markers are cleared only once the paid plan is really live —
       // an `incomplete` checkout must not cost the customer their trial days.
+      // NEW-02: Stripe ชนะแถววางบิล → ล้างรอบวางบิลที่ค้างด้วย
       ...(entitled
-        ? { trialPlan: null, trialStartedAt: null, trialEndsAt: null }
+        ? {
+            trialPlan: null,
+            trialStartedAt: null,
+            trialEndsAt: null,
+            billingPeriodStart: null,
+            billingPeriodEnd: null,
+          }
         : {}),
       // Cache quotas for fast read
       ...quotaCacheFor(planToStore),

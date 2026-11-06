@@ -19,6 +19,7 @@ import {
 } from "@/lib/plans";
 import { getUsage } from "@/server/lib/usage";
 import { BILLING_ENABLED } from "@/lib/billing-flag";
+import { isInvoiceActive, isInvoicePlan } from "@/lib/comp";
 import { COMPANY_NAME } from "@/lib/legal/version";
 import { CustomerPortalButton } from "./portal-button";
 
@@ -77,6 +78,8 @@ export default async function AccountBillingPage({
       billingInterval: true,
       stripeSubscriptionId: true,
       isBetaTester: true,
+      status: true,
+      billingPeriodEnd: true,
     },
   });
 
@@ -98,6 +101,9 @@ export default async function AccountBillingPage({
     : 0;
   const isOnPaidPlan =
     !!sub?.stripeSubscriptionId && sub.plan !== "free" && !inTrial;
+  // วางบิล/โอนกับทีมงาน (ไม่มี Stripe) — ไม่ชวนกดจ่ายในระบบ ไม่งั้นจ่ายสองทาง
+  const invoicePlan = isInvoicePlan(sub) && !inTrial;
+  const invoiceActive = isInvoiceActive(sub);
 
   return (
     <div className="app-page">
@@ -223,6 +229,8 @@ export default async function AccountBillingPage({
               >
                 {lifetime ? (
                   <span>🎁 ฟรีตลอดชีพ — ไม่มีค่าใช้จ่าย</span>
+                ) : invoicePlan ? (
+                  <span>🧾 ชำระผ่านการวางบิลกับทีมงาน</span>
                 ) : price && !inTrial ? (
                   <>
                     <strong style={{ fontSize: "1rem" }}>
@@ -243,13 +251,24 @@ export default async function AccountBillingPage({
               </div>
             </div>
 
-            <Link
-              href="/pricing"
-              className="app-btn app-btn-primary"
-              style={{ flexShrink: 0, whiteSpace: "nowrap" }}
-            >
-              {plan === "free" ? "🚀 อัปเกรด" : "🔄 เปลี่ยนแผน"}
-            </Link>
+            {/* UI-02: ลูกค้าวางบิลเปลี่ยนแพ็กเกจผ่านทีมงาน ไม่ใช่ /pricing (checkout จะปฏิเสธ) */}
+            {invoicePlan ? (
+              <Link
+                href="/contact"
+                className="app-btn app-btn-secondary"
+                style={{ flexShrink: 0, whiteSpace: "nowrap" }}
+              >
+                ติดต่อทีมงาน
+              </Link>
+            ) : (
+              <Link
+                href="/pricing"
+                className="app-btn app-btn-primary"
+                style={{ flexShrink: 0, whiteSpace: "nowrap" }}
+              >
+                {plan === "free" ? "🚀 อัปเกรด" : "🔄 เปลี่ยนแผน"}
+              </Link>
+            )}
           </div>
         </div>
 
@@ -360,8 +379,29 @@ export default async function AccountBillingPage({
         </div>
       </div>
 
+      {/* ลูกค้าวางบิล/โอน — ชำระกับทีมงาน ไม่ต้องกดจ่ายในระบบ */}
+      {invoicePlan && (
+        <div
+          className="app-card"
+          style={{
+            marginBottom: "1rem",
+            background: "var(--color-accent-50)",
+            border: "1px solid var(--color-accent-200)",
+          }}
+        >
+          <h3 style={{ fontSize: "0.9375rem", fontWeight: 700, margin: 0 }}>
+            🧾 แพ็กเกจนี้ชำระผ่านการวางบิลกับทีมงาน
+          </h3>
+          <p style={{ fontSize: "0.8125rem", marginTop: "0.375rem", lineHeight: 1.6, color: "#475569" }}>
+            {invoiceActive && sub?.billingPeriodEnd
+              ? `ใช้งานได้ถึง ${formatDate(sub.billingPeriodEnd)} — เมื่อใกล้ครบรอบ กรุณาติดต่อทีมงานเพื่อต่ออายุ ไม่ต้องกดจ่ายในระบบ`
+              : "รอบที่ชำระไว้สิ้นสุดแล้ว — ติดต่อทีมงานเพื่อต่ออายุ"}
+          </p>
+        </div>
+      )}
+
       {/* Demo / trial-only notice — billing not live yet */}
-      {!isOnPaidPlan && plan !== "enterprise" && !BILLING_ENABLED && (
+      {!isOnPaidPlan && !invoicePlan && plan !== "enterprise" && !BILLING_ENABLED && (
         <div
           className="app-card"
           style={{
@@ -415,7 +455,7 @@ export default async function AccountBillingPage({
       )}
 
       {/* Upgrade CTA — non-paid, non-enterprise (live billing only) */}
-      {!isOnPaidPlan && plan !== "enterprise" && BILLING_ENABLED && (
+      {!isOnPaidPlan && !invoicePlan && plan !== "enterprise" && BILLING_ENABLED && (
         <div
           className="app-card"
           style={{
