@@ -23,6 +23,7 @@ import {
 import { ENTITLED_STATUSES } from "@/lib/stripe";
 import { readIsBackoffice } from "@/lib/org-settings";
 import { yearMonthBangkok } from "@/lib/utils/date";
+import { parseStageMark } from "@/lib/reminder-stages";
 import type { Subscription } from "@prisma/client";
 import {
   GRANTABLE_PLANS,
@@ -60,6 +61,19 @@ const DAY_MS = 24 * 60 * 60 * 1000;
  * ไม่เอา payment/billing/quotation/... เพราะ entityRef/summary ชี้ไปข้อมูลธุรกิจของลูกค้า
  * (Zero Data Retention — ทีมงานไม่เห็นรายการค้าของลูกค้า)
  */
+/** RM-01: mark กันส่งซ้ำของ cron เตือน (summary ดิบ `trial-reminder:7`) → แปลงเป็นข้อความไทยก่อนแสดง */
+const REMINDER_MARKS: { prefix: string; label: string }[] = [
+  { prefix: "trial-reminder:", label: "ส่ง LINE เตือนทดลอง/ฟรีชั่วคราวใกล้หมด" },
+  { prefix: "invoice-reminder:", label: "ส่ง LINE เตือนรอบวางบิลใกล้หมด" },
+];
+function humaniseAuditSummary(summary: string | null): string | null {
+  for (const m of REMINDER_MARKS) {
+    const stage = parseStageMark(summary, m.prefix);
+    if (stage !== null) return `${m.label} (${stage} วัน) — ระบบ`;
+  }
+  return summary;
+}
+
 const SYSTEM_AUDIT_ENTITY_TYPES = [
   "subscription",
   "organization",
@@ -426,7 +440,7 @@ export const backofficeRouter = router({
           createdAt: l.createdAt.toISOString(),
           action: l.action,
           entityType: l.entityType,
-          summary: l.summary,
+          summary: humaniseAuditSummary(l.summary),
           actor: l.user.fullName || l.user.lineDisplayName,
         })),
       };

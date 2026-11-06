@@ -124,6 +124,99 @@ export async function sendTrialReminder(
   }
 }
 
+// ===== Invoice-plan (วางบิล/โอน) renewal reminder =====
+
+function buildInvoiceReminderFlex(params: {
+  orgName: string;
+  planLabel: string;
+  daysLeft: number;
+  periodEnd: Date;
+}): LineFlexMessage {
+  const { orgName, planLabel, daysLeft, periodEnd } = params;
+  const left = daysLeft <= 0 ? "หมดวันนี้" : `เหลืออีก ${daysLeft} วัน`;
+  return {
+    type: "flex",
+    altText: `แพ็กเกจ ${planLabel} ของ ${orgName} ${left} — ติดต่อทีมงานเพื่อต่ออายุ`,
+    contents: {
+      type: "bubble",
+      body: {
+        type: "box",
+        layout: "vertical",
+        spacing: "md",
+        contents: [
+          { type: "text", text: "🧾 รอบแพ็กเกจใกล้ครบกำหนด", weight: "bold", size: "md", color: "#b45309" },
+          { type: "text", text: orgName, size: "sm", color: "#64748b", wrap: true },
+          {
+            type: "box",
+            layout: "baseline",
+            contents: [
+              { type: "text", text: daysLeft <= 0 ? "ใช้ได้ถึง" : "เหลืออีก", size: "sm", color: "#475569", flex: 0 },
+              {
+                type: "text",
+                text: daysLeft <= 0 ? " วันนี้" : ` ${daysLeft} วัน`,
+                weight: "bold",
+                size: "xxl",
+                color: "#2563eb",
+              },
+            ],
+          },
+          {
+            type: "text",
+            text: `แพ็กเกจ ${planLabel} ใช้งานได้ถึง ${formatThaiDate(periodEnd)}`,
+            size: "xs",
+            color: "#94a3b8",
+            wrap: true,
+          },
+          { type: "separator", margin: "md" },
+          {
+            type: "text",
+            text: "แพ็กเกจนี้ชำระผ่านการวางบิลกับทีมงาน Aim Expense — กรุณาติดต่อทีมงานเพื่อต่ออายุ ไม่ต้องกดจ่ายในระบบ",
+            size: "xs",
+            color: "#475569",
+            wrap: true,
+          },
+          {
+            type: "text",
+            text: "หากเลยกำหนด บัญชีจะกลับเป็นแผนฟรีชั่วคราว ข้อมูลทั้งหมดยังอยู่ครบใน Google Sheet ของคุณ",
+            size: "xs",
+            color: "#94a3b8",
+            wrap: true,
+          },
+        ],
+      },
+      footer: {
+        type: "box",
+        layout: "vertical",
+        contents: [
+          {
+            type: "button",
+            style: "primary",
+            color: "#2563eb",
+            action: { type: "uri", label: "ติดต่อทีมงาน", uri: `${appUrl()}/contact` },
+          },
+        ],
+      },
+    },
+  };
+}
+
+/** Push เตือนรอบวางบิลใกล้หมด — best-effort ไม่ throw (เหมือน sendTrialReminder) */
+export async function sendInvoiceReminder(
+  lineUserId: string,
+  params: { orgName: string; planLabel: string; daysLeft: number; periodEnd: Date },
+): Promise<boolean> {
+  try {
+    await pushMessage(lineUserId, [buildInvoiceReminderFlex(params)]);
+    return true;
+  } catch (err) {
+    console.warn(
+      `[line-notify] invoice reminder failed for ${lineUserId}:`,
+      err instanceof Error ? err.message : err,
+    );
+    return false;
+  }
+}
+
 // ===== Welcome message =====
 
 function buildWelcomeFlex(orgName: string): LineFlexMessage {

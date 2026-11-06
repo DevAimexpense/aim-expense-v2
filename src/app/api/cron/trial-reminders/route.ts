@@ -14,18 +14,51 @@
 // (entityType=subscription, summary=`trial-reminder:<stage>`) — no schema
 // change needed.
 //
+// รอบที่ 2 ในไฟล์เดียวกัน: ลูกค้าวางบิล/โอน (status manual_invoice) เตือนก่อน billingPeriodEnd
+// 7 / 3 / 1 วัน ด้วยข้อความ "ติดต่อทีมงานเพื่อต่ออายุ" — mark `invoice-reminder:<stage>`
+// นับใหม่ทุกรอบ (mark ที่เก่ากว่า billingPeriodStart = รอบก่อน)
+//
 // Auth: requires `Authorization: Bearer ${CRON_SECRET}` (matches Vercel Cron).
 // ===========================================
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { sendTrialReminder } from "@/lib/line/notifications";
+import { sendInvoiceReminder, sendTrialReminder } from "@/lib/line/notifications";
+import { INVOICE_STATUS } from "@/lib/comp";
+import { PLAN_LABELS, normalisePlan } from "@/lib/plans";
+import { daysLeftUntil, dueStages, parseStageMark } from "@/lib/reminder-stages";
 
 export const dynamic = "force-dynamic";
 
-const REMINDER_DAYS = [7, 3, 1];
-const DAY_MS = 86_400_000;
 const REMINDER_MARK = "trial-reminder:";
+const INVOICE_MARK = "invoice-reminder:";
+
+/** mark ที่ส่งแล้วของแต่ละ org ในรอบปัจจุบัน (mark ก่อน periodStart = รอบก่อน ไม่นับ) */
+async function loadSentStages(
+  prefix: string,
+  rows: { orgId: string; periodStart: Date | null }[],
+): Promise<Map<string, Set<number>>> {
+  const sent = new Map<string, Set<number>>();
+  if (rows.length === 0) return sent;
+  const marks = await prisma.auditLog.findMany({
+    where: {
+      orgId: { in: rows.map((r) => r.orgId) },
+      entityType: "subscription",
+      summary: { startsWith: prefix },
+    },
+    select: { orgId: true, summary: true, createdAt: true },
+  });
+  for (const m of marks) {
+    const row = rows.find((r) => r.orgId === m.orgId);
+    if (!row) continue;
+    if (row.periodStart && m.createdAt < row.periodStart) continue;
+    const stage = parseStageMark(m.summary, prefix);
+    if (stage === null) continue;
+    if (!sent.has(m.orgId)) sent.set(m.orgId, new Set());
+    sent.get(m.orgId)!.add(stage);
+  }
+  return sent;
+}
 
 export async function GET(req: NextRequest) {
   // Fail CLOSED when CRON_SECRET is missing — otherwise anyone could spam
@@ -66,41 +99,21 @@ export async function GET(req: NextRequest) {
     },
   });
 
-  // Stages already sent for THIS trial (one query for all orgs). Marks older
-  // than the trial start belong to a previous trial and are ignored.
-  const marks = subs.length
-    ? await prisma.auditLog.findMany({
-        where: {
-          orgId: { in: subs.map((s) => s.orgId) },
-          entityType: "subscription",
-          summary: { startsWith: REMINDER_MARK },
-        },
-        select: { orgId: true, summary: true, createdAt: true },
-      })
-    : [];
-  const sentStages = new Map<string, Set<number>>();
-  for (const m of marks) {
-    const sub = subs.find((s) => s.orgId === m.orgId);
-    if (!sub) continue;
-    if (sub.trialStartedAt && m.createdAt < sub.trialStartedAt) continue;
-    const stage = Number(m.summary?.slice(REMINDER_MARK.length));
-    if (!Number.isFinite(stage)) continue;
-    if (!sentStages.has(m.orgId)) sentStages.set(m.orgId, new Set());
-    sentStages.get(m.orgId)!.add(stage);
-  }
+  // Stages already sent for THIS trial — marks older than the trial start belong to a previous trial.
+  const sentStages = await loadSentStages(
+    REMINDER_MARK,
+    subs.map((s) => ({ orgId: s.orgId, periodStart: s.trialStartedAt })),
+  );
 
   let sent = 0;
   let skipped = 0;
 
   for (const sub of subs) {
     if (!sub.trialEndsAt) continue;
-    const daysLeft = Math.ceil(
-      (sub.trialEndsAt.getTime() - now.getTime()) / DAY_MS,
-    );
+    const daysLeft = daysLeftUntil(sub.trialEndsAt, now);
     // Stages whose window we are inside and have not sent yet. If several are
     // due at once (cron was down), send ONE message and mark them all.
-    const done = sentStages.get(sub.orgId) ?? new Set<number>();
-    const due = REMINDER_DAYS.filter((d) => daysLeft <= d && !done.has(d));
+    const due = dueStages(daysLeft, sentStages.get(sub.orgId) ?? new Set<number>());
     if (due.length === 0) {
       skipped++;
       continue;
@@ -133,11 +146,76 @@ export async function GET(req: NextRequest) {
     });
   }
 
+  // ===== รอบที่ 2: ลูกค้าวางบิล/โอน — เตือนก่อนรอบหมด (ไม่มี Stripe ตัดเงินอัตโนมัติ) =====
+  const invoices = await prisma.subscription.findMany({
+    where: {
+      status: INVOICE_STATUS,
+      stripeSubscriptionId: null,
+      billingPeriodEnd: { gt: now },
+    },
+    select: {
+      id: true,
+      orgId: true,
+      plan: true,
+      billingPeriodStart: true,
+      billingPeriodEnd: true,
+      org: {
+        select: {
+          name: true,
+          ownerId: true,
+          owner: { select: { lineUserId: true } },
+        },
+      },
+    },
+  });
+  const invoiceSent = await loadSentStages(
+    INVOICE_MARK,
+    invoices.map((s) => ({ orgId: s.orgId, periodStart: s.billingPeriodStart })),
+  );
+  let invoiceSentCount = 0;
+  let invoiceSkipped = 0;
+  for (const sub of invoices) {
+    if (!sub.billingPeriodEnd) continue;
+    const daysLeft = daysLeftUntil(sub.billingPeriodEnd, now);
+    const due = dueStages(daysLeft, invoiceSent.get(sub.orgId) ?? new Set<number>());
+    if (due.length === 0) {
+      invoiceSkipped++;
+      continue;
+    }
+    const lineUserId = sub.org?.owner?.lineUserId;
+    if (!lineUserId) {
+      invoiceSkipped++;
+      continue;
+    }
+    const ok = await sendInvoiceReminder(lineUserId, {
+      orgName: sub.org?.name || "บริษัทของคุณ",
+      planLabel: PLAN_LABELS[normalisePlan(sub.plan)],
+      daysLeft,
+      periodEnd: sub.billingPeriodEnd,
+    });
+    if (!ok) {
+      invoiceSkipped++;
+      continue; // not marked → retried on the next run
+    }
+    invoiceSentCount++;
+    await prisma.auditLog.createMany({
+      data: due.map((stage) => ({
+        orgId: sub.orgId,
+        userId: sub.org!.ownerId,
+        action: "update",
+        entityType: "subscription",
+        entityRef: sub.id,
+        summary: `${INVOICE_MARK}${stage}`,
+      })),
+    });
+  }
+
   return NextResponse.json({
     success: true,
     sent,
     skipped,
     scanned: subs.length,
+    invoice: { sent: invoiceSentCount, skipped: invoiceSkipped, scanned: invoices.length },
     ranAt: now,
   });
 }
