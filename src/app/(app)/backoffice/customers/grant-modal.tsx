@@ -53,10 +53,9 @@ const KINDS: { key: GrantKind; label: string; hint: string }[] = [
 ];
 
 type IntervalChoice = InvoiceInterval | "custom";
-const INTERVALS: { key: IntervalChoice; label: string; hint: string }[] = [
-  { key: "monthly", label: "รายเดือน", hint: "+1 เดือน" },
-  { key: "yearly", label: "รายปี", hint: "+12 เดือน" },
-  { key: "custom", label: "กำหนดวันเอง", hint: "เลือกวันหมดอายุ" },
+const CYCLE_OPTIONS: { key: InvoiceInterval; label: string }[] = [
+  { key: "monthly", label: "รายเดือน" },
+  { key: "yearly", label: "รายปี" },
 ];
 
 export function GrantModal({
@@ -78,6 +77,8 @@ export function GrantModal({
   const [months, setMonths] = useState<(typeof GRANT_MONTH_OPTIONS)[number]>(1);
   const [plan, setPlan] = useState<Exclude<PlanTier, "free">>("pro");
   const [interval, setInterval_] = useState<IntervalChoice>("yearly");
+  /** รอบบิลที่เลือกไว้ใน dropdown (จำไว้แม้สลับไปกำหนดวันเอง) */
+  const [cycle, setCycle] = useState<InvoiceInterval>("yearly");
   const [endDate, setEndDate] = useState("");
   const [mode, setMode] = useState<"extend" | "today">("extend");
   const [note, setNote] = useState("");
@@ -197,32 +198,78 @@ export function GrantModal({
           </div>
         </div>
 
+        <div className="app-form-group">
+          <label className="app-label">แพ็กเกจ / เพดานผู้ใช้ / ราคา</label>
+          <select
+            value={plan}
+            onChange={(e) => setPlan(e.target.value as Exclude<PlanTier, "free">)}
+            className="app-select"
+          >
+            {(kind === "invoice" ? INVOICE_PLANS : GRANTABLE_PLANS).map((p) => (
+              <option key={p} value={p}>
+                {planOptionLabel(p)}
+              </option>
+            ))}
+          </select>
+          <p className="app-hint">
+            {limitText(limits.users, "ผู้ใช้")} · {limitText(limits.businesses, "ธุรกิจ")} ·{" "}
+            {limitText(limits.events, "โปรเจกต์")} · OCR {limitText(limits.ocrPerMonth, "ครั้ง/เดือน")}
+          </p>
+        </div>
+
         {kind === "invoice" && (
           <>
             <div className="app-form-group">
-              <label className="app-label">รอบที่ชำระ / วันหมดอายุ</label>
-              <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
-                {INTERVALS.map((it) => (
-                  <button
-                    key={it.key}
-                    type="button"
-                    onClick={() => setInterval_(it.key)}
-                    style={{ ...pill(interval === it.key), textAlign: "center" }}
-                  >
-                    <div style={{ fontWeight: 600 }}>{it.label}</div>
-                    <div style={{ fontSize: "0.75rem", color: "#64748b" }}>{it.hint}</div>
-                  </button>
-                ))}
-              </div>
-              {useEndDate && (
-                <div style={{ marginTop: "0.5rem", maxWidth: "220px" }}>
-                  <DateInput value={endDate} onChange={setEndDate} min={todayBangkok()} className="app-input" />
-                  <p className="app-hint">
-                    สิทธิ์ถึงสิ้นวันที่เลือก (เวลาไทย) · รอบใหม่เริ่มวันนี้
-                    {invoiceCurrentEnd ? ` — แทนรอบเดิมที่ถึง ${formatDate(invoiceCurrentEnd)}` : ""}
-                  </p>
-                </div>
-              )}
+              {/* เหมือน Aim HR: วิทยุ 2 แถว — ตามรอบบิล (dropdown) / กำหนดวันหมดอายุเอง (ช่องวันที่ในบรรทัดเดียว) */}
+              <label
+                style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "0.625rem", fontSize: "0.9375rem", cursor: "pointer" }}
+              >
+                <input
+                  type="radio"
+                  name="invoice-cycle"
+                  checked={!useEndDate}
+                  onChange={() => setInterval_(cycle)}
+                  style={{ width: "1.125rem", height: "1.125rem", accentColor: "#2563eb" }}
+                />
+                <span>ตามรอบบิล</span>
+                <select
+                  value={cycle}
+                  disabled={useEndDate}
+                  onChange={(e) => {
+                    const v = e.target.value as InvoiceInterval;
+                    setCycle(v);
+                    setInterval_(v);
+                  }}
+                  className="app-select"
+                  style={{ width: "auto", minWidth: "8.5rem", opacity: useEndDate ? 0.6 : 1 }}
+                >
+                  {CYCLE_OPTIONS.map((c) => (
+                    <option key={c.key} value={c.key}>
+                      {c.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label
+                style={{ display: "flex", alignItems: "center", gap: "0.75rem", fontSize: "0.9375rem", cursor: "pointer", flexWrap: "wrap" }}
+              >
+                <input
+                  type="radio"
+                  name="invoice-cycle"
+                  checked={useEndDate}
+                  onChange={() => setInterval_("custom")}
+                  style={{ width: "1.125rem", height: "1.125rem", accentColor: "#2563eb" }}
+                />
+                <span>กำหนดวันหมดอายุเอง</span>
+                <span style={{ width: "12rem", opacity: useEndDate ? 1 : 0.6 }} onClick={() => setInterval_("custom")}>
+                  <DateInput value={endDate} onChange={setEndDate} min={todayBangkok()} className="app-input" disabled={!useEndDate} />
+                </span>
+              </label>
+              <p className="app-hint">
+                {useEndDate
+                  ? `สิทธิ์ถึงสิ้นวันที่เลือก (เวลาไทย) · รอบใหม่เริ่มวันนี้${invoiceCurrentEnd ? ` — แทนรอบเดิมที่ถึง ${formatDate(invoiceCurrentEnd)}` : ""}`
+                  : `รายเดือน = +1 เดือน · รายปี = +12 เดือน · หมดอายุสิ้นวัน (เวลาไทย)`}
+              </p>
             </div>
             {invoiceCurrentEnd && !useEndDate && (
               <div className="app-form-group">
@@ -267,25 +314,6 @@ export function GrantModal({
             )}
           </div>
         )}
-
-        <div className="app-form-group">
-          <label className="app-label">แพ็กเกจ / เพดานผู้ใช้ / ราคา</label>
-          <select
-            value={plan}
-            onChange={(e) => setPlan(e.target.value as Exclude<PlanTier, "free">)}
-            className="app-select"
-          >
-            {(kind === "invoice" ? INVOICE_PLANS : GRANTABLE_PLANS).map((p) => (
-              <option key={p} value={p}>
-                {planOptionLabel(p)}
-              </option>
-            ))}
-          </select>
-          <p className="app-hint">
-            {limitText(limits.users, "ผู้ใช้")} · {limitText(limits.businesses, "ธุรกิจ")} ·{" "}
-            {limitText(limits.events, "โปรเจกต์")} · OCR {limitText(limits.ocrPerMonth, "ครั้ง/เดือน")}
-          </p>
-        </div>
 
         <div className="app-form-group">
           <label className="app-label">เลขที่ใบแจ้งหนี้ / เหตุผล / หมายเหตุ (เก็บใน audit log)</label>
@@ -339,7 +367,7 @@ export function GrantModal({
             {pending
               ? "กำลังบันทึก…"
               : kind === "invoice"
-                ? `กำหนด ${PLAN_LABELS[plan]} (วางบิล${useEndDate && endDate ? ` ถึง ${formatDate(endDate)}` : ""})`
+                ? "บันทึกแพ็กเกจ"
                 : kind === "lifetime"
                   ? "ให้ฟรีตลอดชีพ"
                   : `ให้ฟรี ${months} เดือน`}
