@@ -25,9 +25,10 @@ export async function withLock<T>(
   }
   // CO-24/DOC-23: ค่าเริ่มต้นต้องยาวกว่า "อ่าน Sheet 2 ครั้งใต้ 429 retry" (~5 วิ/ครั้ง)
   // เดิม 8 วิ → lock หมดอายุก่อนเขียน = คนที่สองอ่าน index/เลขเก่าแล้วเขียนทับ
-  // ttl 20 วิ ครอบ read→write ทั้งรอบ; รอได้ 8 วิ แล้ว fail-open (งานผู้ใช้ต้องไม่ค้าง)
+  // ttl 20 วิ ครอบ read→write ทั้งรอบ · BIL-30: ต้องรอได้ "อย่างน้อยเท่า ttl" ไม่งั้นคนที่สองหมดเวลารอ
+  // ก่อนคนแรกเขียนเสร็จ แล้ว fail-open ไปอ่านเลข/index เก่า (เหมือนไม่มี lock) · fail-open ไว้เฉพาะ Redis พัง
   const ttlMs = opts.ttlMs ?? 20000;
-  const waitMs = opts.waitMs ?? 8000;
+  const waitMs = opts.waitMs ?? ttlMs;
   const lockKey = `lock:${key}`;
   const token = randomUUID();
   const deadline = Date.now() + waitMs;

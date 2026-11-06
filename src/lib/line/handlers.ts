@@ -1301,9 +1301,11 @@ async function writeDraftToSheets(
   // ข้อมูลที่ต้องใช้ต่อ (ocr, eventName) อยู่ในหน่วยความจำแล้ว ไม่มีใครอ่าน draft หลังจากนี้
   // LINE-21: แถวลง Sheet แล้ว — ตั้งแต่จุดนี้ห้าม throw (ผู้เรียกจะบอก "บันทึกไม่สำเร็จ" ทั้งที่ลงแล้ว
   // และ revert status หาแถว draft ที่ไม่มีแล้ว) → ทุกอย่างหลัง append = best-effort, log แทน
-  await prisma.lineDraft.deleteMany({ where: { id: draft.id } }).catch((err) => {
-    // cron cleanup-line-drafts เก็บกวาดให้เมื่อหมดอายุ (LINE-06)
-    console.error(`[LINE] draft ${draft.id} saved as ${paymentId} but delete failed (cron will expire it):`, err);
+  await prisma.lineDraft.deleteMany({ where: { id: draft.id } }).catch(async (err) => {
+    // LINE-32: ลบไม่ได้ → ต้องไม่ปล่อยให้ค้าง "saving" (จะถูกรีเซ็ตเป็น pending แล้วกดบันทึกซ้ำได้)
+    // ตั้งเป็น confirmed (สถานะสิ้นสุด) → ปุ่มเก่าตอบ "บันทึกไปแล้ว", cron ลบทิ้งให้ (LINE-06)
+    console.error(`[LINE] draft ${draft.id} saved as ${paymentId} but delete failed (marking confirmed):`, err);
+    await prisma.lineDraft.updateMany({ where: { id: draft.id }, data: { status: "confirmed" } }).catch(() => {});
   });
 
   // Audit log — distinguish OCR vs manual text entry

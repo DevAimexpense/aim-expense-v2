@@ -875,7 +875,7 @@ export class GoogleSheetsService {
    */
   private withTabLock<T>(tabName: string, fn: () => Promise<T>): Promise<T> {
     // CO-24: หา index แถว (อ่าน 1-2 ครั้ง, ใต้ 429 retry ~5 วิ/ครั้ง) แล้วค่อยเขียน → ttl 20 วิ
-    return withLock(`sheet:${this.spreadsheetId}:${tabName}`, fn, { ttlMs: 20000, waitMs: 8000 });
+    return withLock(`sheet:${this.spreadsheetId}:${tabName}`, fn, { ttlMs: 20000, waitMs: 20000 });
   }
 
   /**

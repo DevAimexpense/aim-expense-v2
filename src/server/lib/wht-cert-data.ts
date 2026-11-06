@@ -11,6 +11,7 @@ import { withLock } from "./lock";
 import { isDocInScope } from "./doc-scope";
 import { findWthTypeByRate } from "@/lib/wth-types";
 import {
+  parseWhtCertSeq,
   generateWhtDocNumber,
   getPndForm,
   mapWhtToIncomeSection,
@@ -152,7 +153,12 @@ export async function loadWhtCertData(
           .filter((p) => {
             // รายการที่ยกเลิก/ถูกปฏิเสธไม่อยู่ในลำดับเลขหนังสือรับรอง — ไม่เช่นนั้นเลขของใบที่พิมพ์ไปแล้ว
             // จะเลื่อนเมื่อรายการก่อนหน้าถูกยกเลิก (DOC-04)
-            if (p.Status === "cancelled" || p.Status === "rejected") return false;
+            // DOC-30: แต่ถ้าใบนั้นออกเลขไปแล้ว ต้องคงอยู่ในลิสต์เพื่อกันเลขซ้ำ (เลขที่เก็บแล้วไม่คำนวณใหม่)
+            if (
+              (p.Status === "cancelled" || p.Status === "rejected") &&
+              parseWhtCertSeq(p.WhtCertNo || "") === null
+            )
+              return false;
             const pDateStr = resolveWhtCertDate(p);
             if (!pDateStr) return false;
             const d = new Date(pDateStr);
@@ -164,9 +170,9 @@ export async function loadWhtCertData(
           })
           .map((p) => ({ PaymentID: p.PaymentID, CreatedAt: p.CreatedAt || "", WhtCertNo: p.WhtCertNo || "" }));
       } catch (e) {
+        // DOC-31: เดาเป็น /001 แล้วเก็บถาวรไม่ได้ (จะซ้ำ) → ให้ render ล้ม ผู้ใช้ลองใหม่
         console.error(`[wht-cert] getPayments() failed:`, e);
-        // ถ้า query ล้มเหลว → fallback ใช้รายการเดียว (seq = 1)
-        monthPayments = [{ PaymentID: payment.PaymentID, CreatedAt: payment.CreatedAt || "" }];
+        throw new Error("อ่านรายการจ่ายเงินของเดือนนี้ไม่สำเร็จ ยังไม่ได้ออกเลขหนังสือรับรอง กรุณาลองใหม่อีกครั้ง");
       }
       const generated = generateWhtDocNumber(paymentDate, monthPayments, payment.PaymentID);
       try {

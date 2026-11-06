@@ -54,17 +54,18 @@ export async function GET(req: NextRequest) {
     where: { status: { startsWith: SAVING_PREFIX }, expiresAt: { gte: now } },
     select: { id: true, status: true, createdAt: true },
   });
-  const stuckIds = savingRows
-    .filter((r) => isSavingStale(r, SAVING_STALE_CRON_MS, now.getTime()))
-    .map((r) => r.id);
+  const stuck = savingRows.filter((r) => isSavingStale(r, SAVING_STALE_CRON_MS, now.getTime()));
   let resetCount = 0;
-  if (stuckIds.length > 0) {
+  // LINE-31: รีเซ็ตเฉพาะแถวที่ status ยังเป็นค่าเดิมที่เห็น — ถ้ามีคน claim ใหม่ระหว่างนี้ (saving:<ใหม่>) ต้องไม่ทับ
+  for (const r of stuck) {
     const reset = await prisma.lineDraft.updateMany({
-      where: { id: { in: stuckIds }, status: { startsWith: SAVING_PREFIX } },
+      where: { id: r.id, status: r.status },
       data: { status: "pending" },
     });
-    resetCount = reset.count;
-    console.warn(`[cron cleanup-line-drafts] reset ${resetCount} draft(s) stuck in saving → pending (LINE-25):`, stuckIds);
+    resetCount += reset.count;
+  }
+  if (resetCount > 0) {
+    console.warn(`[cron cleanup-line-drafts] reset ${resetCount} draft(s) stuck in saving → pending (LINE-25):`, stuck.map((r) => r.id));
   }
 
   return NextResponse.json({
