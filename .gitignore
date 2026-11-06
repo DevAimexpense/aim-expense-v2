@@ -86,3 +86,4 @@ tha.traineddata
 # Zip archives
 *.zip
 *.tar.gz
+demo guide_*.pdf
