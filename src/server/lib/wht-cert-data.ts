@@ -8,7 +8,7 @@ import { getSheetsService, ensureTabsCached } from "@/server/lib/sheets-context"
 import { SHEET_TABS } from "@/server/services/google-sheets.service";
 import { prisma } from "@/lib/prisma";
 import { withLock } from "./lock";
-import { isDocInScope } from "./doc-scope";
+import { scopedEventIds } from "@/lib/permissions";
 import { findWthTypeByRate } from "@/lib/wth-types";
 import {
   parseWhtCertSeq,
@@ -69,11 +69,23 @@ async function getPaymentWithRetry(
   return null;
 }
 
-/** ผู้เปิดเอกสาร — ใช้กั้นขอบเขต project_manager (CO-07b); ไม่ส่ง = ไม่กั้น (ผู้เรียกฝั่ง server ที่เช็คเองแล้ว) */
+/** ผู้เปิดเอกสาร — ใช้กั้นขอบเขต project_manager (CO-07b/CO-30); ไม่ส่ง = ไม่กั้น (ผู้เรียกฝั่ง server ที่เช็คเองแล้ว) */
 export interface WhtCertViewer {
   role: string;
   eventScope: string[];
-  userId: string;
+}
+
+/**
+ * CO-30: กฎเดียวกับ payment.getById — project_manager เห็นเฉพาะรายการจ่ายในโปรเจกต์ที่ได้รับมอบหมาย
+ * (ไม่มีข้อยกเว้น "รายการที่ตัวเองสร้าง" — 50 ทวิ เป็นเอกสารของรายการจ่าย ไม่ใช่เอกสารรายรับที่ PM ออกเอง)
+ * บทบาทอื่นเห็นทุกรายการ
+ */
+export function isPaymentInScope(
+  viewer: { role: string; eventScope: string[] } | null | undefined,
+  payment: { EventID?: string | null },
+): boolean {
+  const scope = scopedEventIds(viewer);
+  return scope === null || scope.includes((payment.EventID || "").trim());
 }
 
 /** คืน null เมื่อไม่พบ payment หรือ org (หรือ viewer ไม่มีสิทธิ์เห็นรายการนี้) */
@@ -87,9 +99,9 @@ export async function loadWhtCertData(
   await ensureTabsCached(sheets, orgId);
   const payment = await getPaymentWithRetry(sheets, paymentId);
   if (!payment) return null;
-  // CO-07b: project_manager เปิดได้เฉพาะรายการในโปรเจกต์ที่ได้รับมอบหมาย หรือรายการที่ตัวเองสร้าง
+  // CO-07b/CO-30: project_manager เปิดได้เฉพาะรายการในโปรเจกต์ที่ได้รับมอบหมาย (กฎเดียวกับ payment.getById)
   // (เช็คก่อนออกเลข — ผู้ที่ไม่มีสิทธิ์ต้องไม่ทำให้เลข 50 ทวิ ถูกออก/บันทึก)
-  if (viewer && !isDocInScope(viewer, viewer.userId, payment.EventID, payment.CreatedByUserId)) {
+  if (viewer && !isPaymentInScope(viewer, payment)) {
     return null;
   }
 

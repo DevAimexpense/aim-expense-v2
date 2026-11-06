@@ -10,6 +10,13 @@ import { prisma } from "@/lib/prisma";
 import type { Permissions, OrgRole } from "@/types/permissions";
 import { DEFAULT_PERMISSIONS } from "@/lib/permissions";
 import { readIsBackoffice, readVatRegistered } from "@/lib/org-settings";
+import {
+  effectivePlan,
+  featuresFor,
+  isInTrial,
+  type FeatureKey,
+  type PlanTier,
+} from "@/lib/plans";
 
 /**
  * Org context — loaded once per request
@@ -27,6 +34,16 @@ export interface OrgContext {
   isBackoffice: boolean;
   /** ธุรกิจจดทะเบียน VAT หรือไม่ — ไม่จด = ซ่อนใบกำกับภาษี / ภ.พ.30 */
   vatRegistered: boolean;
+  /**
+   * BIL-35/CO-31: แพ็กเกจที่มีผลจริงตอนนี้ (trial/lifetime รวมแล้ว = effectivePlan) —
+   * โหลดครั้งเดียวต่อ request ให้ tRPC requireFeature / require-plan / dashboard ใช้ร่วมกัน
+   * แทนการ query Subscription ซ้ำในแต่ละจุด
+   */
+  plan: PlanTier;
+  /** ฟีเจอร์ของแพ็กเกจนั้น (= featuresFor(plan)) */
+  features: FeatureKey[];
+  /** อยู่ในช่วงทดลองใช้หรือไม่ */
+  inTrial: boolean;
 }
 
 /**
@@ -82,15 +99,22 @@ export const getOrgContext = cache(async function getOrgContextImpl(
 
   if (!membership) return null;
 
-  // Get permissions
-  const perms = await prisma.userPermission.findUnique({
-    where: {
-      orgId_userId: {
-        orgId: membership.orgId,
-        userId,
+  // Get permissions + subscription (แพ็กเกจ) พร้อมกัน — ไม่พึ่งกัน
+  const [perms, sub] = await Promise.all([
+    prisma.userPermission.findUnique({
+      where: {
+        orgId_userId: {
+          orgId: membership.orgId,
+          userId,
+        },
       },
-    },
-  });
+    }),
+    prisma.subscription.findUnique({
+      where: { orgId: membership.orgId },
+      select: { plan: true, trialPlan: true, trialEndsAt: true },
+    }),
+  ]);
+  const plan = effectivePlan(sub);
 
   // Default `editPaymentAfterApproval` based on role if not explicitly set in DB
   // (admin/manager → true, accountant/staff → false)
@@ -140,6 +164,9 @@ export const getOrgContext = cache(async function getOrgContextImpl(
     googleDriveFolderId: membership.org.googleDriveFolderId,
     isBackoffice: readIsBackoffice(membership.org.settings),
     vatRegistered: readVatRegistered(membership.org.settings),
+    plan,
+    features: featuresFor(plan),
+    inTrial: isInTrial(sub),
   };
 });
 

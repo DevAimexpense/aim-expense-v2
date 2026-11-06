@@ -22,8 +22,9 @@ import {
  * expired or revoked") = เจ้าของยกเลิกสิทธิ์แอปแล้ว — ปิดการเชื่อมต่อ (isActive=false)
  * และตั้ง tokenExpiry = epoch 0 ให้ request ถัดไปล้มแบบสะอาดด้วยข้อความไทยเดียวกัน
  * (ไม่ลบ refreshToken — เจ้าของกด "เชื่อมต่อใหม่" ที่ /settings/google จะเขียนทับเอง)
+ * export ให้ org.router (สร้าง workspace ด้วย token ของผู้ใช้เอง) ใช้กฎเดียวกัน
  */
-async function markGoogleConnectionRevoked(ownerId: string, cause: unknown): Promise<void> {
+export async function markGoogleConnectionRevoked(ownerId: string, cause: unknown): Promise<void> {
   console.warn("[sheets-context] Google token revoked for owner", ownerId, cause);
   await prisma.googleConnection
     .updateMany({

@@ -10,7 +10,7 @@ import { getOrgContext } from "@/lib/auth/middleware";
 import { prisma } from "@/lib/prisma";
 import { isAffiliateAdmin } from "@/lib/affiliate";
 import type { Permissions, PermissionKey } from "@/types/permissions";
-import { effectivePlan, hasFeature, PLAN_LABELS, type FeatureKey, type SubscriptionState } from "@/lib/plans";
+import { hasFeature, PLAN_LABELS, type FeatureKey, type PlanTier } from "@/lib/plans";
 
 /**
  * tRPC Context — ทุก request จะมี context นี้
@@ -35,6 +35,9 @@ export interface TRPCContext {
     googleSpreadsheetId: string | null;
     googleDriveFolderId: string | null;
     isBackoffice: boolean;
+    /** BIL-35/CO-31: แพ็กเกจที่มีผลจริง (effectivePlan) โหลดครั้งเดียวใน getOrgContext */
+    plan: PlanTier;
+    features: FeatureKey[];
   } | null;
 }
 
@@ -71,6 +74,8 @@ export async function createTRPCContext(): Promise<TRPCContext> {
           googleSpreadsheetId: org.googleSpreadsheetId,
           googleDriveFolderId: org.googleDriveFolderId,
           isBackoffice: org.isBackoffice,
+          plan: org.plan,
+          features: org.features,
         }
       : null,
   };
@@ -173,22 +178,19 @@ export function permissionProcedure(...permissions: PermissionKey[]) {
 
 /**
  * BIL-07: กั้นฟีเจอร์ตามแพ็กเกจที่ชั้น tRPC (เดิมกั้นแค่หน้าเว็บด้วย requireFeature → ยิง API ตรงข้ามได้)
- * - ใช้ effectivePlan (trial/lifetime รวมแล้ว) ชุดเดียวกับ require-plan.ts
+ * - ใช้ ctx.org.plan (= effectivePlan, trial/lifetime รวมแล้ว) ที่ getOrgContext โหลดไว้แล้ว
+ *   ชุดเดียวกับ require-plan.ts — ไม่ query Subscription ซ้ำต่อ procedure (BIL-35/CO-31)
  * - admin ข้าม "สิทธิ์" ได้ แต่ข้าม "แพ็กเกจ" ไม่ได้
  */
 function requireFeature(feature: FeatureKey) {
-  return t.middleware(async ({ ctx, next }) => {
+  return t.middleware(({ ctx, next }) => {
     if (!ctx.session) {
       throw new TRPCError({ code: "UNAUTHORIZED", message: "กรุณาเข้าสู่ระบบ" });
     }
     if (!ctx.org) {
       throw new TRPCError({ code: "BAD_REQUEST", message: "กรุณาเลือกองค์กร" });
     }
-    const sub = await prisma.subscription.findUnique({
-      where: { orgId: ctx.org.orgId },
-      select: { plan: true, trialPlan: true, trialEndsAt: true, isBetaTester: true },
-    });
-    const plan = effectivePlan(sub as SubscriptionState | null);
+    const plan = ctx.org.plan;
     if (!hasFeature(plan, feature)) {
       throw new TRPCError({
         code: "FORBIDDEN",

@@ -351,6 +351,9 @@ model LineDraft {
   driveFileUrl   String?  @map("drive_file_url")
   status         String   @default("pending")
   createdAt      DateTime @default(now()) @map("created_at")
+  // รอบ 4: @updatedAt ให้ Prisma ตั้งเวลาเองทุกครั้งที่ update (ใช้ตรวจ draft ค้าง saving — draft-status.ts)
+  // @default(now()) ทำให้ `db push` เติมค่าให้แถวเดิมได้โดยไม่ต้องล้างตาราง
+  updatedAt      DateTime @default(now()) @updatedAt @map("updated_at")
   expiresAt      DateTime @map("expires_at")
   mimeType       String   @default("image/jpeg") @map("mime_type")
   eventId        String?  @map("event_id")

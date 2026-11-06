@@ -13,6 +13,7 @@
 import { readVatRegistered } from "@/lib/org-settings";
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth/session";
+import { getOrgContext, type OrgContext } from "@/lib/auth/middleware";
 import { prisma } from "@/lib/prisma";
 import {
   effectivePlan,
@@ -28,11 +29,15 @@ interface RequireFeatureResult {
   inTrial: boolean;
   session: NonNullable<Awaited<ReturnType<typeof getSession>>>;
   orgId: string;
+  org: OrgContext;
 }
 
 /**
  * Server-side guard. Redirects to login / select-org / upgrade as needed,
  * otherwise returns the active session + effective plan.
+ *
+ * BIL-35/CO-31: แพ็กเกจมาจาก getOrgContext (React.cache ต่อ request — (app)/layout.tsx
+ * เรียกด้วย args เดียวกันอยู่แล้ว) จึงไม่ query Subscription ซ้ำอีกครั้งในหน้า
  */
 export async function requireFeature(
   feature: FeatureKey,
@@ -42,16 +47,10 @@ export async function requireFeature(
   if (!session) redirect("/login");
   if (!session.activeOrgId) redirect("/");
 
-  const sub = await prisma.subscription.findUnique({
-    where: { orgId: session.activeOrgId },
-    select: {
-      plan: true,
-      trialPlan: true,
-      trialEndsAt: true,
-    },
-  });
+  const org = await getOrgContext(session.userId, session.activeOrgId);
+  if (!org) redirect("/select-org");
 
-  const plan = effectivePlan(sub as SubscriptionState | null);
+  const plan = org.plan;
   if (!hasFeature(plan, feature)) {
     const target = options.upgradePath || "/dashboard";
     redirect(`${target}?upgrade=${encodeURIComponent(feature)}`);
@@ -59,9 +58,10 @@ export async function requireFeature(
 
   return {
     session,
-    orgId: session.activeOrgId,
+    orgId: org.orgId,
+    org,
     plan,
-    inTrial: isInTrial(sub as SubscriptionState | null),
+    inTrial: org.inTrial,
   };
 }
 

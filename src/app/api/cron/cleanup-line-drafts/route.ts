@@ -49,10 +49,10 @@ export async function GET(req: NextRequest) {
   });
 
   // LINE-25: draft ที่ค้าง saving (ยังไม่หมดอายุ) เกิน 10 นาที → คืนเป็น pending ให้กดบันทึกใหม่ได้
-  // เวลาที่ claim ฝังอยู่ใน status ("saving:<ms>") — แถวเก่าใช้ createdAt (ดู draft-status.ts)
+  // เวลาที่ claim ฝังอยู่ใน status ("saving:<ms>") — ไม่มี → updatedAt → createdAt (ดู draft-status.ts)
   const savingRows = await prisma.lineDraft.findMany({
     where: { status: { startsWith: SAVING_PREFIX }, expiresAt: { gte: now } },
-    select: { id: true, status: true, createdAt: true },
+    select: { id: true, status: true, createdAt: true, updatedAt: true },
   });
   const stuck = savingRows.filter((r) => isSavingStale(r, SAVING_STALE_CRON_MS, now.getTime()));
   let resetCount = 0;

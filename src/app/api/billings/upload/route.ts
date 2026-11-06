@@ -23,6 +23,7 @@ import { prisma } from "@/lib/prisma";
 import { validateUploadedFile } from "@/lib/security/file-validation";
 import { safeAuditLog } from "@/server/lib/audit";
 import { todayBangkok } from "@/lib/utils/date";
+import { hasFeature, PLAN_LABELS } from "@/lib/plans";
 
 export async function POST(req: NextRequest) {
   const session = await getSession();
@@ -32,6 +33,17 @@ export async function POST(req: NextRequest) {
   const org = await getOrgContext(session.userId, session.activeOrgId);
   if (!org) {
     return NextResponse.json({ error: "No organization" }, { status: 400 });
+  }
+  // CO-28: กั้นสิทธิ์ + แพ็กเกจเหมือน tRPC billing.* (featureProcedure("revenueModule", "manageBillings"))
+  // — admin ข้ามสิทธิ์ได้ แต่ข้ามแพ็กเกจไม่ได้ (ลำดับเดียวกับ featureProcedure: สิทธิ์ก่อน แพ็กเกจทีหลัง)
+  if (org.role !== "admin" && !org.permissions.manageBillings) {
+    return NextResponse.json({ error: "ไม่มีสิทธิ์: manageBillings" }, { status: 403 });
+  }
+  if (!hasFeature(org.plan, "revenueModule")) {
+    return NextResponse.json(
+      { error: `แพ็กเกจ ${PLAN_LABELS[org.plan]} ยังไม่รองรับฟีเจอร์นี้ — อัปเกรดแพ็กเกจเพื่อใช้งาน` },
+      { status: 403 },
+    );
   }
 
   try {

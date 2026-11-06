@@ -7,7 +7,6 @@ import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth/session";
 import { getOrgContext } from "@/lib/auth/middleware";
 import { prisma } from "@/lib/prisma";
-import { effectivePlan, type SubscriptionState } from "@/lib/plans";
 import { DashboardClient } from "./dashboard-client";
 import { GoogleRevokedBanner } from "@/components/shared/google-revoked-banner";
 
@@ -19,19 +18,20 @@ export default async function DashboardPage() {
   const org = await getOrgContext(session.userId);
   if (!org) redirect("/");
 
-  const subscription = await prisma.subscription.findUnique({
-    where: { orgId: org.orgId },
-  });
-
-  // Use the EFFECTIVE plan (trial Pro counts as Pro) — not the raw stored plan,
-  // otherwise orgs in their Pro trial see free-tier features (revenue/P&L hidden).
-  const plan = effectivePlan(subscription as SubscriptionState | null);
+  // BIL-35/CO-31: EFFECTIVE plan (trial Pro counts as Pro) — โหลดไว้แล้วใน getOrgContext
+  // ไม่ query Subscription ซ้ำที่นี่
+  const plan = org.plan;
 
   // CO-08: token Google ของเจ้าของถูกยกเลิก → ทุกคนในบริษัทใช้ Sheet ไม่ได้ แจ้งตั้งแต่หน้าแรก
-  const orgRow = await prisma.organization.findUnique({ where: { id: org.orgId }, select: { ownerId: true } });
-  const ownerConn = orgRow
-    ? await prisma.googleConnection.findUnique({ where: { userId: orgRow.ownerId }, select: { isActive: true, googleEmail: true } })
-    : null;
+  // (query เดียว: org → owner → googleConnection)
+  const orgRow = await prisma.organization.findUnique({
+    where: { id: org.orgId },
+    select: {
+      ownerId: true,
+      owner: { select: { googleConnection: { select: { isActive: true, googleEmail: true } } } },
+    },
+  });
+  const ownerConn = orgRow?.owner.googleConnection ?? null;
   const revoked = !!ownerConn && !ownerConn.isActive;
 
   return (

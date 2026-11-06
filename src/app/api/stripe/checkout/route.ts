@@ -258,9 +258,10 @@ export async function POST(req: NextRequest) {
     include: { partner: { select: { id: true, code: true, isActive: true, userId: true } } },
   });
   if (referral) {
-    // org เคยถูกแนะนำแล้ว (ไม่ว่าสถานะใด) → ไม่สร้างซ้ำ ให้คูปองเฉพาะ row ที่ยังใช้ได้
+    // org เคยถูกแนะนำแล้ว (ไม่ว่าสถานะใด) → ไม่สร้างซ้ำ · BIL-33: คูปอง "ใบแรก" ให้เฉพาะ row ที่ยัง pending
+    // (confirmed = จ่ายครบ 2 ใบแล้ว = เคยได้ส่วนลดไปแล้ว) → ยกเลิกแล้วสมัครใหม่ไม่ได้ลดซ้ำ
     if (
-      (referral.status === "pending" || referral.status === "confirmed") &&
+      referral.status === "pending" &&
       referral.partner.isActive &&
       referral.partner.userId !== session.userId
     ) {

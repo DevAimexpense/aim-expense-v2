@@ -1070,6 +1070,12 @@ async function confirmDraftAsync(draft: {
   const draftFull = await prisma.lineDraft.findUnique({ where: { id: draft.id } });
   const eventId = draftFull?.eventId || "";
   const eventName = draftFull?.eventName || "";
+  // LINE-33: driveFileId ถูกตั้งเฉพาะใน writeDraftToSheets หลังอัปโหลดสำเร็จ → มีค่า = รอบก่อนอัปโหลดแล้ว
+  // (แต่ตายก่อนลบ draft) → รอบนี้ใช้ไฟล์เดิม ไม่อัปโหลดซ้ำ
+  const priorUpload =
+    draftFull?.driveFileId && draftFull.driveFileUrl
+      ? { fileId: draftFull.driveFileId, webViewLink: draftFull.driveFileUrl }
+      : null;
 
   // LINE-25: ฝังเวลาที่ claim ไว้ใน status ("saving:<ms>") เพื่อให้ตรวจ "ค้าง saving" ได้ (ดู draft-status.ts)
   const claim = await prisma.lineDraft.updateMany({
@@ -1079,7 +1085,7 @@ async function confirmDraftAsync(draft: {
   if (claim.count === 0) return false;
 
   try {
-    await writeDraftToSheets(draft, eventId, eventName);
+    await writeDraftToSheets(draft, eventId, eventName, priorUpload);
   } catch (err) {
     // คืนเป็น pending ให้กดบันทึกใหม่ได้ (ถ้าแถวยังอยู่ — แถวถูกลบแล้วเมื่อ append สำเร็จ ดู LINE-21)
     await prisma.lineDraft
@@ -1102,11 +1108,43 @@ async function writeDraftToSheets(
   },
   eventId: string,
   eventName: string,
+  /** LINE-33: ไฟล์ Drive ที่รอบก่อนอัปโหลดไว้แล้ว (จาก draft.driveFileId/driveFileUrl) */
+  priorUpload: { fileId: string; webViewLink: string } | null = null,
 ): Promise<void> {
   const ocr = draft.ocrJson as OcrParsedReceipt;
 
+  // ----- Receipt source: text entry vs image/pdf -----
+  // Text entries skip Drive download/upload entirely — there's no file.
+  const isTextEntry = draft.imageMessageId.startsWith("text:");
+
+  // Saved-card label — text entries use the typed message (truncated) so the user recognizes the entry.
+  const savedLabel = isTextEntry
+    ? (ocr.rawText?.slice(0, 40) || "บันทึกจาก LINE")
+    : (ocr.vendorName || "บันทึกจาก LINE");
+
   // Get services
   const sheets = await getSheetsService(draft.orgId);
+
+  // LINE-33: รอบก่อนอาจ append แถวลง Sheet แล้วแต่ function ตายก่อนลบ draft → status ถูกคืนเป็น pending
+  // (LINE-25) แล้วผู้ใช้กดบันทึกซ้ำ → ต้องไม่ append อีกแถว: ทุกแถวที่ LINE สร้างมี Notes "LINE draft <id>"
+  // → หาแถวนั้นก่อน (getPayments ติด cache 60 วิ แต่ retry เกิดหลัง claim ≥ 3 นาที จึงเห็นแถวจริงเสมอ)
+  // เจอ = บันทึกไปแล้ว → ลบ draft + ส่งการ์ดเดิม แล้วจบ โดยไม่แตะ Drive/Sheet อีก
+  const draftTag = `LINE draft ${draft.id}`;
+  const existingRow = await findPaymentRowByDraftTag(sheets, draftTag);
+  if (existingRow) {
+    const existingId = existingRow.PaymentID || "";
+    console.warn(`[LINE] draft ${draft.id} already saved as ${existingId} — skipping append (LINE-33)`);
+    await deleteDraftAfterSave(draft.id, existingId);
+    const existingAmount = Number(existingRow.GTTLAmount);
+    await notifySaved(draft.lineUserId, {
+      paymentId: existingId,
+      vendor: savedLabel,
+      amount: Number.isFinite(existingAmount) ? existingAmount : 0,
+      projectName: eventName || "ไม่ระบุ",
+    });
+    return;
+  }
+
   const { drive, receiptsFolderId, orgName } = await getDriveService(draft.orgId);
 
   // Find or create payee
@@ -1159,15 +1197,15 @@ async function writeDraftToSheets(
   // Use selected project or default
   const finalEventId = eventId || defaults.eventId;
 
-  // ----- Receipt source: text entry vs image/pdf -----
-  // Text entries skip Drive download/upload entirely — there's no file.
-  const isTextEntry = draft.imageMessageId.startsWith("text:");
-
   const today = todayBangkok();
   const paymentId = GoogleSheetsService.generateId("PMT");
 
   let receiptUrl = "";
-  if (!isTextEntry) {
+  if (!isTextEntry && priorUpload) {
+    // LINE-33: ไฟล์ขึ้น Drive ไปแล้วรอบก่อน (แถวยังไม่ลง Sheet) → ใช้ลิงก์เดิม ไม่ดาวน์โหลด/อัปโหลดซ้ำ
+    receiptUrl = priorUpload.webViewLink;
+    console.log(`[LINE] draft ${draft.id} reusing Drive file ${priorUpload.fileId} from earlier attempt (LINE-33)`);
+  } else if (!isTextEntry) {
     // Re-download content from LINE
     const buffer = await getMessageContent(draft.imageMessageId);
 
@@ -1297,16 +1335,10 @@ async function writeDraftToSheets(
     UpdatedAt: now,
   });
 
-  // บันทึกแล้ว → ลบ draft (ocrJson มีเลขภาษี/ยอด — เก็บไว้แค่ชั่วคราวตาม Zero Data Retention)
-  // ข้อมูลที่ต้องใช้ต่อ (ocr, eventName) อยู่ในหน่วยความจำแล้ว ไม่มีใครอ่าน draft หลังจากนี้
+  // บันทึกแล้ว → ลบ draft — ข้อมูลที่ต้องใช้ต่อ (ocr, eventName) อยู่ในหน่วยความจำแล้ว
   // LINE-21: แถวลง Sheet แล้ว — ตั้งแต่จุดนี้ห้าม throw (ผู้เรียกจะบอก "บันทึกไม่สำเร็จ" ทั้งที่ลงแล้ว
   // และ revert status หาแถว draft ที่ไม่มีแล้ว) → ทุกอย่างหลัง append = best-effort, log แทน
-  await prisma.lineDraft.deleteMany({ where: { id: draft.id } }).catch(async (err) => {
-    // LINE-32: ลบไม่ได้ → ต้องไม่ปล่อยให้ค้าง "saving" (จะถูกรีเซ็ตเป็น pending แล้วกดบันทึกซ้ำได้)
-    // ตั้งเป็น confirmed (สถานะสิ้นสุด) → ปุ่มเก่าตอบ "บันทึกไปแล้ว", cron ลบทิ้งให้ (LINE-06)
-    console.error(`[LINE] draft ${draft.id} saved as ${paymentId} but delete failed (marking confirmed):`, err);
-    await prisma.lineDraft.updateMany({ where: { id: draft.id }, data: { status: "confirmed" } }).catch(() => {});
-  });
+  await deleteDraftAfterSave(draft.id, paymentId);
 
   // Audit log — distinguish OCR vs manual text entry
   const auditPrefix = isTextEntry ? "LINE Text" : "LINE OCR";
@@ -1329,27 +1361,58 @@ async function writeDraftToSheets(
     console.error(`[LINE] audit log failed for ${paymentId} (row already saved):`, err);
   }
 
-  // Notify user — saved Flex card. For text entries, use the typed message
-  // (truncated) as the "vendor" label so the user recognizes the entry.
-  const savedLabel = isTextEntry
-    ? (ocr.rawText?.slice(0, 40) || "บันทึกจาก LINE")
-    : (ocr.vendorName || "บันทึกจาก LINE");
+  // Notify user — saved Flex card (savedLabel computed at the top of this function).
+  await notifySaved(draft.lineUserId, {
+    paymentId,
+    vendor: savedLabel,
+    amount: gttlAmount,
+    projectName: eventName || "ไม่ระบุ",
+  });
+}
 
+/**
+ * LINE-33: หาแถว Payments ที่ draft นี้เคย append ไปแล้ว (Notes มี "LINE draft <id>")
+ * อ่านไม่ได้ (quota/เครือข่าย) → คืน null แล้วให้ flow ปกติเดินต่อ — การตรวจซ้ำต้องไม่ทำให้การบันทึกปกติล้ม
+ */
+async function findPaymentRowByDraftTag(
+  sheets: GoogleSheetsService,
+  draftTag: string,
+): Promise<Record<string, string> | null> {
   try {
-    await pushMessage(draft.lineUserId, [
-      buildSavedFlex({
-        paymentId,
-        vendor: savedLabel,
-        amount: gttlAmount,
-        projectName: eventName || "ไม่ระบุ",
-        webUrl: `${APP_BASE_URL}/expenses`,
-      }),
+    const rows = await sheets.getPayments();
+    return rows.find((r) => (r.Notes || "").includes(draftTag)) ?? null;
+  } catch (err) {
+    console.error(`[LINE] duplicate check (${draftTag}) read failed — proceeding with append:`, err);
+    return null;
+  }
+}
+
+/**
+ * แถวลง Sheet แล้ว → ลบ draft (ocrJson มีเลขภาษี/ยอด — เก็บไว้แค่ชั่วคราวตาม Zero Data Retention)
+ * LINE-21: ตั้งแต่จุดนี้ห้าม throw → best-effort, log แทน
+ * LINE-32: ลบไม่ได้ → ต้องไม่ปล่อยให้ค้าง "saving" (จะถูกรีเซ็ตเป็น pending แล้วกดบันทึกซ้ำได้)
+ *          ตั้งเป็น confirmed (สถานะสิ้นสุด) → ปุ่มเก่าตอบ "บันทึกไปแล้ว", cron ลบทิ้งให้ (LINE-06)
+ */
+async function deleteDraftAfterSave(draftId: string, paymentId: string): Promise<void> {
+  await prisma.lineDraft.deleteMany({ where: { id: draftId } }).catch(async (err) => {
+    console.error(`[LINE] draft ${draftId} saved as ${paymentId} but delete failed (marking confirmed):`, err);
+    await prisma.lineDraft.updateMany({ where: { id: draftId }, data: { status: "confirmed" } }).catch(() => {});
+  });
+}
+
+/** ส่งการ์ด "บันทึกแล้ว" — การ์ดไม่ถึง → ส่งข้อความสั้นแทน (best-effort, แถวอยู่ใน Sheet แล้ว ห้าม throw) */
+async function notifySaved(
+  lineUserId: string,
+  args: { paymentId: string; vendor: string; amount: number; projectName: string },
+): Promise<void> {
+  try {
+    await pushMessage(lineUserId, [
+      buildSavedFlex({ ...args, webUrl: `${APP_BASE_URL}/expenses` }),
     ]);
   } catch (err) {
-    // การ์ดไม่ถึงผู้ใช้ แต่แถวอยู่ใน Sheet แล้ว — ส่งข้อความสั้นแทน (best-effort) แล้วจบแบบสำเร็จ
-    console.error(`[LINE] saved-card push failed for ${paymentId} (row already saved):`, err);
-    await pushMessage(draft.lineUserId, [
-      text(`บันทึกแล้ว ฿${gttlAmount} (${savedLabel}) — ดูได้ที่ ${APP_BASE_URL}/expenses`),
+    console.error(`[LINE] saved-card push failed for ${args.paymentId} (row already saved):`, err);
+    await pushMessage(lineUserId, [
+      text(`บันทึกแล้ว ฿${args.amount} (${args.vendor}) — ดูได้ที่ ${APP_BASE_URL}/expenses`),
     ]).catch(() => {});
   }
 }

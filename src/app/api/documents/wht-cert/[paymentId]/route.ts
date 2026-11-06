@@ -28,11 +28,10 @@ export async function GET(
   }
 
   try {
-    // CO-07b: project_manager เห็นเฉพาะรายการในขอบเขต/ของตัวเอง — นอกนั้น 404 เหมือน tRPC getById
+    // CO-07b/CO-30: project_manager เห็นเฉพาะรายการในขอบเขตโปรเจกต์ — นอกนั้น 404 เหมือน tRPC payment.getById
     const data = await loadWhtCertData(org.orgId, paymentId, {
       role: org.role,
       eventScope: org.eventScope,
-      userId: session.userId,
     });
     if (!data) {
       return NextResponse.json({ error: "ไม่พบรายการ" }, { status: 404 });

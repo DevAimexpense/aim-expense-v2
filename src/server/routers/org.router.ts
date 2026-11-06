@@ -12,7 +12,16 @@ import { decryptToken } from "@/lib/google/token-encryption";
 import { refreshAccessToken } from "@/lib/google/oauth";
 import { encryptToken } from "@/lib/google/token-encryption";
 import { getDefaultPermissions } from "@/lib/permissions";
-import { getSheetsService, ensureTabsCached } from "../lib/sheets-context";
+import {
+  getSheetsService,
+  ensureTabsCached,
+  markGoogleConnectionRevoked,
+} from "../lib/sheets-context";
+import {
+  googleNotConnectedError,
+  googleRevokedError,
+  isGoogleAuthError,
+} from "@/lib/google/errors";
 import { getAllDocPrefixes, isValidDocPrefix } from "../lib/doc-number";
 import { checkBusinessQuota } from "../lib/business-quota";
 import { PLAN_LABELS } from "@/lib/plans";
@@ -23,18 +32,18 @@ import { safeAuditLog } from "@/server/lib/audit";
 
 /**
  * Helper: Get valid access token for a user (refresh if expired)
+ * ใช้ตอนสร้าง workspace ใหม่ (token ของผู้ใช้เอง — ยังไม่มี org/owner)
+ * CO-08: กฎ revoke เดียวกับ sheets-context.getOrgAccessToken —
+ *   - เคยเชื่อมต่อแต่ isActive=false → googleRevokedError (ข้อความไทยเดียวกัน)
+ *   - refresh แล้ว Google ตอบ invalid_grant → mark revoked + googleRevokedError
  */
 async function getValidAccessToken(userId: string): Promise<string> {
   const conn = await prisma.googleConnection.findUnique({
     where: { userId },
   });
 
-  if (!conn || !conn.isActive) {
-    throw new TRPCError({
-      code: "PRECONDITION_FAILED",
-      message: "ไม่ได้เชื่อมต่อ Google Account",
-    });
-  }
+  if (!conn) throw googleNotConnectedError();
+  if (!conn.isActive) throw googleRevokedError();
 
   // Check if token is expired (with 5 min buffer)
   const isExpired =
@@ -58,9 +67,14 @@ async function getValidAccessToken(userId: string): Promise<string> {
 
       return accessToken;
     } catch (err) {
+      if (isGoogleAuthError(err)) {
+        await markGoogleConnectionRevoked(userId, err);
+        throw googleRevokedError(err);
+      }
       throw new TRPCError({
         code: "PRECONDITION_FAILED",
         message: "Token หมดอายุ กรุณาเชื่อมต่อ Google ใหม่",
+        cause: err,
       });
     }
   }
