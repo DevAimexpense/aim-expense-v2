@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { trpc } from "@/lib/trpc/client";
 import { BillingStatusBadge } from "../billings-client";
+import { RecordBillingPaymentModal } from "./billing-payment-modal";
 import { formatDate } from "@/lib/utils/date";
 
 const formatTHB = (n: number) =>
@@ -21,6 +22,7 @@ export function BillingDetailClient({ billingId }: { billingId: string }) {
   const orgQuery = trpc.org.get.useQuery();
 
   const [error, setError] = useState<string | null>(null);
+  const [showPayment, setShowPayment] = useState(false);
 
   const refresh = () => {
     utils.billing.getById.invalidate({ billingId });
@@ -191,6 +193,19 @@ export function BillingDetailClient({ billingId }: { billingId: string }) {
             {combined ? "→ ออกใบเสร็จรับเงิน/ใบกำกับภาษี" : "→ ออกใบกำกับภาษี"}
           </Link>
         )}
+        {/* บันทึกรับเงิน — ใบที่ออกใบกำกับภาษีไม่ได้ (ไม่จด VAT / ใบไม่มี VAT) ต้องบันทึกที่นี่
+            ไม่งั้นค้างที่ "ส่งแล้ว" ออกใบเสร็จไม่ได้ (ใบที่มี VAT บันทึกที่หน้าใบกำกับภาษี) */}
+        {!canTaxInvoice &&
+          (header.status === "sent" || header.status === "partial") &&
+          header.balance > 0 && (
+            <button
+              onClick={() => setShowPayment(true)}
+              disabled={isLoading}
+              className="app-btn app-btn-primary"
+            >
+              💰 บันทึกรับเงิน
+            </button>
+          )}
         {/* ใบเสร็จรับเงิน — ออกได้เมื่อรับเงินครบ (ใช้ได้ทั้งจด/ไม่จด VAT) */}
         {header.status === "paid" &&
           (canReceipt || !!header.receiptNumber) &&
@@ -443,9 +458,22 @@ export function BillingDetailClient({ billingId }: { billingId: string }) {
         </div>
       )}
 
-      {/* Payment modal moved to /tax-invoices flow (S25B Phase 2). The
-          legacy RecordPaymentModal below is unused and kept temporarily for
-          reference; remove with the next billing-router cleanup. */}
+      {/* ใบที่มี VAT บันทึกรับเงินที่ /tax-invoices (S25B) · ใบที่ออกใบกำกับไม่ได้ใช้ modal นี้ */}
+      {showPayment && (
+        <RecordBillingPaymentModal
+          billingId={billingId}
+          docNumber={header.docNumber}
+          grandTotal={header.grandTotal}
+          balance={header.balance}
+          whtPercent={header.whtPercent}
+          whtAmount={header.whtAmount}
+          onClose={() => setShowPayment(false)}
+          onSuccess={() => {
+            setShowPayment(false);
+            refresh();
+          }}
+        />
+      )}
     </div>
   );
 }
