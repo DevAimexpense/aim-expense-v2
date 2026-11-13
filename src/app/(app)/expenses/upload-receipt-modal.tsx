@@ -11,6 +11,7 @@ import {
 } from "@/lib/constants/expense-categories";
 import { pdfFirstPageToImage, isPdfFile } from "@/lib/utils/pdf-to-image";
 import SearchableSelect, { type SearchableSelectOption } from "@/components/searchable-select";
+import { VendorCombobox } from "@/components/vendor-combobox";
 import { fireAutoGenDoc, resolveDocTypeForPayment } from "@/lib/utils/auto-gen-doc";
 import DateInput from "@/components/shared/date-input";
 
@@ -540,7 +541,26 @@ export function UploadReceiptModal({ events, payees, onClose, onSuccess, attachT
 
                   <SH title="🏢 ผู้ขาย / ผู้ออกเอกสาร" />
                   <div style={{ marginBottom: "1rem" }}>
-                    <FG label="ชื่อผู้ขาย *" full><input type="text" value={form.vendorName} onChange={(e) => setForm({ ...form, vendorName: e.target.value })} className="app-input" /></FG>
+                    <FG label="ชื่อผู้ขาย *" full>
+                    {/* ค้นหาจากผู้รับเงินที่มีอยู่ / เพิ่มใหม่ — เลือกแล้วผูกผู้รับเงินด้านล่างให้ด้วย */}
+                    <VendorCombobox
+                      value={form.vendorName}
+                      onChange={(name) => setForm({ ...form, vendorName: name })}
+                      payees={payees}
+                      selectedPayeeId={form.payeeId}
+                      onSelectPayee={(p) =>
+                        setForm({
+                          ...form,
+                          vendorName: p.payeeName,
+                          vendorTaxId: p.taxId || form.vendorTaxId,
+                          vendorAddress: p.address || form.vendorAddress,
+                          payeeId: p.payeeId,
+                          createNewPayee: false,
+                        })
+                      }
+                      onCreateNew={(name) => setForm({ ...form, vendorName: name, payeeId: "", createNewPayee: true })}
+                    />
+                  </FG>
                     <div className="app-form-grid cols-2" style={{ gap: "0.5rem", marginTop: "0.5rem" }}>
                       <FG label="เลขผู้เสียภาษี">
                         <input type="text" inputMode="numeric" value={form.vendorTaxId} onChange={(e) => setForm({ ...form, vendorTaxId: e.target.value.replace(/\D/g, "").slice(0, 13) })} placeholder="13 หลัก" className={`app-input mono ${form.vendorTaxId && form.vendorTaxId.length !== 13 ? "input-error" : ""}`} maxLength={13} />

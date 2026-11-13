@@ -4,6 +4,7 @@
 // Fallback: OpenAI GPT-4o 2-pass
 // ===========================================
 
+import * as Sentry from "@sentry/nextjs";
 import type { OcrProvider, OcrParsedReceipt, DocumentType } from "./types";
 import { OpenAIOcrProvider } from "./openai-provider";
 import { AksonOcrProvider } from "./akson-provider";
@@ -14,6 +15,14 @@ export type { OcrParsedReceipt, DocumentType };
 // (ภาษาอังกฤษ, อาจมี status/body ของ API) อยู่ใน log และ `providerErrors` เท่านั้น
 export const OCR_TIMEOUT_MESSAGE = "อ่านใบเสร็จนานเกินไป กรุณาลองใหม่อีกครั้ง";
 export const OCR_FAILED_MESSAGE = "อ่านใบเสร็จไม่สำเร็จ กรุณาลองใหม่อีกครั้ง";
+/** ทุก provider ล้มเพราะเครดิต/โควตาบัญชีหมด — ลองใหม่ก็ไม่หาย บอกให้กรอกเองไปก่อน */
+export const OCR_UNAVAILABLE_MESSAGE =
+  "ระบบอ่านใบเสร็จอัตโนมัติใช้งานไม่ได้ชั่วคราว — กรอกข้อมูลเองไปก่อนได้ ทีมงานกำลังแก้ไข";
+
+/** error ของ provider ที่เป็นเรื่องบัญชี/เครดิตหมด (ไม่ใช่ไฟล์หรือเครือข่าย) */
+export function isOutOfCreditError(msg: string): boolean {
+  return /API error: 402|insufficient_quota|credit_balance_exhausted|no credits remaining|billing_hard_limit/i.test(msg);
+}
 
 /** fetch ที่ถูกยกเลิกด้วย AbortSignal.timeout → DOMException name "TimeoutError" (หรือ "AbortError") */
 export function isTimeoutError(err: unknown): boolean {
@@ -28,11 +37,15 @@ export function isTimeoutError(err: unknown): boolean {
 export class OcrFailedError extends Error {
   readonly providerErrors: string[];
   readonly timedOut: boolean;
+  /** ทุก provider ล้มเพราะเครดิตหมด */
+  readonly outOfCredit: boolean;
   constructor(providerErrors: string[], timedOut: boolean) {
-    super(timedOut ? OCR_TIMEOUT_MESSAGE : OCR_FAILED_MESSAGE);
+    const outOfCredit = providerErrors.length > 0 && providerErrors.every(isOutOfCreditError);
+    super(outOfCredit ? OCR_UNAVAILABLE_MESSAGE : timedOut ? OCR_TIMEOUT_MESSAGE : OCR_FAILED_MESSAGE);
     this.name = "OcrFailedError";
     this.providerErrors = providerErrors;
     this.timedOut = timedOut;
+    this.outOfCredit = outOfCredit;
   }
 }
 
@@ -87,5 +100,12 @@ export async function parseReceipt(
 
   // LINE-24: log รายละเอียดภาษาอังกฤษที่นี่ — ผู้เรียกได้ error ภาษาไทยไปแสดงผู้ใช้
   console.error(`[OCR] All OCR providers failed${timedOut ? " (timeout)" : ""}: ${errors.join(" | ")}`);
-  throw new OcrFailedError(errors, timedOut);
+  const failure = new OcrFailedError(errors, timedOut);
+  // เครดิต Akson/OpenAI หมด = สแกนพังทั้งระบบ → แจ้งทีมผ่าน Sentry (ข้อความไม่มีข้อมูลลูกค้า)
+  for (const e of errors) {
+    if (isOutOfCreditError(e)) {
+      Sentry.captureMessage(`OCR provider out of credit: ${e.split(":")[0]}`, "fatal");
+    }
+  }
+  throw failure;
 }

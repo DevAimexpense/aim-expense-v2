@@ -90,7 +90,7 @@ export async function POST(req: NextRequest) {
     if (err instanceof OcrFailedError) {
       // LINE-24: message เป็นภาษาไทยแล้ว — รายละเอียด provider อยู่ใน log เท่านั้น
       console.error("[ocr/receipt] provider errors:", err.providerErrors);
-      return NextResponse.json({ error: err.message }, { status: err.timedOut ? 504 : 502 });
+      return NextResponse.json({ error: err.message, ocrUnavailable: err.outOfCredit }, { status: err.outOfCredit ? 503 : err.timedOut ? 504 : 502 });
     }
     if (err instanceof Error) {
       console.error("[ocr/receipt] Stack:", err.stack);
