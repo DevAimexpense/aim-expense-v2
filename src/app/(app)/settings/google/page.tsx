@@ -14,6 +14,7 @@ import { getOrgContext } from "@/lib/auth/middleware";
 import { prisma } from "@/lib/prisma";
 import { formatDate as formatThaiDate } from "@/lib/utils/date";
 import { GoogleRevokedBanner } from "@/components/shared/google-revoked-banner";
+import { FileAccessCard } from "./file-access-card";
 
 export const metadata = {
   title: "เชื่อมต่อ Google | Aim Expense",
@@ -26,28 +27,6 @@ const USERINFO_SCOPE_PREFIX = "https://www.googleapis.com/auth/userinfo";
 
 function hasScope(scopes: string[], prefix: string): boolean {
   return scopes.some((s) => s.startsWith(prefix));
-}
-
-function formatExpiryRelative(expiry: Date | null): {
-  label: string;
-  tone: "ok" | "warn" | "expired";
-} {
-  if (!expiry) return { label: "ไม่มีข้อมูล", tone: "warn" };
-  const ms = expiry.getTime() - Date.now();
-  if (ms <= 0) return { label: "หมดอายุแล้ว — กดเชื่อมต่อใหม่", tone: "expired" };
-  const minutes = Math.floor(ms / 60_000);
-  if (minutes < 60) {
-    return {
-      label: `หมดอายุในอีก ${minutes} นาที`,
-      tone: minutes < 10 ? "warn" : "ok",
-    };
-  }
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) {
-    return { label: `หมดอายุในอีก ${hours} ชั่วโมง`, tone: "ok" };
-  }
-  const days = Math.floor(hours / 24);
-  return { label: `หมดอายุในอีก ${days} วัน`, tone: "ok" };
 }
 
 export default async function GoogleSettingsPage({
@@ -73,7 +52,6 @@ export default async function GoogleSettingsPage({
       select: {
         googleEmail: true,
         scopes: true,
-        tokenExpiry: true,
         isActive: true,
         createdAt: true,
         updatedAt: true,
@@ -111,9 +89,6 @@ export default async function GoogleSettingsPage({
   const justReconnected = params.reconnected === "1";
   const errorCode = params.error;
 
-  const expiry = connection?.tokenExpiry
-    ? formatExpiryRelative(connection.tokenExpiry)
-    : null;
 
   const scopes = connection?.scopes ?? [];
   const scopeFlags = {
@@ -242,22 +217,6 @@ export default async function GoogleSettingsPage({
               <dd style={{ margin: 0 }}>
                 {formatThaiDate(connection.updatedAt)}
               </dd>
-
-              <dt style={{ color: "#64748b" }}>Token</dt>
-              <dd
-                style={{
-                  margin: 0,
-                  color:
-                    expiry?.tone === "expired"
-                      ? "#dc2626"
-                      : expiry?.tone === "warn"
-                      ? "#d97706"
-                      : "#16a34a",
-                  fontWeight: 500,
-                }}
-              >
-                {expiry?.label ?? "—"}
-              </dd>
             </dl>
 
             <div
@@ -323,10 +282,13 @@ export default async function GoogleSettingsPage({
               alignSelf: "center",
             }}
           >
-            ใช้สำหรับต่ออายุ token หรือเปลี่ยนบัญชี Google
+            ใช้เมื่อการเชื่อมต่อถูกยกเลิก หรือต้องการเปลี่ยนบัญชี Google
           </span>
         </div>
       </section>
+
+      {/* ===== Card 1.5: สิทธิ์ไฟล์เดิม (Google Picker re-grant) — ผู้ดูแล/เจ้าของ ===== */}
+      {(orgCtx.role === "admin" || isOwner) && !ownerRevoked && <FileAccessCard />}
 
       {/* ===== Card 2: Master Spreadsheet ===== */}
       <section

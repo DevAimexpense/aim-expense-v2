@@ -23,6 +23,7 @@ import { lineGroupRouter } from "./line-group.router";
 import { affiliateRouter } from "./affiliate.router";
 import { affiliateAdminRouter } from "./affiliate-admin.router";
 import { backofficeRouter } from "./backoffice.router";
+import { googleAccessRouter } from "./google-access.router";
 
 export const appRouter = router({
   event: eventRouter,
@@ -45,6 +46,7 @@ export const appRouter = router({
   affiliate: affiliateRouter,
   affiliateAdmin: affiliateAdminRouter,
   backoffice: backofficeRouter,
+  googleAccess: googleAccessRouter,
 });
 
 export type AppRouter = typeof appRouter;

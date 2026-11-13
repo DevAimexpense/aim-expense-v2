@@ -12,8 +12,10 @@ import { GoogleSheetsService } from "@/server/services/google-sheets.service";
 import { GoogleDriveService } from "@/server/services/google-drive.service";
 import { TRPCError } from "@trpc/server";
 import {
+  fileAccessLostError,
   googleNotConnectedError,
   googleRevokedError,
+  isFileAccessError,
   isGoogleAuthError,
 } from "@/lib/google/errors";
 
@@ -118,13 +120,24 @@ export async function getOrgAccessToken(
  *   3. refresh ไม่ผ่าน (invalid_grant) → ปิดการเชื่อมต่อ + โยน TRPCError ข้อความไทย
  *      (ไม่ใช่ error ดิบจาก googleapis) — ใช้ร่วมกันทั้ง tRPC, route handlers และ LINE
  *      เพราะทุกทางเข้าถึง Sheets/Drive ของ org ผ่าน getSheetsService/getDriveService
+ *   4. Google ตอบ 404/403 เรื่องสิทธิ์ไฟล์ (แอปมองไม่เห็นชีต/โฟลเดอร์เดิม) → โยน
+ *      fileAccessLostError (ข้อความไทยบอกให้เจ้าของยืนยันสิทธิ์ชีตเดิม) แทน error ดิบ
+ *      — ยกเว้น method ใน `rawFileErrors` (เช่น deleteFile ของไฟล์เก่าทีละไฟล์)
  */
-function withAuthRecovery<T extends object>(
+export function withAuthRecovery<T extends object>(
   service: T,
   orgId: string,
   ownerId: string,
   rebuild: (accessToken: string) => T,
+  rawFileErrors: ReadonlySet<PropertyKey> = new Set(),
 ): T {
+  const mapFileError = (prop: PropertyKey, err: unknown): never => {
+    if (!rawFileErrors.has(prop) && isFileAccessError(err)) {
+      console.warn("[sheets-context] file access lost for org", orgId, String(prop));
+      throw fileAccessLostError(err);
+    }
+    throw err;
+  };
   return new Proxy(service, {
     get(target, prop, receiver) {
       const value = Reflect.get(target, prop, receiver);
@@ -134,7 +147,7 @@ function withAuthRecovery<T extends object>(
         const result = method.apply(target, args);
         if (!(result instanceof Promise)) return result;
         return result.catch(async (err: unknown) => {
-          if (!isGoogleAuthError(err)) throw err;
+          if (!isGoogleAuthError(err)) return mapFileError(prop, err);
           console.warn("[sheets-context] Google auth error for org", orgId, "→ refresh + retry once");
           invalidateOrgInfoCache(orgId);
           // โยน googleRevokedError เองถ้า refresh ไม่ผ่าน
@@ -144,7 +157,7 @@ function withAuthRecovery<T extends object>(
           try {
             return await (retryMethod.apply(fresh, args) as Promise<unknown>);
           } catch (retryErr) {
-            if (!isGoogleAuthError(retryErr)) throw retryErr;
+            if (!isGoogleAuthError(retryErr)) return mapFileError(prop, retryErr);
             // token ที่เพิ่ง refresh ก็ยังถูกปฏิเสธ → ถือว่าถูกยกเลิก
             await markGoogleConnectionRevoked(ownerId, retryErr);
             throw googleRevokedError(retryErr);
@@ -287,6 +300,8 @@ const SCHEMA_VERSION = (() => {
   return (h >>> 0).toString(36);
 })();
 
+const DRIVE_RAW_FILE_ERRORS: ReadonlySet<PropertyKey> = new Set(["deleteFile", "getFileAccess"]);
+
 /**
  * Get GoogleDriveService instance for an org
  */
@@ -320,6 +335,8 @@ export async function getDriveService(orgId: string): Promise<{
       orgId,
       org.ownerId,
       (token) => new GoogleDriveService(token),
+      // ลบไฟล์เก่าทีละไฟล์ 404 = ไฟล์นั้นหาย/เป็นของ client เก่า ไม่ใช่โฟลเดอร์ของ org หาย
+      DRIVE_RAW_FILE_ERRORS,
     ),
     rootFolderId: org.googleDriveFolderId,
     receiptsFolderId: org.driveReceiptsFolderId || org.googleDriveFolderId,

@@ -18,7 +18,7 @@ import {
   sheetsTabKeys,
 } from "@/server/lib/cache";
 import { withLock } from "@/server/lib/lock";
-import { isGoogleAuthError } from "@/lib/google/errors";
+import { isFileAccessError, isGoogleAuthError } from "@/lib/google/errors";
 
 // ===== Sheet Tab Names =====
 export const SHEET_TABS = {
@@ -1172,6 +1172,8 @@ export class GoogleSheetsService {
       } catch (err) {
         // CO-08: 401/invalid_grant ไม่ใช่ "tab ไม่มี" — โยนต่อให้ sheets-context refresh/ปิดการเชื่อมต่อ
         if (isGoogleAuthError(err)) throw err;
+        // แอปมองไม่เห็นชีตทั้งไฟล์ (ไม่ใช่แค่ tab หาย) → โยนต่อให้ sheets-context แปลงเป็นข้อความไทย
+        if (isFileAccessError(err) && !/Unable to parse range/i.test(String((err as Error)?.message))) throw err;
         // tab ไม่มี — ปล่อยให้ ensureAllTabsExist() เรียกก่อน (caller responsibility)
         throw new Error(`Sheet "${SHEET_TABS.CONFIG}" not found`);
       }
@@ -1239,6 +1241,8 @@ export class GoogleSheetsService {
     } catch (err) {
       // CO-08: token ถูกยกเลิกต้องไม่กลายเป็น config ว่าง ๆ เงียบ ๆ
       if (isGoogleAuthError(err)) throw err;
+      // ชีตทั้งไฟล์เข้าไม่ได้ต้องไม่กลายเป็น config ว่าง ๆ เงียบ ๆ เช่นกัน
+      if (isFileAccessError(err) && !/Unable to parse range/i.test(String((err as Error)?.message))) throw err;
       console.warn("[Sheets] getConfigMap failed (tab missing/no access):", err);
       return {};
     }

@@ -277,6 +277,30 @@ export class GoogleDriveService {
   }
 
   /**
+   * แอปเข้าถึงไฟล์/โฟลเดอร์นี้ได้ไหม (อ่านแค่ metadata — ไม่อ่านข้อมูลในไฟล์)
+   * ใช้ตรวจสิทธิ์ drive.file ของชีต/โฟลเดอร์ของ org ก่อนและหลังยืนยันผ่าน Google Picker
+   */
+  async getFileAccess(
+    fileId: string,
+  ): Promise<{ status: "ok" | "trashed" | "no_access"; name?: string }> {
+    try {
+      const res = await this.drive.files.get({
+        fileId,
+        fields: "id,name,trashed",
+        supportsAllDrives: true,
+      });
+      return { status: res.data.trashed ? "trashed" : "ok", name: res.data.name ?? undefined };
+    } catch (err) {
+      const status = Number(
+        (err as { response?: { status?: number }; code?: number | string })?.response?.status ??
+          (err as { code?: number | string })?.code,
+      );
+      if (status === 404 || status === 403) return { status: "no_access" };
+      throw err;
+    }
+  }
+
+  /**
    * Delete file
    */
   async deleteFile(fileId: string): Promise<void> {
