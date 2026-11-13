@@ -1060,6 +1060,9 @@ export const billingRouter = router({
         });
       }
 
+      if (input.receiptDate && input.receiptDate > todayBangkok()) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "วันที่ใบเสร็จต้องไม่เกินวันนี้" });
+      }
       const receiptDate =
         input.receiptDate ||
         existing.PaidDate ||
@@ -1095,6 +1098,98 @@ export const billingRouter = router({
       });
 
       return { success: true, receiptNumber };
+    }),
+
+  /**
+   * แก้วันที่ใบเสร็จรับเงินที่ออกจากใบวางบิล (= วันที่รับเงิน) — เช่นตอนบันทึกรับเงินลืมเปลี่ยน
+   * จาก "วันนี้" เป็นวันที่เงินเข้าจริง · ใบเสร็จที่ออกโดยตรง (DocKind=receipt) แก้ที่ updateReceipt
+   * DOC-07: ย้ายข้ามเดือน → คงเลขเดิม (อาจส่งให้ลูกค้าแล้ว) + คืนคำเตือนให้ UI แสดง
+   */
+  updateReceiptDate: featureProcedure("revenueModule", "manageBillings")
+    .input(
+      z.object({
+        billingId: z.string(),
+        receiptDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "วันที่ไม่ถูกต้อง"),
+        // ผู้ใช้เลือกเอง: ย้ายข้ามเดือน → ออกเลขใหม่ของเดือนนั้น (ปกติ DOC-07 คงเลขเดิม)
+        renumber: z.boolean().default(false),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      if (input.receiptDate > todayBangkok()) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "วันที่ใบเสร็จต้องไม่เกินวันนี้" });
+      }
+      const sheets = await getSheetsService(ctx.org.orgId);
+      const existing = await withLock(`billing:${ctx.org.orgId}:${input.billingId}`, async () => {
+        if (ctx.org.googleSpreadsheetId) {
+          await invalidateTab(ctx.org.googleSpreadsheetId, SHEET_TABS.BILLINGS);
+        }
+        const existing = await sheets.getBillingById(input.billingId);
+        if (!existing) throw new TRPCError({ code: "NOT_FOUND", message: "ไม่พบใบวางบิล" });
+        if (existing.DocKind === "receipt") {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "ใบเสร็จที่ออกโดยตรง แก้ไขได้ที่เมนูใบเสร็จรับเงิน" });
+        }
+        if (!existing.ReceiptNumber) {
+          throw new TRPCError({ code: "PRECONDITION_FAILED", message: "ยังไม่ได้ออกใบเสร็จรับเงิน" });
+        }
+        const oldDate = existing.ReceiptDate || existing.PaidDate || "";
+        const from = docPeriod(oldDate);
+        const to = docPeriod(input.receiptDate);
+        const crossMonth = from.yyyy !== to.yyyy || from.mm !== to.mm;
+        const patch = {
+          ReceiptDate: input.receiptDate,
+          PaidDate: input.receiptDate, // ใบเสร็จ = วันที่รับเงิน — ให้สองค่าตรงกัน
+          PaymentNote: [
+            existing.PaymentNote,
+            `แก้วันที่รับเงิน/ใบเสร็จ ${oldDate || "-"} → ${input.receiptDate}`,
+          ]
+            .filter(Boolean)
+            .join("\n"),
+          UpdatedAt: new Date().toISOString(),
+        };
+        let newNumber: string | undefined;
+        if (input.renumber && crossMonth) {
+          // เลขใหม่ของเดือนปลายทาง: อ่าน max สด + เขียนภายใน lock ต่อ org/RC/เดือน (DOC-03)
+          newNumber = await withDocNumberLock(ctx.org.orgId, "RC", input.receiptDate, async () => {
+            const no = await computeNextDocNumber(
+              sheets,
+              "RC",
+              input.receiptDate,
+              SHEET_TABS.BILLINGS,
+              undefined,
+              "ReceiptNumber",
+              { spreadsheetId: ctx.org.googleSpreadsheetId }
+            );
+            await sheets.updateById(SHEET_TABS.BILLINGS, "BillingID", input.billingId, { ...patch, ReceiptNumber: no });
+            return no;
+          });
+        } else {
+          await sheets.updateById(SHEET_TABS.BILLINGS, "BillingID", input.billingId, patch);
+        }
+        return { row: existing, newNumber };
+      });
+      const { row, newNumber } = existing;
+
+      await safeAuditLog({
+        data: {
+          orgId: ctx.org.orgId,
+          userId: ctx.session.userId,
+          action: "update",
+          entityType: "receipt",
+          entityRef: input.billingId,
+          summary: `แก้วันที่ใบเสร็จรับเงิน ${row.ReceiptNumber}: ${row.ReceiptDate || row.PaidDate || "-"} → ${input.receiptDate}${
+            newNumber ? ` · เลขใหม่ ${newNumber}` : ""
+          }`,
+        },
+      });
+
+      return {
+        success: true,
+        receiptNumber: newNumber ?? row.ReceiptNumber,
+        renumbered: !!newNumber,
+        warning: newNumber
+          ? undefined
+          : monthMoveWarning(row.ReceiptDate || row.PaidDate, input.receiptDate, row.ReceiptNumber),
+      };
     }),
 
   recordPayment: featureProcedure("revenueModule", "manageBillings")

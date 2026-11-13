@@ -5,6 +5,7 @@ import Link from "next/link";
 import { trpc } from "@/lib/trpc/client";
 import { BillingStatusBadge } from "../billings-client";
 import { RecordBillingPaymentModal } from "./billing-payment-modal";
+import { ReceiptDateModal } from "./receipt-date-modal";
 import { formatDate } from "@/lib/utils/date";
 
 const formatTHB = (n: number) =>
@@ -19,10 +20,13 @@ export function BillingDetailClient({ billingId }: { billingId: string }) {
   const sendMut = trpc.billing.send.useMutation();
   const voidMut = trpc.billing.void.useMutation();
   const receiptMut = trpc.billing.issueReceipt.useMutation();
+  const receiptDateMut = trpc.billing.updateReceiptDate.useMutation();
   const orgQuery = trpc.org.get.useQuery();
 
   const [error, setError] = useState<string | null>(null);
   const [showPayment, setShowPayment] = useState(false);
+  const [receiptDialog, setReceiptDialog] = useState<"" | "issue" | "edit">("");
+  const [notice, setNotice] = useState<string | null>(null);
 
   const refresh = () => {
     utils.billing.getById.invalidate({ billingId });
@@ -43,12 +47,32 @@ export function BillingDetailClient({ billingId }: { billingId: string }) {
     }
   };
 
-  const handleIssueReceipt = async () => {
+  // ออกใบเสร็จ: ให้ยืนยันวันที่ก่อน (ค่าเริ่มต้น = วันที่รับเงิน) — ใบเสร็จต้องลงวันที่รับเงินจริง
+  const handleIssueReceipt = async (receiptDate: string) => {
     setError(null);
+    // เปิดแท็บก่อน await — Safari/iPad บล็อก window.open ที่เกิดหลัง async
+    const win = window.open("about:blank", "_blank");
     try {
-      await receiptMut.mutateAsync({ billingId });
+      await receiptMut.mutateAsync({ billingId, receiptDate });
+      setReceiptDialog("");
       refresh();
-      window.open(`/documents/receipt/${billingId}`, "_blank", "noopener");
+      if (win) win.location.href = `/documents/receipt/${billingId}`;
+      else window.open(`/documents/receipt/${billingId}`, "_blank", "noopener");
+    } catch (e) {
+      win?.close();
+      setError(e instanceof Error ? e.message : "เกิดข้อผิดพลาด");
+    }
+  };
+
+  const handleEditReceiptDate = async (receiptDate: string, renumber: boolean) => {
+    setError(null);
+    setNotice(null);
+    try {
+      const res = await receiptDateMut.mutateAsync({ billingId, receiptDate, renumber });
+      setReceiptDialog("");
+      if (res.renumbered) setNotice(`ออกเลขใบเสร็จใหม่เป็น ${res.receiptNumber} แล้ว — กดพิมพ์ใบเสร็จเพื่อดูฉบับใหม่`);
+      else if (res.warning) setNotice(res.warning);
+      refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "เกิดข้อผิดพลาด");
     }
@@ -116,6 +140,22 @@ export function BillingDetailClient({ billingId }: { billingId: string }) {
       </div>
 
       {error && <div className="app-error-msg">{error}</div>}
+      {notice && (
+        <div
+          role="status"
+          style={{
+            padding: "0.625rem 0.875rem",
+            background: "#fffbeb",
+            border: "1px solid #fde68a",
+            borderRadius: "0.5rem",
+            color: "#92400e",
+            fontSize: "0.875rem",
+            marginBottom: "1rem",
+          }}
+        >
+          ⚠️ {notice}
+        </div>
+      )}
 
       <div
         style={{
@@ -220,13 +260,19 @@ export function BillingDetailClient({ billingId }: { billingId: string }) {
             </a>
           ) : (
             <button
-              onClick={handleIssueReceipt}
+              onClick={() => setReceiptDialog("issue")}
               disabled={receiptMut.isPending}
               className="app-btn app-btn-primary"
             >
               {receiptMut.isPending ? "กำลังออกใบเสร็จ…" : "🧾 ออกใบเสร็จรับเงิน"}
             </button>
           ))}
+        {/* แก้วันที่ใบเสร็จที่ออกจากใบวางบิล (ใบเสร็จออกตรงแก้ที่เมนูใบเสร็จ) */}
+        {!!header.receiptNumber && header.docKind !== "receipt" && (
+          <button onClick={() => setReceiptDialog("edit")} className="app-btn app-btn-secondary">
+            📅 แก้วันที่ใบเสร็จ
+          </button>
+        )}
         <a
           href={`/documents/billing/${billingId}`}
           target="_blank"
@@ -481,6 +527,20 @@ export function BillingDetailClient({ billingId }: { billingId: string }) {
             </div>
           )}
         </div>
+      )}
+
+      {receiptDialog && (
+        <ReceiptDateModal
+          mode={receiptDialog}
+          receiptNumber={header.receiptNumber}
+          initialDate={receiptDialog === "edit" ? header.receiptDate || header.paidDate : header.paidDate}
+          paidDate={header.paidDate}
+          busy={receiptMut.isPending || receiptDateMut.isPending}
+          onConfirm={(d, renumber) =>
+            receiptDialog === "issue" ? handleIssueReceipt(d) : handleEditReceiptDate(d, renumber)
+          }
+          onClose={() => setReceiptDialog("")}
+        />
       )}
 
       {/* ใบที่มี VAT บันทึกรับเงินที่ /tax-invoices (S25B) · ใบที่ออกใบกำกับไม่ได้ใช้ modal นี้ */}

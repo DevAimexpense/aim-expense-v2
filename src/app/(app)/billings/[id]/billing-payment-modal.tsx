@@ -209,7 +209,12 @@ export function RecordBillingPaymentModal({
             <div style={{ borderTop: "1px solid #e2e8f0", margin: "0.25rem 0 0.875rem" }} />
 
             <div style={row}>
-              <span style={labelStyle}>วันที่รับชำระ</span>
+              <span style={labelStyle}>
+                วันที่รับชำระ{" "}
+                <span style={{ fontWeight: 400, fontSize: "0.75rem", color: "#64748b", display: "block" }}>
+                  วันที่เงินเข้าจริง — ใบเสร็จจะลงวันที่นี้
+                </span>
+              </span>
               <DateInput value={paidDate} onChange={(v) => setPaidDate(v)} max={today} className="app-input" />
             </div>
 
