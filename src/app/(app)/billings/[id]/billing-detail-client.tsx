@@ -438,6 +438,23 @@ export function BillingDetailClient({ billingId }: { billingId: string }) {
               ))}
             </div>
           )}
+          {(header.paymentEvidenceUrl || header.whtCertUrl) && (
+            <div style={{ marginTop: "0.5rem", display: "flex", flexWrap: "wrap", gap: "0.25rem 0.75rem", fontSize: "0.8125rem" }}>
+              {header.paymentEvidenceUrl
+                .split("\n")
+                .filter(Boolean)
+                .map((url, i, all) => (
+                  <a key={url} href={url} target="_blank" rel="noopener noreferrer" style={{ color: "#0369a1" }}>
+                    📎 หลักฐานการโอน{all.length > 1 ? ` ${i + 1}` : ""}
+                  </a>
+                ))}
+              {header.whtCertUrl && (
+                <a href={header.whtCertUrl} target="_blank" rel="noopener noreferrer" style={{ color: "#0369a1" }}>
+                  📎 ใบหัก ณ ที่จ่าย (50 ทวิ)
+                </a>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
@@ -476,6 +493,7 @@ export function BillingDetailClient({ billingId }: { billingId: string }) {
           balance={header.balance}
           paidAmount={header.paidAmount}
           whtPercent={header.whtPercent}
+          existingWhtCertUrl={header.whtCertUrl}
           onClose={() => setShowPayment(false)}
           onSuccess={() => {
             setShowPayment(false);

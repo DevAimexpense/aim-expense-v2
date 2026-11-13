@@ -39,6 +39,7 @@ export function RecordBillingPaymentModal({
   balance,
   paidAmount,
   whtPercent: billingWhtPercent,
+  existingWhtCertUrl,
   onClose,
   onSuccess,
 }: {
@@ -52,6 +53,8 @@ export function RecordBillingPaymentModal({
   paidAmount: number;
   /** % หัก ณ ที่จ่ายที่ระบุไว้ในใบวางบิล (0 = ไม่มี) */
   whtPercent: number;
+  /** ใบ 50 ทวิ ที่เคยแนบไว้แล้ว (ถ้ามี) */
+  existingWhtCertUrl?: string;
   onClose: () => void;
   onSuccess: (newStatus: string) => void;
 }) {
@@ -78,7 +81,35 @@ export function RecordBillingPaymentModal({
   const [adjAmount, setAdjAmount] = useState("0");
 
   const [notes, setNotes] = useState("");
+  const [evidenceFile, setEvidenceFile] = useState<File | null>(null);
+  const [whtFile, setWhtFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState<"" | "evidence" | "whtCert">("");
   const [error, setError] = useState<string | null>(null);
+
+  /** อัปโหลดไฟล์ไป Drive ของธุรกิจ (route เดิม /api/billings/upload) — คืน false ถ้าไม่สำเร็จ */
+  const uploadOne = async (file: File, fileType: "evidence" | "whtCert"): Promise<boolean> => {
+    setUploading(fileType);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("billingId", billingId);
+      fd.append("fileType", fileType);
+      fd.append("paidDate", paidDate);
+      const res = await fetch("/api/billings/upload", { method: "POST", body: fd });
+      const json = (await res.json().catch(() => ({}))) as { success?: boolean; error?: string };
+      if (!res.ok || !json.success) throw new Error(json.error || "อัปโหลดไม่สำเร็จ");
+      return true;
+    } catch (e) {
+      setError(
+        `อัปโหลด${fileType === "evidence" ? "หลักฐานการโอน" : "ใบหัก ณ ที่จ่าย (50 ทวิ)"}ไม่สำเร็จ: ${
+          e instanceof Error ? e.message : ""
+        } — ยังไม่ได้บันทึกรับเงิน`,
+      );
+      return false;
+    } finally {
+      setUploading("");
+    }
+  };
 
   const cashNum = toNum(cash);
   const whtNum = hasWht ? toNum(whtAmount) : 0;
@@ -96,6 +127,15 @@ export function RecordBillingPaymentModal({
     if (cashNum < 0 || whtNum < 0 || adjNum < 0) return setError("จำนวนเงินต้องไม่ติดลบ");
     if (settled <= 0) return setError("กรุณากรอกจำนวนเงินที่ได้รับ");
     if (diff > 0) return setError(`ยอดเกินยอดที่ต้องชำระ ${formatTHB(diff)} บาท — ตรวจจำนวนเงินอีกครั้ง`);
+    // แนบไฟล์ก่อน — อัปโหลดไม่ผ่านจะยังไม่บันทึกรับเงิน (ผู้ใช้แก้แล้วกดใหม่ได้)
+    if (evidenceFile) {
+      if (!(await uploadOne(evidenceFile, "evidence"))) return;
+      setEvidenceFile(null);
+    }
+    if (hasWht && whtFile) {
+      if (!(await uploadOne(whtFile, "whtCert"))) return;
+      setWhtFile(null);
+    }
     try {
       const res = await recordMut.mutateAsync({
         billingId,
@@ -117,7 +157,7 @@ export function RecordBillingPaymentModal({
     }
   };
 
-  const isLoading = recordMut.isPending;
+  const isLoading = recordMut.isPending || uploading !== "";
   const row: React.CSSProperties = {
     display: "grid",
     gridTemplateColumns: "minmax(120px, 34%) 1fr",
@@ -346,6 +386,36 @@ export function RecordBillingPaymentModal({
               {hasAdj ? ` + ${adjType} ${formatTHB(adjNum)}` : ""}
             </div>
 
+            <div style={row}>
+              <span style={labelStyle}>
+                หลักฐานการโอน{" "}
+                <span style={{ fontWeight: 400, fontSize: "0.75rem", color: "#64748b" }}>(ไม่บังคับ)</span>
+              </span>
+              <FilePick file={evidenceFile} onChange={setEvidenceFile} label="หลักฐานการโอน" />
+            </div>
+
+            {hasWht && (
+              <div style={row}>
+                <span style={labelStyle}>
+                  ใบหัก ณ ที่จ่าย (50 ทวิ){" "}
+                  <span style={{ fontWeight: 400, fontSize: "0.75rem", color: "#64748b" }}>(แนบทีหลังได้)</span>
+                </span>
+                <div>
+                  {existingWhtCertUrl && !whtFile && (
+                    <a
+                      href={existingWhtCertUrl.split("\n").pop()}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{ display: "block", fontSize: "0.8125rem", color: "#0369a1", marginBottom: "0.25rem" }}
+                    >
+                      📎 มีไฟล์แนบแล้ว — ดูไฟล์ (เลือกไฟล์ใหม่เพื่อแทนที่)
+                    </a>
+                  )}
+                  <FilePick file={whtFile} onChange={setWhtFile} label="ใบหัก ณ ที่จ่าย (50 ทวิ)" />
+                </div>
+              </div>
+            )}
+
             <div style={{ ...row, alignItems: "start", marginBottom: 0 }}>
               <span style={{ ...labelStyle, paddingTop: "0.5rem" }}>หมายเหตุ</span>
               <textarea
@@ -366,7 +436,12 @@ export function RecordBillingPaymentModal({
             <button type="submit" disabled={isLoading || diff > 0} className="app-btn app-btn-primary">
               {isLoading ? (
                 <>
-                  <span className="app-spinner" /> กำลังบันทึก...
+                  <span className="app-spinner" />{" "}
+                  {uploading === "evidence"
+                    ? "กำลังอัปโหลดหลักฐาน..."
+                    : uploading === "whtCert"
+                      ? "กำลังอัปโหลด 50 ทวิ..."
+                      : "กำลังบันทึก..."}
                 </>
               ) : (
                 "บันทึก"
@@ -375,6 +450,34 @@ export function RecordBillingPaymentModal({
           </div>
         </form>
       </div>
+    </div>
+  );
+}
+
+/** เลือกไฟล์รูป/PDF 1 ไฟล์ (ตรวจชนิด/ขนาดจริงที่ฝั่งเซิร์ฟเวอร์ใน /api/billings/upload) */
+function FilePick({
+  file,
+  onChange,
+  label,
+}: {
+  file: File | null;
+  onChange: (f: File | null) => void;
+  label: string;
+}) {
+  return (
+    <div>
+      <input
+        type="file"
+        accept="image/*,application/pdf"
+        onChange={(e) => onChange(e.target.files?.[0] || null)}
+        className="app-input"
+        aria-label={label}
+      />
+      {file && (
+        <p style={{ fontSize: "0.75rem", color: "#475569", margin: "0.25rem 0 0" }}>
+          📎 {file.name} ({Math.max(1, Math.round(file.size / 1024)).toLocaleString()} KB) — อัปโหลดตอนกดบันทึก
+        </p>
+      )}
     </div>
   );
 }

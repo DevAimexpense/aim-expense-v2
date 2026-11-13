@@ -247,6 +247,7 @@ export const SHEET_HEADERS: Record<string, string[]> = {
     "ReceiptDate", // วันที่ใบเสร็จรับเงิน
     "DocKind", // "receipt" = ใบเสร็จรับเงินที่ออกโดยตรง (ไม่มีใบวางบิล, DocNumber = เลข RC) — ว่าง = ใบวางบิลปกติ
     "PaymentNote", // รายละเอียดการรับเงิน (รับจริง/หัก ณ ที่จ่าย/ปรับลด/หมายเหตุ) — ต่อท้ายทีละครั้งที่รับเงิน
+    "PaymentEvidenceUrl", // หลักฐานการโอน/รับเงิน (ลิงก์ Drive) — รับหลายครั้ง = หลายบรรทัด
   ],
   [SHEET_TABS.BILLING_LINES]: [
     "LineID",

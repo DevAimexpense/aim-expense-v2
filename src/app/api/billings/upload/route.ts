@@ -1,6 +1,8 @@
 // ===========================================
 // POST /api/billings/upload
 // Upload a withholding-tax certificate (50ทวิ) for a billing/income row → Google Drive
+// fileType=evidence → หลักฐานการโอน/รับเงิน (บันทึกรับเงินของใบวางบิล) → PaymentEvidenceUrl
+// fileType=whtCert (ค่าเริ่มต้น — flow รายรับบุคคลเดิม) → WHTCertUrl
 //
 // Used by the personal "บันทึกรายรับ" flow: the payer issues a WHT cert which
 // the individual attaches to the income record. Mirrors the tax-invoice upload.
@@ -50,6 +52,8 @@ export async function POST(req: NextRequest) {
     const formData = await req.formData();
     const file = formData.get("file");
     const billingId = formData.get("billingId") as string | null;
+    const fileType = formData.get("fileType") === "evidence" ? "evidence" : "whtCert";
+    const paidDate = (formData.get("paidDate") as string | null) || "";
 
     if (!(file instanceof File)) {
       return NextResponse.json({ error: "ไม่พบไฟล์" }, { status: 400 });
@@ -75,8 +79,11 @@ export async function POST(req: NextRequest) {
     }
 
     const { drive, receiptsFolderId } = await getDriveService(org.orgId);
+    // หลักฐานรับเงินจัดโฟลเดอร์ตามวันที่รับเงิน — ใบหัก ณ ที่จ่ายตามวันที่เอกสารแบบเดิม
     const refDate =
-      billing.DocDate || todayBangkok();
+      (fileType === "evidence" && /^\d{4}-\d{2}-\d{2}$/.test(paidDate) ? paidDate : "") ||
+      billing.DocDate ||
+      todayBangkok();
 
     let date = new Date(refDate);
     if (isNaN(date.getTime())) date = new Date();
@@ -101,7 +108,7 @@ export async function POST(req: NextRequest) {
         .replace(/-+/g, "-")
         .replace(/^-|-$/g, "")
         .slice(0, 60);
-    const fileName = `${datePrefix}_bil-whtcert_${sanitize(docTag)}_${billingId}.${ext}`;
+    const fileName = `${datePrefix}_bil-${fileType === "evidence" ? "evidence" : "whtcert"}_${sanitize(docTag)}_${billingId}.${ext}`;
     const folderPath = `Receipts/${year}/${paddedMonth}`;
 
     const result = await drive.uploadFile(
@@ -112,7 +119,12 @@ export async function POST(req: NextRequest) {
     );
 
     await sheets.updateById(SHEET_TABS.BILLINGS, "BillingID", billingId, {
-      WHTCertUrl: result.webViewLink,
+      ...(fileType === "evidence"
+        ? {
+            // รับหลายงวด → เก็บทุกไฟล์ (บรรทัดละลิงก์)
+            PaymentEvidenceUrl: [billing.PaymentEvidenceUrl, result.webViewLink].filter(Boolean).join("\n"),
+          }
+        : { WHTCertUrl: result.webViewLink }),
       UpdatedAt: new Date().toISOString(),
     });
 
@@ -123,7 +135,7 @@ export async function POST(req: NextRequest) {
         action: "upload",
         entityType: "billing",
         entityRef: billingId,
-        summary: `อัปโหลดใบหัก ณ ที่จ่าย ${billing.DocNumber || ""} → ${folderPath}/${fileName}`,
+        summary: `อัปโหลด${fileType === "evidence" ? "หลักฐานการรับเงิน" : "ใบหัก ณ ที่จ่าย"} ${billing.DocNumber || ""} → ${folderPath}/${fileName}`,
       },
     });
 

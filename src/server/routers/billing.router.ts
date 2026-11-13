@@ -180,6 +180,7 @@ function shapeHeader(r: Record<string, string>) {
     updatedAt: r.UpdatedAt || "",
     pdfUrl: r.PdfUrl || "",
     whtCertUrl: r.WHTCertUrl || "",
+    paymentEvidenceUrl: r.PaymentEvidenceUrl || "",
     // ใบเสร็จรับเงิน (ออกเมื่อรับเงินครบ)
     receiptNumber: r.ReceiptNumber || "",
     receiptDate: r.ReceiptDate || "",
