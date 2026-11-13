@@ -171,6 +171,7 @@ function shapeHeader(r: Record<string, string>) {
     paidDate: r.PaidDate || "",
     paymentMethod: r.PaymentMethod || "",
     bankAccountId: r.BankAccountID || "",
+    paymentNote: r.PaymentNote || "",
     notes: r.Notes || "",
     terms: r.Terms || "",
     preparedBy: r.PreparedBy || "",
@@ -1104,10 +1105,36 @@ export const billingRouter = router({
         paymentMethod: PaymentMethod,
         bankAccountId: z.string().optional(),
         notes: z.string().max(500).optional(),
+        // แยกยอดแบบ FlowAccount (amount = ยอดตัดหนี้ = cashReceived + whtAmount + adjustmentAmount)
+        breakdown: z
+          .object({
+            cashReceived: z.number().min(0),
+            whtPercent: z.number().min(0).max(15),
+            whtAmount: z.number().min(0),
+            adjustmentType: z.string().max(50).optional(),
+            adjustmentAmount: z.number().min(0),
+          })
+          .optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
+      const b = input.breakdown;
+      if (b && Math.abs(round2(b.cashReceived + b.whtAmount + b.adjustmentAmount) - round2(input.amount)) > 0.01) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "ยอดรับจริง + หัก ณ ที่จ่าย + ปรับลด ไม่เท่ากับยอดตัดหนี้" });
+      }
+      // รายละเอียดเก็บในชีตของลูกค้า (ZDR) — ไม่ใส่ข้อความอิสระลง Postgres
+      const fmt = (n: number) => n.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const noteParts = [
+        `${input.paidDate} ตัดหนี้ ${fmt(input.amount)}`,
+        b ? `รับจริง ${fmt(b.cashReceived)}` : "",
+        b && b.whtAmount > 0 ? `หัก ณ ที่จ่าย ${b.whtPercent}% ${fmt(b.whtAmount)}` : "",
+        b && b.adjustmentAmount > 0 ? `${b.adjustmentType || "ปรับลด"} ${fmt(b.adjustmentAmount)}` : "",
+        input.notes?.trim() ? `หมายเหตุ: ${input.notes.trim()}` : "",
+      ].filter(Boolean);
+      const paymentNoteEntry = noteParts.join(" · ");
+
       const sheets = await getSheetsService(ctx.org.orgId);
+      await ensureTabsCached(sheets, ctx.org.orgId); // คอลัมน์ PaymentNote ในชีตเก่า
       // lock ต่อเอกสาร + อ่าน PaidAmount สด (ไม่ใช้ cache 90 วิ) — กดซ้ำ/2 คนพร้อมกันต้องไม่
       // คำนวณยอดรับจากค่าเก่า (CO-04)
       const { existing, newPaid, newStatus, grandTotal } = await withLock(
@@ -1162,6 +1189,8 @@ export const billingRouter = router({
               PaymentMethod: input.paymentMethod,
               BankAccountID: input.bankAccountId || "",
               Status: newStatus,
+              // รับหลายครั้ง → ต่อท้าย (อ่านค่าสดภายใน lock แล้ว)
+              PaymentNote: [existing.PaymentNote, paymentNoteEntry].filter(Boolean).join("\n"),
               UpdatedAt: new Date().toISOString(),
             }
           );
@@ -1176,7 +1205,9 @@ export const billingRouter = router({
           action: "update",
           entityType: "billing",
           entityRef: input.billingId,
-          summary: `รับเงิน ${input.amount.toLocaleString()} บาท (${input.paymentMethod}) ใบวางบิล ${existing.DocNumber} → ${newStatus}`,
+          summary: `รับเงิน ${input.amount.toLocaleString()} บาท (${input.paymentMethod}${
+            b ? ` · รับจริง ${b.cashReceived.toLocaleString()} · WHT ${b.whtAmount.toLocaleString()} · ปรับลด ${b.adjustmentAmount.toLocaleString()}` : ""
+          }) ใบวางบิล ${existing.DocNumber} → ${newStatus}`,
         },
       });
 

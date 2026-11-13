@@ -430,6 +430,14 @@ export function BillingDetailClient({ billingId }: { billingId: string }) {
               {formatTHB(header.paidAmount)} / {formatTHB(header.balance)}
             </span>
           </div>
+          {header.paymentNote && (
+            <div style={{ marginTop: "0.5rem", fontSize: "0.75rem", color: "#475569", lineHeight: 1.6 }}>
+              <div style={{ fontWeight: 600, marginBottom: "0.125rem" }}>ประวัติรับเงิน</div>
+              {header.paymentNote.split("\n").map((line, i) => (
+                <div key={i}>{line}</div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
@@ -463,10 +471,11 @@ export function BillingDetailClient({ billingId }: { billingId: string }) {
         <RecordBillingPaymentModal
           billingId={billingId}
           docNumber={header.docNumber}
-          grandTotal={header.grandTotal}
+          customerName={header.customerNameSnapshot}
+          subtotal={header.subtotal}
           balance={header.balance}
+          paidAmount={header.paidAmount}
           whtPercent={header.whtPercent}
-          whtAmount={header.whtAmount}
           onClose={() => setShowPayment(false)}
           onSuccess={() => {
             setShowPayment(false);

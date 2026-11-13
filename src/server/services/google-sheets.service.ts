@@ -246,6 +246,7 @@ export const SHEET_HEADERS: Record<string, string[]> = {
     "ReceiptNumber", // ใบเสร็จรับเงิน RC-2026-0001 — ออกได้เมื่อรับเงินครบ (1 ใบต่อ 1 ใบวางบิล)
     "ReceiptDate", // วันที่ใบเสร็จรับเงิน
     "DocKind", // "receipt" = ใบเสร็จรับเงินที่ออกโดยตรง (ไม่มีใบวางบิล, DocNumber = เลข RC) — ว่าง = ใบวางบิลปกติ
+    "PaymentNote", // รายละเอียดการรับเงิน (รับจริง/หัก ณ ที่จ่าย/ปรับลด/หมายเหตุ) — ต่อท้ายทีละครั้งที่รับเงิน
   ],
   [SHEET_TABS.BILLING_LINES]: [
     "LineID",
