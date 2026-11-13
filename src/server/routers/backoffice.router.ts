@@ -21,7 +21,13 @@ import {
   type PlanTier,
 } from "@/lib/plans";
 import { ENTITLED_STATUSES } from "@/lib/stripe";
-import { readIsBackoffice } from "@/lib/org-settings";
+import {
+  readIsBackoffice,
+  readSpecialFeatureUsers,
+  SPECIAL_FEATURES,
+  SPECIAL_FEATURE_KEYS,
+} from "@/lib/org-settings";
+import type { Prisma } from "@prisma/client";
 import { yearMonthBangkok } from "@/lib/utils/date";
 import { parseStageMark } from "@/lib/reminder-stages";
 import type { Subscription } from "@prisma/client";
@@ -402,8 +408,16 @@ export const backofficeRouter = router({
               }
             : null,
         },
+        // ฟังก์ชันพิเศษที่ทีมงานเปิดให้รายคน (settings.specialFeatures)
+        specialFeatures: SPECIAL_FEATURE_KEYS.map((key) => ({
+          key,
+          label: SPECIAL_FEATURES[key].label,
+          description: SPECIAL_FEATURES[key].description,
+          userIds: readSpecialFeatureUsers(o.settings, key),
+        })),
         members: o.members.map((m) => ({
           id: m.id,
+          userId: m.user.id,
           name: m.user.fullName || m.user.lineDisplayName,
           email: m.user.email,
           role: m.role,
@@ -615,6 +629,81 @@ export const backofficeRouter = router({
     }),
 
   /** ยกเลิกสิทธิ์ที่ทีมงานให้ (ฟรีชั่วคราว / ฟรีตลอดชีพ) → กลับแพ็กเกจฐาน */
+  /**
+   * เปิด/ปิดฟังก์ชันพิเศษให้สมาชิกรายคนของ org (เช่น แก้วันที่ใบเสร็จ)
+   * userIds = รายชื่อทั้งหมดที่ได้สิทธิ์หลังบันทึก (แทนที่ของเดิม) · ต้องเป็นสมาชิก active ของ org
+   */
+  setSpecialFeature: backofficeProcedure
+    .input(
+      z.object({
+        orgId: z.string().uuid(),
+        feature: z.enum(SPECIAL_FEATURE_KEYS),
+        userIds: z.array(z.string().uuid()).max(500),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const org = await prisma.organization.findUnique({
+        where: { id: input.orgId },
+        select: {
+          id: true,
+          settings: true,
+          members: {
+            where: { status: "active" },
+            select: { user: { select: { id: true, fullName: true, lineDisplayName: true } } },
+          },
+        },
+      });
+      if (!org) throw new TRPCError({ code: "NOT_FOUND", message: "ไม่พบบริษัทนี้" });
+
+      const memberById = new Map(org.members.map((m) => [m.user.id, m.user]));
+      const userIds = Array.from(new Set(input.userIds));
+      const outsider = userIds.find((id) => !memberById.has(id));
+      if (outsider) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "เลือกได้เฉพาะสมาชิกที่ใช้งานอยู่ของบริษัทนี้" });
+      }
+
+      const before = readSpecialFeatureUsers(org.settings, input.feature);
+      // merge เฉพาะ specialFeatures.<feature> — ไม่ทับ key อื่น (vatRegistered, backoffice, …)
+      const existing =
+        org.settings && typeof org.settings === "object" && !Array.isArray(org.settings)
+          ? (org.settings as Prisma.JsonObject)
+          : {};
+      const features =
+        existing.specialFeatures && typeof existing.specialFeatures === "object" && !Array.isArray(existing.specialFeatures)
+          ? (existing.specialFeatures as Prisma.JsonObject)
+          : {};
+      await prisma.organization.update({
+        where: { id: org.id },
+        data: {
+          settings: {
+            ...existing,
+            specialFeatures: { ...features, [input.feature]: userIds },
+          } as Prisma.InputJsonObject,
+        },
+      });
+
+      const nameOf = (id: string) => {
+        const u = memberById.get(id);
+        return u?.fullName || u?.lineDisplayName || id.slice(0, 8);
+      };
+      const added = userIds.filter((id) => !before.includes(id)).map(nameOf);
+      const removed = before.filter((id) => !userIds.includes(id)).map(nameOf);
+      await safeAuditLog({
+        data: {
+          orgId: org.id,
+          userId: ctx.session.userId,
+          action: "update",
+          entityType: "organization",
+          entityRef: org.id,
+          summary: `ทีมงานตั้งฟังก์ชันพิเศษ "${SPECIAL_FEATURES[input.feature].label}"${
+            added.length ? ` · เปิดให้ ${added.join(", ")}` : ""
+          }${removed.length ? ` · ปิดของ ${removed.join(", ")}` : ""}${!added.length && !removed.length ? " · ไม่เปลี่ยน" : ""}`,
+        },
+      });
+
+      return { success: true, userIds };
+    }),
+
   revoke: backofficeProcedure
     .input(z.object({ orgId: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {

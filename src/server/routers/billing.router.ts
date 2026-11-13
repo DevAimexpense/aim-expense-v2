@@ -21,6 +21,7 @@ import { todayBangkok } from "@/lib/utils/date";
 import { resolveIssuerBranch } from "../lib/issuer-branch";
 import { prisma } from "@/lib/prisma";
 import { safeAuditLog } from "@/server/lib/audit";
+import { hasSpecialFeature } from "@/lib/org-settings";
 
 // ===== Schemas =====
 
@@ -1115,6 +1116,17 @@ export const billingRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      // ฟังก์ชันพิเศษ — ทีมงานเปิดให้รายคนในหลังบ้านเท่านั้น (ไม่ได้เปิดให้ทุก user)
+      const orgRow = await prisma.organization.findUnique({
+        where: { id: ctx.org.orgId },
+        select: { settings: true },
+      });
+      if (!hasSpecialFeature(orgRow?.settings, "receiptDateEdit", ctx.session.userId)) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "ยังไม่ได้เปิดใช้ฟังก์ชันแก้วันที่ใบเสร็จ — ติดต่อทีม Aim Expense",
+        });
+      }
       if (input.receiptDate > todayBangkok()) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "วันที่ใบเสร็จต้องไม่เกินวันนี้" });
       }

@@ -387,6 +387,30 @@ export function OrgDetailClient({ orgId }: { orgId: string }) {
         </div>
       </Section>
 
+      {/* ===== ฟังก์ชันพิเศษ (เปิดให้รายคน) ===== */}
+      <Section
+        title="⭐ ฟังก์ชันพิเศษ"
+        subtitle="ไม่ได้เปิดให้ทุกคน — เลือกสมาชิกที่ใช้ได้ทีละฟังก์ชัน แล้วกดบันทึก"
+      >
+        {d.specialFeatures.map((f) => (
+          <SpecialFeatureEditor
+            key={f.key}
+            orgId={orgId}
+            feature={f}
+            members={d.members.filter((m) => m.status === "active")}
+            onSaved={(msg) => {
+              setError(null);
+              setNotice(msg);
+              refresh();
+            }}
+            onError={(msg) => {
+              setNotice(null);
+              setError(msg);
+            }}
+          />
+        ))}
+      </Section>
+
       {/* ===== ประวัติ ===== */}
       <Section
         title="📜 ประวัติสิทธิ์และการตั้งค่า"
@@ -435,5 +459,80 @@ export function OrgDetailClient({ orgId }: { orgId: string }) {
         />
       )}
     </>
+  );
+}
+
+function SpecialFeatureEditor({
+  orgId,
+  feature,
+  members,
+  onSaved,
+  onError,
+}: {
+  orgId: string;
+  feature: { key: "receiptDateEdit"; label: string; description: string; userIds: string[] };
+  members: { userId: string; name: string; role: string; isOwner: boolean }[];
+  onSaved: (msg: string) => void;
+  onError: (msg: string) => void;
+}) {
+  const saveMut = trpc.backoffice.setSpecialFeature.useMutation();
+  const [selected, setSelected] = useState<Set<string>>(() => new Set(feature.userIds));
+  const dirty =
+    selected.size !== feature.userIds.length || feature.userIds.some((id) => !selected.has(id));
+
+  const toggle = (userId: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(userId)) next.delete(userId);
+      else next.add(userId);
+      return next;
+    });
+
+  const save = async () => {
+    try {
+      const res = await saveMut.mutateAsync({ orgId, feature: feature.key, userIds: Array.from(selected) });
+      onSaved(`บันทึก "${feature.label}" แล้ว — เปิดให้ ${res.userIds.length} คน`);
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ");
+    }
+  };
+
+  return (
+    <div style={{ padding: "0.25rem 0 0.75rem" }}>
+      <div style={{ fontWeight: 600, fontSize: "0.9375rem" }}>{feature.label}</div>
+      <p className="app-hint" style={{ marginTop: "0.125rem" }}>
+        {feature.description}
+      </p>
+      {members.length === 0 ? (
+        <p style={{ color: "#64748b", fontSize: "0.875rem" }}>ยังไม่มีสมาชิกที่ใช้งานอยู่</p>
+      ) : (
+        <div style={{ display: "grid", gap: "0.375rem", margin: "0.5rem 0 0.75rem" }}>
+          {members.map((m) => (
+            <label
+              key={m.userId}
+              style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.875rem", cursor: "pointer" }}
+            >
+              <input type="checkbox" checked={selected.has(m.userId)} onChange={() => toggle(m.userId)} />
+              <span>
+                {m.name}
+                <span style={{ color: "#64748b" }}>
+                  {" "}
+                  · {ROLE_LABELS[m.role] ?? m.role}
+                  {m.isOwner ? " (เจ้าของ)" : ""}
+                </span>
+              </span>
+            </label>
+          ))}
+        </div>
+      )}
+      <button
+        type="button"
+        className="app-btn app-btn-primary app-btn-sm"
+        disabled={!dirty || saveMut.isPending}
+        onClick={save}
+      >
+        {saveMut.isPending ? "กำลังบันทึก…" : "บันทึก"}
+      </button>
+    </div>
   );
 }

@@ -27,7 +27,7 @@ import { checkBusinessQuota } from "../lib/business-quota";
 import { PLAN_LABELS } from "@/lib/plans";
 import { TRPCError } from "@trpc/server";
 import type { Prisma } from "@prisma/client";
-import { readVatRegistered, readReceiptMode } from "@/lib/org-settings";
+import { readVatRegistered, readReceiptMode, hasSpecialFeature } from "@/lib/org-settings";
 import { safeAuditLog } from "@/server/lib/audit";
 
 /**
@@ -201,6 +201,8 @@ export const orgRouter = router({
       vatRegistered: readVatRegistered(settings),
       // จด VAT: ออกใบเสร็จรับเงินแยกจากใบกำกับภาษี หรือรวมใบเดียว
       receiptMode: readReceiptMode(settings),
+      // ฟังก์ชันพิเศษที่ทีมงานเปิดให้ผู้ใช้คนนี้ (หลังบ้าน) — ซ่อนปุ่มถ้าไม่ได้สิทธิ์
+      canEditReceiptDate: hasSpecialFeature(settings, "receiptDateEdit", ctx.session.userId),
     };
   }),
 

@@ -46,3 +46,37 @@ export function readReceiptMode(settings: unknown): ReceiptMode {
   }
   return "separate";
 }
+
+// ===========================================
+// ฟังก์ชันพิเศษ — ทีมงานเปิดให้ "รายคน" ในหลังบ้าน (/backoffice/customers/[orgId])
+// เก็บใน settings.specialFeatures = { <feature>: [userId, ...] }
+// เขียนได้จาก backoffice.setSpecialFeature เท่านั้น — org.update รับเฉพาะ key ที่ระบุใน schema
+// (vatRegistered / receiptMode) ลูกค้าจึงเปิดให้ตัวเองไม่ได้
+// ===========================================
+
+export const SPECIAL_FEATURES = {
+  receiptDateEdit: {
+    label: "แก้วันที่ใบเสร็จ / ออกเลขใหม่",
+    description:
+      "แก้วันที่ใบเสร็จรับเงินที่ออกไปแล้ว (เปลี่ยนวันที่รับเงินตาม) และเลือกออกเลขใหม่ของเดือนนั้นได้",
+  },
+} as const;
+
+export type SpecialFeature = keyof typeof SPECIAL_FEATURES;
+export const SPECIAL_FEATURE_KEYS = Object.keys(SPECIAL_FEATURES) as [SpecialFeature, ...SpecialFeature[]];
+
+/** userId ที่ได้ฟังก์ชันพิเศษนี้ใน org */
+export function readSpecialFeatureUsers(settings: unknown, feature: SpecialFeature): string[] {
+  if (settings && typeof settings === "object" && !Array.isArray(settings)) {
+    const all = (settings as Record<string, unknown>).specialFeatures;
+    if (all && typeof all === "object" && !Array.isArray(all)) {
+      const list = (all as Record<string, unknown>)[feature];
+      if (Array.isArray(list)) return list.filter((v): v is string => typeof v === "string");
+    }
+  }
+  return [];
+}
+
+export function hasSpecialFeature(settings: unknown, feature: SpecialFeature, userId: string): boolean {
+  return readSpecialFeatureUsers(settings, feature).includes(userId);
+}

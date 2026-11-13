@@ -268,7 +268,8 @@ export function BillingDetailClient({ billingId }: { billingId: string }) {
             </button>
           ))}
         {/* แก้วันที่ใบเสร็จที่ออกจากใบวางบิล (ใบเสร็จออกตรงแก้ที่เมนูใบเสร็จ) */}
-        {!!header.receiptNumber && header.docKind !== "receipt" && (
+        {/* ฟังก์ชันพิเศษ — แสดงเฉพาะคนที่ทีมงานเปิดให้ในหลังบ้าน */}
+        {!!header.receiptNumber && header.docKind !== "receipt" && orgQuery.data?.canEditReceiptDate && (
           <button onClick={() => setReceiptDialog("edit")} className="app-btn app-btn-secondary">
             📅 แก้วันที่ใบเสร็จ
           </button>
