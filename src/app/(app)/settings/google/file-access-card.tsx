@@ -1,81 +1,15 @@
 "use client";
 
 // ===========================================
-// การ์ด "สิทธิ์เข้าถึงชีตและโฟลเดอร์เดิม" — หน้า ตั้งค่า › เชื่อมต่อ Google
+// การ์ด "สิทธิ์เข้าถึงชีตและโฟลเดอร์" — หน้า ตั้งค่า › เชื่อมต่อ Google
 //
 // org ที่สร้างก่อนย้าย Google client (2026-07-09) แอปมองไม่เห็นชีต/โฟลเดอร์เดิม
 // (scope drive.file ผูกไฟล์กับ client ที่สร้าง) ทั้งที่ token ยังดี — เจ้าของกด
-// "ยืนยันสิทธิ์ชีตเดิม" → Google Picker แสดงเฉพาะไฟล์ของ org นี้ (setFileIds) →
-// เลือกทุกรายการ → Google มอบสิทธิ์ไฟล์ให้แอปอีกครั้ง ข้อมูลเดิมใช้ต่อได้ครบ
+// "ยืนยันสิทธิ์ชีตเดิม" → ไปหน้า Google เต็มหน้า (Picker แบบ redirect ใช้ได้ทุกอุปกรณ์
+// รวม iPad/มือถือ) → เลือกไฟล์ของธุรกิจนี้ → กลับมาหน้านี้พร้อม ?regrant=<ผล>
 // ===========================================
 
-import { useState } from "react";
 import { trpc } from "@/lib/trpc/client";
-
-declare global {
-  interface Window {
-    gapi?: any;
-    google?: any;
-  }
-}
-
-let pickerLoad: Promise<void> | null = null;
-
-/** โหลด Google API loader + library picker ครั้งเดียวต่อหน้า */
-function loadPicker(): Promise<void> {
-  if (window.google?.picker) return Promise.resolve();
-  if (pickerLoad) return pickerLoad;
-  pickerLoad = new Promise<void>((resolve, reject) => {
-    const done = () => window.gapi.load("picker", { callback: () => resolve(), onerror: () => reject(new Error("โหลด Google Picker ไม่สำเร็จ")) });
-    if (window.gapi) return done();
-    const s = document.createElement("script");
-    s.src = "https://apis.google.com/js/api.js";
-    s.async = true;
-    s.onload = done;
-    s.onerror = () => reject(new Error("โหลด Google Picker ไม่สำเร็จ — ตรวจสอบอินเทอร์เน็ตแล้วลองใหม่"));
-    document.head.appendChild(s);
-  }).catch((e) => {
-    pickerLoad = null;
-    throw e;
-  });
-  return pickerLoad;
-}
-
-type PickerConfig = {
-  accessToken: string;
-  developerKey: string;
-  appId: string;
-  fileIds: string[];
-};
-
-/** เปิด Picker แล้วคืน true เมื่อผู้ใช้กดเลือก / false เมื่อปิดหรือยกเลิก */
-function openPicker(cfg: PickerConfig): Promise<boolean> {
-  return new Promise((resolve) => {
-    const g = window.google.picker;
-    const view = new g.DocsView(g.ViewId.DOCS)
-      .setFileIds(cfg.fileIds.join(","))
-      .setIncludeFolders(true)
-      .setSelectFolderEnabled(true)
-      .setMode(g.DocsViewMode.LIST);
-    const picker = new g.PickerBuilder()
-      .addView(view)
-      .enableFeature(g.Feature.MULTISELECT_ENABLED)
-      .enableFeature(g.Feature.NAV_HIDDEN)
-      .setOAuthToken(cfg.accessToken)
-      .setDeveloperKey(cfg.developerKey)
-      .setAppId(cfg.appId)
-      .setOrigin(window.location.origin)
-      .setLocale("th")
-      .setTitle("เลือกทุกรายการ (ชีต + โฟลเดอร์) แล้วกด Select")
-      .setCallback((data: any) => {
-        const action = data?.[g.Response.ACTION];
-        if (action === g.Action.PICKED) resolve(true);
-        else if (action === g.Action.CANCEL) resolve(false);
-      })
-      .build();
-    picker.setVisible(true);
-  });
-}
 
 const STATUS_LABEL: Record<string, { text: string; color: string; icon: string }> = {
   ok: { text: "เข้าถึงได้", color: "#16a34a", icon: "✓" },
@@ -84,46 +18,46 @@ const STATUS_LABEL: Record<string, { text: string; color: string; icon: string }
   missing_id: { text: "ไม่มี (ใช้โฟลเดอร์หลักแทน)", color: "#94a3b8", icon: "–" },
 };
 
-export function FileAccessCard() {
-  const utils = trpc.useUtils();
+/** ผลจาก /api/auth/google/callback (?regrant=...) */
+const RESULT_MESSAGE: Record<string, { tone: "ok" | "error" | "info"; text: string }> = {
+  ok: { tone: "ok", text: "ยืนยันสิทธิ์สำเร็จ — ใช้งานชีตและโฟลเดอร์เดิมได้ตามปกติแล้ว" },
+  partial: {
+    tone: "error",
+    text: "ยังเข้าถึงไม่ครบ — กดอีกครั้งแล้วเลือกให้ครบทุกรายการ (ชีต + ทุกโฟลเดอร์) ก่อนกดยืนยัน",
+  },
+  cancelled: { tone: "info", text: "ยกเลิกแล้ว — ยังไม่ได้ยืนยันสิทธิ์" },
+  wrong_account: {
+    tone: "error",
+    text: "เลือกไฟล์ด้วยบัญชี Google คนละบัญชีกับที่เชื่อมไว้ — กดอีกครั้งแล้วเลือกบัญชีที่แสดงในขั้นที่ 1",
+  },
+  not_owner: { tone: "error", text: "เฉพาะเจ้าของธุรกิจที่ยืนยันสิทธิ์ได้" },
+  expired: { tone: "error", text: "หมดเวลา — กด “ยืนยันสิทธิ์ชีตเดิม” ใหม่อีกครั้ง" },
+  failed: { tone: "error", text: "ยืนยันสิทธิ์ไม่สำเร็จ — ลองใหม่อีกครั้ง หรือติดต่อทีม Aim Expense" },
+  // GA-10
+  drive_not_granted: {
+    tone: "error",
+    text: "ยังไม่ได้อนุญาตสิทธิ์ Google Drive — กดอีกครั้ง แล้วติ๊กอนุญาตสิทธิ์ Google Drive ในหน้า Google",
+  },
+  // GA-09
+  no_files: { tone: "error", text: "ธุรกิจนี้ยังไม่มีชีตหรือโฟลเดอร์ — ติดต่อทีม Aim Expense" },
+  no_org: { tone: "error", text: "ไม่พบธุรกิจที่ใช้งานอยู่ — เลือกธุรกิจแล้วลองใหม่อีกครั้ง" },
+};
+
+export function FileAccessCard({
+  regrantResult,
+  regrantHref = "/api/auth/google/regrant",
+}: {
+  regrantResult?: string;
+  /** ลิงก์ที่มี openExternalBrowser=1 + ตั๋ว handoff (สร้างฝั่ง server) */
+  regrantHref?: string;
+}) {
   const status = trpc.googleAccess.status.useQuery(undefined, {
     retry: false,
     refetchOnWindowFocus: false,
   });
-  const pickerConfig = trpc.googleAccess.pickerConfig.useMutation();
-  const confirm = trpc.googleAccess.confirmRegrant.useMutation();
-  const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState<{ tone: "ok" | "error" | "info"; text: string } | null>(null);
-
-  async function handleRegrant() {
-    setBusy(true);
-    setMsg(null);
-    try {
-      const cfg = await pickerConfig.mutateAsync();
-      await loadPicker();
-      const picked = await openPicker(cfg);
-      if (!picked) {
-        setMsg({ tone: "info", text: "ยกเลิกแล้ว — ยังไม่ได้ยืนยันสิทธิ์" });
-        return;
-      }
-      const result = await confirm.mutateAsync();
-      utils.googleAccess.status.setData(undefined, result);
-      setMsg(
-        result.allOk
-          ? { tone: "ok", text: "ยืนยันสิทธิ์สำเร็จ — ใช้งานชีตและโฟลเดอร์เดิมได้ตามปกติแล้ว" }
-          : {
-              tone: "error",
-              text: "ยังเข้าถึงไม่ครบ — กดอีกครั้งแล้วเลือกให้ครบทุกรายการ (ติ๊กทุกแถว) ก่อนกด Select",
-            },
-      );
-    } catch (e) {
-      setMsg({ tone: "error", text: e instanceof Error ? e.message : "เกิดข้อผิดพลาด" });
-    } finally {
-      setBusy(false);
-    }
-  }
-
   const data = status.data;
+  // GA-09: รหัสที่ไม่รู้จัก → ข้อความ failed (ไม่เงียบ)
+  const msg = regrantResult ? (RESULT_MESSAGE[regrantResult] ?? RESULT_MESSAGE.failed) : undefined;
 
   return (
     <section
@@ -155,6 +89,20 @@ export function FileAccessCard() {
             <span className="app-badge app-badge-error">ต้องยืนยันสิทธิ์</span>
           ))}
       </div>
+
+      {msg && (
+        <p
+          role="status"
+          style={{
+            margin: "0 0 0.75rem",
+            fontSize: "0.875rem",
+            color: msg.tone === "ok" ? "#065f46" : msg.tone === "error" ? "#b91c1c" : "#475569",
+          }}
+        >
+          {msg.tone === "ok" ? "✅ " : msg.tone === "error" ? "⚠️ " : ""}
+          {msg.text}
+        </p>
+      )}
 
       {status.isLoading && (
         <p style={{ fontSize: "0.875rem", color: "#64748b", margin: 0 }}>กำลังตรวจสอบ…</p>
@@ -208,12 +156,11 @@ export function FileAccessCard() {
                     ด้านบนแล้วเลือกบัญชีเดิม
                   </li>
                   <li>
-                    ถ้าเป็นบัญชีที่ถูกต้องแล้ว กด <strong>&ldquo;ยืนยันสิทธิ์ชีตเดิม&rdquo;</strong> → หน้าต่าง Google
-                    จะแสดงไฟล์ของธุรกิจนี้ → <strong>ติ๊กเลือกทุกรายการ</strong> แล้วกด <strong>Select</strong>{" "}
-                    (ล็อกอินบัญชีเดียวกันนี้ในเบราว์เซอร์ แนะนำ Chrome บนคอมพิวเตอร์)
+                    ถ้าเป็นบัญชีที่ถูกต้องแล้ว กด <strong>&ldquo;ยืนยันสิทธิ์ชีตเดิม&rdquo;</strong> → ระบบจะพาไปหน้า Google
+                    ที่แสดงไฟล์ของธุรกิจนี้ → <strong>เลือกทุกรายการ</strong> แล้วกดยืนยัน (ทำได้ทั้งคอม iPad และมือถือ)
                   </li>
                   <li>
-                    ถ้าหน้าต่าง Google ไม่แสดงไฟล์ ไฟล์อาจถูกลบหรือย้ายไปบัญชีอื่น — ติดต่อทีม Aim Expense
+                    ถ้าหน้า Google ไม่แสดงไฟล์ ไฟล์อาจถูกลบหรือย้ายไปบัญชีอื่น — ติดต่อทีม Aim Expense
                   </li>
                 </ol>
               ) : (
@@ -226,35 +173,11 @@ export function FileAccessCard() {
           )}
 
           {!data.allOk && data.isOwner && (
-            <button
-              type="button"
-              className="app-btn app-btn-primary"
-              onClick={handleRegrant}
-              disabled={busy || !data.pickerConfigured}
-            >
-              {busy ? "กำลังเปิดหน้าต่าง Google…" : "🔑 ยืนยันสิทธิ์ชีตเดิม"}
-            </button>
-          )}
-          {!data.allOk && data.isOwner && !data.pickerConfigured && (
-            <p style={{ fontSize: "0.75rem", color: "#94a3b8", margin: "0.5rem 0 0" }}>
-              ระบบยังไม่ได้เปิดใช้ Google Picker — กรุณาติดต่อทีม Aim Expense
-            </p>
+            <a href={regrantHref} className="app-btn app-btn-primary">
+              🔑 ยืนยันสิทธิ์ชีตเดิม
+            </a>
           )}
         </>
-      )}
-
-      {msg && (
-        <p
-          role="status"
-          style={{
-            margin: "0.75rem 0 0",
-            fontSize: "0.875rem",
-            color: msg.tone === "ok" ? "#065f46" : msg.tone === "error" ? "#b91c1c" : "#475569",
-          }}
-        >
-          {msg.tone === "ok" ? "✅ " : msg.tone === "error" ? "⚠️ " : ""}
-          {msg.text}
-        </p>
       )}
     </section>
   );

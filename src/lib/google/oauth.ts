@@ -43,13 +43,15 @@ export function createOAuth2Client() {
 /**
  * Generate Google OAuth consent URL
  */
-export function getGoogleAuthUrl(): string {
+export function getGoogleAuthUrl(loginHint?: string | null): string {
   const client = createOAuth2Client();
 
   return client.generateAuthUrl({
     access_type: "offline", // ได้ refresh_token
     prompt: "consent", // force consent เพื่อให้ได้ refresh_token ทุกครั้ง
     scope: GOOGLE_SCOPES,
+    // เชื่อมใหม่ → เลือกบัญชีเดิมไว้ให้ (ชีตอยู่ใน Drive ของบัญชีเดิมเท่านั้น)
+    ...(loginHint ? { login_hint: loginHint } : {}),
   });
 }
 

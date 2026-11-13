@@ -15,6 +15,7 @@ import { prisma } from "@/lib/prisma";
 import { formatDate as formatThaiDate } from "@/lib/utils/date";
 import { GoogleRevokedBanner } from "@/components/shared/google-revoked-banner";
 import { FileAccessCard } from "./file-access-card";
+import { createAuthHandoff, googleLinkWithHandoff } from "@/lib/auth/handoff";
 
 export const metadata = {
   title: "เชื่อมต่อ Google | Aim Expense",
@@ -32,7 +33,7 @@ function hasScope(scopes: string[], prefix: string): boolean {
 export default async function GoogleSettingsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ reconnected?: string; error?: string }>;
+  searchParams: Promise<{ reconnected?: string; error?: string; regrant?: string }>;
 }) {
   const session = await getSession();
   if (!session) redirect("/login");
@@ -86,6 +87,12 @@ export default async function GoogleSettingsPage({
   const ownerRevoked = !!ownerConnection && !ownerConnection.isActive;
 
   const params = await searchParams;
+
+  // ลิงก์เชื่อม Google: ให้ LINE เปิด Safari/Chrome (Google อาจไม่ยอมให้ทำใน browser ฝังของแอป)
+  // + ตั๋วใช้ครั้งเดียวพา session ตามไป — ตั๋วเดียวใช้ร่วมทุกปุ่มในหน้านี้ (กดได้ทีละปุ่มอยู่แล้ว)
+  const handoff = await createAuthHandoff(session.userId);
+  const connectHref = googleLinkWithHandoff("/api/auth/google", handoff);
+  const regrantHref = googleLinkWithHandoff("/api/auth/google/regrant", handoff);
   const justReconnected = params.reconnected === "1";
   const errorCode = params.error;
 
@@ -124,7 +131,11 @@ export default async function GoogleSettingsPage({
       </div>
 
       {ownerRevoked && !justReconnected && (
-        <GoogleRevokedBanner isOwner={isOwner} ownerEmail={ownerConnection?.googleEmail} />
+        <GoogleRevokedBanner
+          isOwner={isOwner}
+          ownerEmail={ownerConnection?.googleEmail}
+          reconnectHref={connectHref}
+        />
       )}
 
       {justReconnected && (
@@ -272,7 +283,7 @@ export default async function GoogleSettingsPage({
             flexWrap: "wrap",
           }}
         >
-          <a href="/api/auth/google" className="app-btn app-btn-primary">
+          <a href={connectHref} className="app-btn app-btn-primary">
             🔄 {connection ? "เชื่อมต่อใหม่" : "เชื่อมต่อ Google"}
           </a>
           <span
@@ -288,7 +299,7 @@ export default async function GoogleSettingsPage({
       </section>
 
       {/* ===== Card 1.5: สิทธิ์ไฟล์เดิม (Google Picker re-grant) — ผู้ดูแล/เจ้าของ ===== */}
-      {(orgCtx.role === "admin" || isOwner) && !ownerRevoked && <FileAccessCard />}
+      {(orgCtx.role === "admin" || isOwner) && !ownerRevoked && <FileAccessCard regrantResult={params.regrant} regrantHref={regrantHref} />}
 
       {/* ===== Card 2: Master Spreadsheet ===== */}
       <section

@@ -117,17 +117,17 @@ export function middleware(req: NextRequest) {
   // Content Security Policy — allow required third-parties
   const csp = [
     "default-src 'self'",
-    // scripts: self + Next.js inline (dev) + Google API loader (Google Picker — ยืนยันสิทธิ์ชีตเดิม)
-    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://apis.google.com https://www.gstatic.com",
+    // scripts: self + Next.js inline (dev) + nothing else
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
     // styles: self + inline (for CSS-in-JS) + Google Fonts
-    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://www.gstatic.com",
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     "font-src 'self' https://fonts.gstatic.com data:",
     // images: self + data (base64) + Google avatars + LINE profile + QR service
     "img-src 'self' data: blob: https://lh3.googleusercontent.com https://profile.line-scdn.net https://api.qrserver.com https://drive.google.com",
     // XHR/fetch: self + LINE + Google + OpenAI + AksonOCR
-    "connect-src 'self' https://access.line.me https://api.line.me https://accounts.google.com https://oauth2.googleapis.com https://www.googleapis.com https://api.openai.com https://api.aksonocr.com https://apis.google.com https://content.googleapis.com",
-    // frames (PDF preview, Drive docs, Google Picker + gapi proxy iframe)
-    "frame-src 'self' blob: https://drive.google.com https://docs.google.com https://content.googleapis.com https://accounts.google.com",
+    "connect-src 'self' https://access.line.me https://api.line.me https://accounts.google.com https://oauth2.googleapis.com https://www.googleapis.com https://api.openai.com https://api.aksonocr.com",
+    // frames (PDF preview, Drive docs)
+    "frame-src 'self' blob: https://drive.google.com https://docs.google.com",
     // objects (PDF preview fallback)
     "object-src 'self' blob:",
     // base URI

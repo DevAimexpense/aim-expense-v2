@@ -6,6 +6,7 @@
 
 import { SignJWT, jwtVerify } from "jose";
 import { cookies } from "next/headers";
+import { NextResponse } from "next/server";
 import { cache } from "react";
 
 const SESSION_COOKIE = "aim-session";
@@ -92,6 +93,38 @@ export async function setSessionCookie(payload: SessionPayload): Promise<void> {
     sameSite: "lax",
     maxAge: SESSION_MAX_AGE,
     path: "/",
+  });
+}
+
+/**
+ * ตั้ง session cookie ลงบน response ที่จะส่งกลับโดยตรง (ใช้คู่กับ htmlRedirect)
+ * — ใช้ตอนแลกตั๋ว handoff เป็น session ใน Safari/Chrome (ดู lib/auth/handoff.ts)
+ */
+export async function setSessionCookieOnResponse(
+  res: NextResponse,
+  payload: SessionPayload,
+): Promise<void> {
+  const token = await createSessionToken(payload);
+  res.cookies.set(SESSION_COOKIE, token, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    maxAge: SESSION_MAX_AGE,
+    path: "/",
+  });
+}
+
+/**
+ * พาไปต่อด้วยหน้า HTML 200 + JS แทน 3xx — cookie ที่ set บน 3xx อาจไม่ติดใน
+ * browser ฝังของ LINE (iOS WKWebView) · พอร์ตจาก aim-hr
+ */
+export function htmlRedirect(to: string): NextResponse {
+  const jsUrl = JSON.stringify(to);
+  const attr = to.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+  const html = `<!doctype html><html lang="th"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="refresh" content="0;url=${attr}"><title>กำลังไปต่อ…</title></head><body style="font-family:system-ui,sans-serif;text-align:center;padding:2.5rem;color:#475569">กำลังไปต่อ…<script>location.replace(${jsUrl})</script><noscript><a href="${attr}">ดำเนินการต่อ</a></noscript></body></html>`;
+  return new NextResponse(html, {
+    status: 200,
+    headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
   });
 }
 

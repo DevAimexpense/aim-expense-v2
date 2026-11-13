@@ -12,6 +12,8 @@ import { encryptToken } from "@/lib/google/token-encryption";
 import { getSession, setSessionCookie } from "@/lib/auth/session";
 import { prisma } from "@/lib/prisma";
 import { invalidateOrgInfoCache } from "@/server/lib/sheets-context";
+import { REGRANT_STATE_PREFIX } from "@/server/lib/google-file-access";
+import { handleRegrantCallback } from "@/server/lib/google-regrant-callback";
 
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
@@ -24,6 +26,13 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(
       new URL("/login?error=must_login_first", request.url)
     );
+  }
+
+  // ขากลับของ "ยืนยันสิทธิ์ชีตเดิม" (Google Picker แบบ redirect) — แยก flow ทั้งหมด
+  // ไม่แตะ GoogleConnection / onboarding (ดู google-regrant-callback.ts)
+  const state = searchParams.get("state");
+  if (state?.startsWith(REGRANT_STATE_PREFIX)) {
+    return handleRegrantCallback(request, session.userId, state);
   }
 
   if (error) {
