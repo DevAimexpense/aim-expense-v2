@@ -139,6 +139,7 @@ export const SHEET_HEADERS: Record<string, string[]> = {
     "CreatedByUserId", // R6: stable userId — ใช้เช็ค ownership permission (display name เปลี่ยนได้)
     "UpdatedAt",
     "WhtCertNo", // DOC-04: เลขหนังสือรับรอง 50 ทวิ ที่ออกครั้งแรก "เล่มที่|เลขที่" — คงที่ ไม่คำนวณใหม่
+    "WhtCertFor", // WHT-03: ลายนิ้วมือข้อมูล (ยอด/อัตรา/ผู้รับเงิน/วันที่/รายละเอียด) ที่ใช้สร้าง 50 ทวิ ใน Drive — ไม่ตรง = เขียนทับไฟล์เดิม
   ],
   [SHEET_TABS.EVENT_ASSIGNMENTS]: [
     "AssignmentID",

@@ -5,7 +5,8 @@ const reactCjs = createRequire(import.meta.url)("react") as { cache?: unknown };
 if (typeof reactCjs.cache !== "function") reactCjs.cache = <F,>(fn: F) => fn;
 
 (async () => {
-  const { whtAutoSaveSkipReason } = await import("../../src/server/lib/wht-cert-pdf");
+  const { whtAutoSaveSkipReason, whtCertSignature } = await import("../../src/server/lib/wht-cert-pdf");
+  const savedRow = { WTHAmount: "300", Status: "paid", GeneratedDocUrl: "https://drive/x", GeneratedDocType: "wht-cert" };
   const CASES = [
     { name: "LINE: pending + มี WHT (มีวันที่ใบเสร็จ) → ไม่ออก (WHT-01)", got: whtAutoSaveSkipReason({ WTHAmount: "300", Status: "pending" }), want: "not_paid" },
     { name: "อนุมัติแล้วแต่ยังไม่จ่าย → ไม่ออก", got: whtAutoSaveSkipReason({ WTHAmount: "300", Status: "approved" }), want: "not_paid" },
@@ -13,7 +14,8 @@ if (typeof reactCjs.cache !== "function") reactCjs.cache = <F,>(fn: F) => fn;
     { name: "จ่ายแล้ว (paid) → ออก", got: whtAutoSaveSkipReason({ WTHAmount: "300", Status: "paid" }), want: null },
     { name: "เคลียร์แล้ว (cleared) → ออก", got: whtAutoSaveSkipReason({ WTHAmount: "300", Status: "cleared" }), want: null },
     { name: "ไม่มี WHT → ข้าม", got: whtAutoSaveSkipReason({ WTHAmount: "0", Status: "paid" }), want: "no_wht" },
-    { name: "จ่ายแล้วและมี 50 ทวิ แล้ว → ใช้ไฟล์เดิม", got: whtAutoSaveSkipReason({ WTHAmount: "300", Status: "paid", GeneratedDocUrl: "https://drive/x", GeneratedDocType: "wht-cert" }), want: "exists" },
+    // WHT-03: "ใช้ไฟล์เดิม" ต้องมีลายนิ้วมือข้อมูลตรงกัน (แถวเก่าไม่มี → สร้างใหม่ครั้งเดียว — ดู wht03-doc04.test.ts)
+    { name: "จ่ายแล้วและมี 50 ทวิ จากข้อมูลชุดนี้แล้ว → ใช้ไฟล์เดิม", got: whtAutoSaveSkipReason({ ...savedRow, WhtCertFor: whtCertSignature(savedRow) }), want: "exists" },
     { name: "มีใบรับรองแทนใบเสร็จในช่องเดียวกัน → other_doc (WHT-02)", got: whtAutoSaveSkipReason({ WTHAmount: "300", Status: "paid", GeneratedDocUrl: "https://drive/y", GeneratedDocType: "substitute-receipt" }), want: "other_doc" },
   ];
   let fail = 0;

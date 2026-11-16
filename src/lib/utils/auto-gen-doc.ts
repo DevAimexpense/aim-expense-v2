@@ -317,8 +317,10 @@ export function ensureSalesDocSaved(params: {
   savedFor: string;
   savedUrl: string;
   onDone?: (fileUrl?: string) => void;
+  /** บันทึกไม่สำเร็จ (ข้อความจากหน้าเอกสาร/เซิร์ฟเวอร์) — ผู้เรียกใช้ตัดสินว่าจะข้าม/หยุดคิว */
+  onFail?: (error?: string) => void;
 }): void {
-  const { kind, id, version, savedFor, savedUrl, onDone } = params;
+  const { kind, id, version, savedFor, savedUrl, onDone, onFail } = params;
   if (typeof window === "undefined" || !id || !version) return;
   if (savedUrl && savedFor === version) return;
   const key = `${kind}:${id}:${version}`;
@@ -326,6 +328,14 @@ export function ensureSalesDocSaved(params: {
   salesSaveStarted.add(key);
   triggerBackgroundDocGen(id, kind, { timeoutMs: 90000 }).then((r) => {
     if (r.success) onDone?.(r.fileUrl);
-    else salesSaveStarted.delete(key);
+    else {
+      salesSaveStarted.delete(key);
+      onFail?.(r.error);
+    }
   });
+}
+
+/** ข้อความที่แปลว่าแอปเข้า Google Sheet/Drive ของธุรกิจไม่ได้ — ลองใบอื่นก็ล้มเหมือนกัน (หยุดคิว) */
+export function isDriveAccessProblem(error?: string): boolean {
+  return /เข้าถึง Google Sheet\/Drive|เชื่อมต่อ Google|ยังไม่ได้เชื่อมต่อ Google/.test(error || "");
 }

@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { trpc } from "@/lib/trpc/client";
-import { ensureSalesDocSaved } from "@/lib/utils/auto-gen-doc";
+import { ensureSalesDocSaved, isDriveAccessProblem } from "@/lib/utils/auto-gen-doc";
 import { formatDate } from "@/lib/utils/date";
 
 const formatTHB = (n: number) =>
@@ -31,10 +31,20 @@ export function ReceiptsClient() {
     .sort((a, b) => b.receiptNumber.localeCompare(a.receiptNumber));
   // DOC-02: ใบเสร็จที่ PDF ยังไม่เข้า Drive (หรือเก่ากว่าข้อมูล) → บันทึกเบื้องหลังทีละ 3 ใบ
   // (ใบเสร็จที่ออกตรงไม่มีหน้ารายละเอียด และแท็บเอกสารอาจถูก Safari บล็อก)
-  const pendingPdf = issued.filter((b) => b.status !== "draft" && (!b.receiptPdfUrl || b.receiptPdfFor !== b.updatedAt));
-  const pendingKey = pendingPdf.slice(0, 3).map((b) => `${b.billingId}:${b.updatedAt}`).join("|");
+  // DOC-04: ใบที่ล้มในรอบนี้ → ข้ามไปหยิบใบถัดไป (ไม่ขวางคิว) · ล้มเพราะเข้า Drive ไม่ได้ → หยุดทั้งคิว
+  const failedRef = useRef<Set<string>>(new Set());
+  const [queueTick, setQueueTick] = useState(0);
+  const [queueStopped, setQueueStopped] = useState(false);
+  const pendingPdf = issued.filter(
+    (b) =>
+      b.status !== "draft" &&
+      (!b.receiptPdfUrl || b.receiptPdfFor !== b.updatedAt) &&
+      !failedRef.current.has(`${b.billingId}:${b.updatedAt}`),
+  );
+  const batch = queueStopped ? [] : pendingPdf.slice(0, 3);
+  const pendingKey = `${batch.map((b) => `${b.billingId}:${b.updatedAt}`).join("|")}#${queueTick}`;
   useEffect(() => {
-    for (const b of pendingPdf.slice(0, 3)) {
+    for (const b of batch) {
       ensureSalesDocSaved({
         kind: "receipt",
         id: b.billingId,
@@ -42,6 +52,11 @@ export function ReceiptsClient() {
         savedFor: b.receiptPdfFor,
         savedUrl: b.receiptPdfUrl,
         onDone: () => utils.billing.list.invalidate(),
+        onFail: (error) => {
+          failedRef.current.add(`${b.billingId}:${b.updatedAt}`);
+          if (isDriveAccessProblem(error)) setQueueStopped(true);
+          else setQueueTick((t) => t + 1);
+        },
       });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

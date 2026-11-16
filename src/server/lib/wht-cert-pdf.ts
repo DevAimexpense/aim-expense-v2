@@ -9,7 +9,7 @@
 
 import { generateWhtCertPdf } from "@/lib/wht-cert/generate";
 import { loadWhtCertData, WhtCertNoDateError, type WhtCertData } from "@/server/lib/wht-cert-data";
-import { getSheetsService, getDriveService } from "@/server/lib/sheets-context";
+import { getSheetsService, getDriveService, ensureTabsCached } from "@/server/lib/sheets-context";
 import { SHEET_TABS } from "@/server/services/google-sheets.service";
 import { safeAuditLog } from "@/server/lib/audit";
 import { withLock } from "@/server/lib/lock";
@@ -43,6 +43,16 @@ export async function buildWhtCertPdf(data: WhtCertData): Promise<Uint8Array> {
   });
 }
 
+/** ชื่อไฟล์แบบเดียวกับ GoogleDriveService.uploadSystemDocument: YYYYMMDD_type_desc_id.pdf */
+function systemDocFileName(docDate: string, docType: string, description: string, paymentId: string): string {
+  let d = new Date(docDate);
+  if (isNaN(d.getTime())) d = new Date();
+  const prefix = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
+  const desc =
+    description.replace(/[^\w\u0E00-\u0E7F-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").slice(0, 60) || "doc";
+  return `${prefix}_${docType}_${desc}_${paymentId}.pdf`;
+}
+
 /** สถานะที่ถือว่าจ่ายเงินแล้ว (หักภาษีเกิดขึ้นจริง) */
 const PAID_STATUSES = new Set(["paid", "cleared"]);
 
@@ -50,17 +60,41 @@ const PAID_STATUSES = new Set(["paid", "cleared"]);
  * เหตุที่ไม่บันทึก 50 ทวิ อัตโนมัติ (null = บันทึกได้) — แยกเป็นฟังก์ชันล้วนให้เทสต์ได้
  * ลำดับ: ไม่มี WHT → ยังไม่จ่าย (WHT-01) → มีไฟล์แล้ว (dedup เหมือน save-pdf) → มีเอกสารระบบอื่นในช่องเดียวกัน
  */
-export function whtAutoSaveSkipReason(payment: {
+type WhtPaymentRow = {
   WTHAmount?: string;
+  PctWTH?: string;
+  TTLAmount?: string;
+  PayeeID?: string;
+  PaymentDate?: string;
+  ReceiptDate?: string;
+  Description?: string;
   Status?: string;
   GeneratedDocUrl?: string;
   GeneratedDocType?: string;
-}): "no_wht" | "not_paid" | "exists" | "other_doc" | null {
+  WhtCertFor?: string;
+};
+
+/**
+ * WHT-03: ลายนิ้วมือของข้อมูลที่พิมพ์อยู่บน 50 ทวิ — ไม่ใช้ UpdatedAt เพราะเปลี่ยนจากเรื่องอื่น
+ * (แนบไฟล์/เคลียร์งบ) ด้วย จะทำให้สร้างไฟล์ใหม่โดยไม่จำเป็น
+ * (ชื่อ/ที่อยู่ในทะเบียนผู้รับเงินไม่อยู่ในนี้ — แก้ทะเบียนแล้วเปิดหน้า 50 ทวิ จะเห็นฉบับใหม่ แต่ไฟล์ใน Drive คงเดิม)
+ */
+export function whtCertSignature(p: WhtPaymentRow): string {
+  return [p.WTHAmount, p.PctWTH, p.TTLAmount, p.PayeeID, p.PaymentDate, p.ReceiptDate, p.Description]
+    .map((v) => String(v ?? "").trim())
+    .join("|");
+}
+
+export function whtAutoSaveSkipReason(payment: WhtPaymentRow): "no_wht" | "not_paid" | "exists" | "other_doc" | null {
   if (!((parseFloat(payment.WTHAmount || "") || 0) > 0)) return "no_wht";
   // WHT-01: ออกเฉพาะรายการที่จ่ายเงินแล้ว — รายการรออนุมัติ (เช่นจาก LINE ที่มีวันที่ใบเสร็จ)
   // ถ้าออกตอนนี้จะใช้เลข 50 ทวิ ไปก่อน (ไม่อนุมัติ = เลขหาย) และลงวันที่ใบเสร็จแทนวันจ่ายจริง
   if (!PAID_STATUSES.has(payment.Status || "")) return "not_paid";
-  if (payment.GeneratedDocUrl) return payment.GeneratedDocType === "wht-cert" ? "exists" : "other_doc";
+  if (payment.GeneratedDocUrl) {
+    if (payment.GeneratedDocType !== "wht-cert") return "other_doc";
+    // WHT-03: ไฟล์เดิมสร้างจากข้อมูลชุดนี้แล้ว → ใช้ต่อ · ไม่ตรง (แก้ยอด/วันที่ ฯลฯ) → เขียนทับ
+    if ((payment.WhtCertFor || "") === whtCertSignature(payment)) return "exists";
+  }
   return null;
 }
 
@@ -100,6 +134,8 @@ async function saveLocked(
 ): Promise<AutoSaveWhtResult> {
   {
     const sheets = await getSheetsService(orgId);
+    // คอลัมน์ WhtCertFor ต้องมีในชีตก่อน — updateById ข้ามคอลัมน์ที่ไม่มีเงียบ ๆ (ไม่งั้นจะสร้างไฟล์ใหม่ทุกครั้ง)
+    await ensureTabsCached(sheets, orgId);
     if (spreadsheetId) await invalidateTab(spreadsheetId, SHEET_TABS.PAYMENTS);
     const payment = await sheets.getById(SHEET_TABS.PAYMENTS, "PaymentID", paymentId);
     if (!payment) return { status: "skipped", reason: "not_found" };
@@ -118,18 +154,29 @@ async function saveLocked(
 
     const bytes = await buildWhtCertPdf(data);
     const { drive, documentsFolderId } = await getDriveService(orgId);
-    const result = await drive.uploadSystemDocument({
-      documentsFolderId,
-      docDate: data.payment.paymentDate,
-      paymentId,
-      docType: "wht-cert",
-      description: payment.Description || "หนังสือรับรองหัก ณ ที่จ่าย",
-      fileBuffer: Buffer.from(bytes),
-    });
+    const description = payment.Description || "หนังสือรับรองหัก ณ ที่จ่าย";
+    // WHT-03: มีไฟล์ 50 ทวิ แล้วแต่ข้อมูลเปลี่ยน → เขียนทับไฟล์เดิม (เลขเดิม · ลิงก์เดิม · ย้ายโฟลเดอร์ถ้าเดือนเปลี่ยน)
+    const replacing = payment.GeneratedDocType === "wht-cert" && !!payment.GeneratedDocUrl;
+    const result = replacing
+      ? await drive.uploadOrReplaceDocument({
+          documentsFolderId,
+          docDate: data.payment.paymentDate,
+          fileName: systemDocFileName(data.payment.paymentDate, "wht-cert", description, paymentId),
+          fileBuffer: Buffer.from(bytes),
+          existingUrl: payment.GeneratedDocUrl,
+        })
+      : await drive.uploadSystemDocument({
+          documentsFolderId,
+          docDate: data.payment.paymentDate,
+          paymentId,
+          docType: "wht-cert",
+          description,
+          fileBuffer: Buffer.from(bytes),
+        });
     await sheets.updateById(SHEET_TABS.PAYMENTS, "PaymentID", paymentId, {
       GeneratedDocUrl: result.webViewLink,
       GeneratedDocType: "wht-cert",
-      UpdatedAt: new Date().toISOString(),
+      WhtCertFor: whtCertSignature(payment),
     });
     await safeAuditLog({
       data: {
@@ -138,7 +185,7 @@ async function saveLocked(
         action: "save_document",
         entityType: "payment",
         entityRef: paymentId,
-        summary: `บันทึก หนังสือรับรองหัก ณ ที่จ่าย PDF (อัตโนมัติ) → ${result.folderPath}/${result.fileName}`,
+        summary: `บันทึก หนังสือรับรองหัก ณ ที่จ่าย PDF (อัตโนมัติ${replacing ? " · อัปเดตไฟล์เดิมตามข้อมูลที่แก้" : ""}) → ${result.folderPath}/${result.fileName}`,
       },
     });
     return { status: "saved", fileUrl: result.webViewLink };
