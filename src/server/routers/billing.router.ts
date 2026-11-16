@@ -17,6 +17,7 @@ import {
 } from "../lib/receipt-output-vat";
 import { withReplacementNote, receiptReplacementNote } from "../lib/ti-replacement";
 import { filedVatPeriodWarning } from "../lib/vat-period";
+import { branchCode } from "@/lib/branch-label";
 import { assertPeriodOpen } from "../lib/period-lock";
 import { activeNotesFor } from "./creditNote.router";
 import { getSheetsService, ensureTabsCached } from "../lib/sheets-context";
@@ -961,6 +962,7 @@ export const billingRouter = router({
             // SALE-09: โหมดรวม = ใบกำกับภาษี → ที่อยู่ตาม ภ.พ.20 ก่อนที่อยู่ส่งบิล
             CustomerAddressSnapshot:
               (taxDocMode === "combined" ? customer.Address || customer.BillingAddress : customer.BillingAddress || customer.Address) || "",
+            CustomerBranchSnapshot: branchCode(customer.BranchType, customer.BranchNumber), // SALE-22
             IssuerBranchSnapshot: issuer.branchLabel,
             IssuerAddressSnapshot: issuer.address,
             SourceQuotationID: "",
@@ -1132,6 +1134,7 @@ export const billingRouter = router({
         // SALE-09: โหมดรวม = ใบกำกับภาษี → ที่อยู่ตาม ภ.พ.20 ก่อนที่อยู่ส่งบิล
         CustomerAddressSnapshot:
           (taxDocMode === "combined" ? customer.Address || customer.BillingAddress : customer.BillingAddress || customer.Address) || "",
+        CustomerBranchSnapshot: branchCode(customer.BranchType, customer.BranchNumber), // SALE-22
         EventID: input.eventId || "",
         ProjectName: input.projectName || "",
         Subtotal: totals.subtotal,

@@ -143,6 +143,7 @@ export const SHEET_HEADERS: Record<string, string[]> = {
     "WhtCertFor", // WHT-03: ลายนิ้วมือข้อมูล (ยอด/อัตรา/ผู้รับเงิน/วันที่/รายละเอียด) ที่ใช้สร้าง 50 ทวิ ใน Drive — ไม่ตรง = เขียนทับไฟล์เดิม
     "WthTypeId", // WHT-19: ประเภทหัก ณ ที่จ่ายที่เลือกตอนบันทึก (lib/wth-types) — ใช้พิมพ์ประเภทเงินได้บน 50 ทวิ
     "ReapprovalOf", // CTRL-04: แก้สาระสำคัญหลังอนุมัติ → กลับไป pending · เก็บสถานะเดิม (approved/paid/cleared) ไว้คืนตอนอนุมัติใหม่
+    "ReapprovalSnapshot", // CTRL-15: ค่าสาระสำคัญก่อนแก้ (JSON) — "ปฏิเสธ" = คืนค่าเดิม + สถานะเดิม
     "NonDeductibleVat", // PUR-03: ภาษีซื้อต้องห้าม ม.82/5 — รหัสเหตุ ("" = ขอคืนได้) ดู lib/input-vat-rules.ts
     "DuplicateOf", // PUR-06: บิลนี้อาจซ้ำกับรายการ (PaymentID) — เตือน ไม่บล็อก
   ],
@@ -263,6 +264,7 @@ export const SHEET_HEADERS: Record<string, string[]> = {
     "VoidReason", // SALE-01b: เหตุผลการยกเลิกใบเสร็จ (บังคับเมื่อเป็นใบเสร็จ/ใบกำกับ หรือมีใบกำกับคู่)
     "TaxDocMode", // SALE-01: ใบเสร็จออกตรงที่มี VAT — "combined" = ใบเสร็จ/ใบกำกับ · "separate" = มีใบกำกับคู่ (snapshot ตอนออก)
     "PdfContentFor", // CTRL-10: ลายนิ้วมือเนื้อหาที่พิมพ์บนใบวางบิล — ตรง = ไม่ต้องมีไฟล์เวอร์ชันใหม่
+    "CustomerBranchSnapshot", // SALE-22: สาขาผู้ซื้อ (00000 = สำนักงานใหญ่) — พิมพ์บนใบเสร็จรับเงิน/ใบกำกับภาษี
     "ReceiptPdfContentFor", // CTRL-10: ลายนิ้วมือเนื้อหาที่พิมพ์บนใบเสร็จ
   ],
   [SHEET_TABS.BILLING_LINES]: [

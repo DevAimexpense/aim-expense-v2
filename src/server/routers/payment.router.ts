@@ -14,7 +14,7 @@ import { scopedEventIds } from "@/lib/permissions";
 import { todayBangkok } from "@/lib/utils/date";
 import { autoSaveWhtCert } from "../lib/wht-cert-pdf";
 import { safeAuditLog } from "@/server/lib/audit";
-import { materialChanges, statusAfterReapproval } from "@/lib/payment-reapproval";
+import { materialChanges, statusAfterReapproval, reapprovalSnapshot, revertReapproval } from "@/lib/payment-reapproval";
 import { NON_DEDUCTIBLE_VALUES, resolveNonDeductibleVat } from "@/lib/input-vat-rules";
 import { findDuplicateBills, duplicateWarningText } from "@/lib/duplicate-bill";
 import { assertPeriodOpen, assertPaymentPeriodOpen } from "../lib/period-lock";
@@ -55,6 +55,8 @@ const PaymentInputSchema = z.object({
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/)
     .optional(),
+  // PUR-06b: รายการที่เพิ่งสร้างจากใบเดียวกัน (แยกหลายบรรทัด) — ไม่นับเป็นบิลซ้ำ
+  excludeDuplicateOf: z.array(z.string()).max(50).optional(),
 });
 
 function toPaymentRow(payment: Record<string, string>) {
@@ -104,6 +106,14 @@ function toPaymentRow(payment: Record<string, string>) {
     generatedDocUrl: payment.GeneratedDocUrl || "",
     // CTRL-04: รออนุมัติใหม่หลังแก้ (สถานะเดิม) · PUR-03: ภาษีซื้อต้องห้าม · PUR-06: อาจซ้ำกับ
     reapprovalOf: payment.ReapprovalOf || "",
+    // CTRL-15: ยอดจ่ายก่อนแก้ (ปฏิเสธ = คืนยอดนี้)
+    reapprovalPrevAmount: (() => {
+      try {
+        return parseFloat(JSON.parse(payment.ReapprovalSnapshot || "{}").GTTLAmount) || 0;
+      } catch {
+        return 0;
+      }
+    })(),
     nonDeductibleVat: payment.NonDeductibleVat || "",
     duplicateOf: payment.DuplicateOf || "",
     generatedDocType: payment.GeneratedDocType || "",
@@ -292,6 +302,7 @@ export const paymentRouter = router({
         duplicates = findDuplicateBills(await sheets.getPayments(), {
           vendorTaxId: vendorTaxIdSnapshot,
           docNumbers: [input.invoiceNumber],
+          excludePaymentIds: input.excludeDuplicateOf,
         });
       } catch (err) {
         console.warn("[payment.create] duplicate check skipped", err);
@@ -516,6 +527,8 @@ export const paymentRouter = router({
       if (requiresReapproval) {
         updates.Status = "pending";
         updates.ReapprovalOf = existing.ReapprovalOf || existing.Status;
+        // CTRL-15: เก็บค่าที่เคยอนุมัติไว้ — ผู้อนุมัติ "ปฏิเสธ" = คืนค่าเดิม (ไม่ใช่ทิ้งรายการที่จ่ายแล้ว)
+        updates.ReapprovalSnapshot = reapprovalSnapshot(existing);
         updates.ApprovedBy = "";
         updates.ApprovedAt = "";
       }
@@ -652,13 +665,22 @@ export const paymentRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const sheets = await getSheetsService(ctx.org.orgId);
+      await ensureTabsCached(sheets, ctx.org.orgId); // คอลัมน์ ReapprovalSnapshot
       const now = new Date().toISOString();
       let success = 0;
       const restoredPaid: string[] = [];
-      for (const id of input.paymentIds) {
-        const existing = await sheets.getById(SHEET_TABS.PAYMENTS, "PaymentID", id);
-        if (!existing) continue;
-        if (existing.Status !== "pending") continue;
+      // CTRL-16/17: อ่านทั้งชุดและตรวจปิดงวดก่อนเขียน — รายการที่จะคืนเป็น "จ่ายแล้ว" ต้องไม่ลงงวดที่ปิด
+      // (ปิดงวดหลังจากถูกแก้ = รายงานที่ยื่นไม่มีรายการนี้) · ห้ามทำครึ่งชุดแล้วค่อย error
+      const rows = (
+        await Promise.all(input.paymentIds.map((id) => sheets.getById(SHEET_TABS.PAYMENTS, "PaymentID", id)))
+      ).filter((r): r is Record<string, string> => !!r && r.Status === "pending");
+      await assertPaymentPeriodOpen(
+        ctx.org.orgId,
+        rows.map((r) => ({ ...r, Status: statusAfterReapproval(r.ReapprovalOf) })),
+        "อนุมัติ (คืนสถานะจ่ายแล้ว)",
+      );
+      for (const existing of rows) {
+        const id = existing.PaymentID;
         // CTRL-04: รายการที่กลับมารออนุมัติเพราะแก้หลังอนุมัติ → คืนสถานะเดิม (จ่ายแล้ว = วันที่จ่ายเดิม)
         const nextStatus = statusAfterReapproval(existing.ReapprovalOf);
         const updates: Record<string, string | number> = {
@@ -666,6 +688,7 @@ export const paymentRouter = router({
           ApprovedBy: ctx.session.displayName,
           ApprovedAt: now,
           ReapprovalOf: "",
+          ReapprovalSnapshot: "",
           UpdatedAt: now,
         };
         // วันที่จ่ายใหม่ใช้กับรายการที่ยังไม่จ่ายเท่านั้น (รายการที่จ่ายแล้ว วันจ่ายจริงคงเดิม)
@@ -707,18 +730,39 @@ export const paymentRouter = router({
     }))
     .mutation(async ({ ctx, input }) => {
       const sheets = await getSheetsService(ctx.org.orgId);
+      await ensureTabsCached(sheets, ctx.org.orgId);
       const now = new Date().toISOString();
       let success = 0;
-      for (const id of input.paymentIds) {
-        const existing = await sheets.getById(SHEET_TABS.PAYMENTS, "PaymentID", id);
-        if (!existing) continue;
-        if (existing.Status !== "pending") continue;
-        const ok = await sheets.updateById(SHEET_TABS.PAYMENTS, "PaymentID", id, {
-          Status: "rejected",
-          Notes: (existing.Notes || "") + (input.reason ? ` | เหตุผล: ${input.reason}` : ""),
-          UpdatedAt: now,
-        });
-        if (ok) success++;
+      let reverted = 0;
+      const rows = (
+        await Promise.all(input.paymentIds.map((id) => sheets.getById(SHEET_TABS.PAYMENTS, "PaymentID", id)))
+      ).filter((r): r is Record<string, string> => !!r && r.Status === "pending");
+      // CTRL-15: รายการที่กลับมาเพราะถูกแก้หลังอนุมัติ → ปฏิเสธ "การแก้" = คืนค่าเดิม + สถานะเดิม
+      // (คืนเป็นจ่ายแล้ว → ตรวจปิดงวดทั้งชุดก่อนเขียน CTRL-16/17)
+      await assertPaymentPeriodOpen(
+        ctx.org.orgId,
+        rows.filter((r) => r.ReapprovalOf).map((r) => ({ ...r, ...revertReapproval(r) })),
+        "ปฏิเสธการแก้ไข (คืนค่าเดิม)",
+      );
+      for (const existing of rows) {
+        const id = existing.PaymentID;
+        const reason = input.reason ? ` | เหตุผล: ${input.reason}` : "";
+        const updates: Record<string, string> = existing.ReapprovalOf
+          ? {
+              ...revertReapproval(existing),
+              Notes: (existing.Notes || "") + ` | ปฏิเสธการแก้ไข — คืนค่าเดิม${reason}`,
+              UpdatedAt: now,
+            }
+          : {
+              Status: "rejected",
+              Notes: (existing.Notes || "") + reason,
+              UpdatedAt: now,
+            };
+        const ok = await sheets.updateById(SHEET_TABS.PAYMENTS, "PaymentID", id, updates);
+        if (ok) {
+          success++;
+          if (existing.ReapprovalOf) reverted++;
+        }
       }
 
       await safeAuditLog({
@@ -728,11 +772,11 @@ export const paymentRouter = router({
           action: "reject",
           entityType: "payment",
           entityRef: input.paymentIds.join(","),
-          summary: `ปฏิเสธ ${success} รายการ${input.reason ? " — " + input.reason : ""}`,
+          summary: `ปฏิเสธ ${success} รายการ${reverted ? ` (คืนค่าเดิม ${reverted} รายการที่ถูกแก้หลังอนุมัติ)` : ""}${input.reason ? " — " + input.reason : ""}`,
         },
       });
 
-      return { success: true, rejected: success };
+      return { success: true, rejected: success - reverted, reverted };
     }),
 
   // ยกเลิกรายการที่ "อนุมัติแล้ว/จ่ายแล้ว/เคลียร์แล้ว" — ลบไม่ได้ (delete จำกัด pending/rejected)
@@ -748,11 +792,13 @@ export const paymentRouter = router({
       const now = new Date().toISOString();
       const CANCELLABLE = ["approved", "paid", "cleared"];
       let success = 0;
-      for (const id of input.paymentIds) {
-        const existing = await sheets.getById(SHEET_TABS.PAYMENTS, "PaymentID", id);
-        if (!existing) continue;
-        if (!CANCELLABLE.includes(existing.Status)) continue;
-        await assertPaymentPeriodOpen(ctx.org.orgId, [existing], "ยกเลิกรายการ"); // CTRL-01
+      // CTRL-17: ตรวจปิดงวดทั้งชุดก่อน — ไม่ยกเลิกครึ่งชุดแล้วค่อย error
+      const rows = (
+        await Promise.all(input.paymentIds.map((id) => sheets.getById(SHEET_TABS.PAYMENTS, "PaymentID", id)))
+      ).filter((r): r is Record<string, string> => !!r && CANCELLABLE.includes(r.Status));
+      await assertPaymentPeriodOpen(ctx.org.orgId, rows, "ยกเลิกรายการ"); // CTRL-01
+      for (const existing of rows) {
+        const id = existing.PaymentID;
         const ok = await sheets.updateById(SHEET_TABS.PAYMENTS, "PaymentID", id, {
           Status: "cancelled",
           Notes: (existing.Notes || "") + (input.reason ? ` | ยกเลิก: ${input.reason}` : " | ยกเลิกรายการ"),

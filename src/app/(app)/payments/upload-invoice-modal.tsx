@@ -459,6 +459,7 @@ export function UploadInvoiceModal({
         // Multi-line: create 1 payment per line item
         // PUR-02c: กรอก "VAT รวมตามใบ" → กระจายตามสัดส่วนไปยังรายการที่มี VAT (ไม่ใช้ ÷1.07 ซึ่งผิดเมื่อมีของยกเว้น VAT ปน)
         const allocatedVat = multiVatTotal !== null ? allocateInvoiceVat(lineItems, multiVatTotal) : null;
+        const createdIds: string[] = []; // PUR-06b: บรรทัดจากใบเดียวกันไม่ใช่บิลซ้ำ
         for (let i = 0; i < lineItems.length; i++) {
           const item = lineItems[i];
           const selWth = WTH_TYPES.find((t) => t.id === item.wthTypeId) || WTH_TYPES[0];
@@ -476,7 +477,9 @@ export function UploadInvoiceModal({
             wthTypeId: itemWthRate > 0 ? item.wthTypeId : undefined, // WHT-19
             isVatPayee: item.hasVat,
             vatAmount: itemVat, // PUR-02c
+            excludeDuplicateOf: createdIds.length > 0 ? [...createdIds] : undefined,
           });
+          createdIds.push(result.paymentId);
           if (i === 0) firstPaymentId = result.paymentId;
           if (i === 0 && result.duplicateWarning) alert(result.duplicateWarning); // PUR-06 (เลขใบเดียวกันทุกบรรทัด — เตือนครั้งเดียว)
         }

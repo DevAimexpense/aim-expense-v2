@@ -11,6 +11,7 @@ import { useState } from "react";
 import { DriveSaveStatus, type DriveSaveProps } from "@/components/documents/drive-save-status";
 import { buildDocPagesPdf } from "@/lib/utils/sales-doc-autosave";
 import { formatDate } from "@/lib/utils/date";
+import { branchDisplay } from "@/lib/branch-label";
 
 type Props = {
   driveSave: DriveSaveProps;
@@ -90,7 +91,7 @@ function NotePage({ copyType, org, note }: { copyType: "original" | "copy" } & O
         <div>{note.customerAddress}</div>
         <div>
           เลขประจำตัวผู้เสียภาษี {note.customerTaxId || "-"}
-          {note.customerBranch ? ` · ${note.customerBranch}` : ""}
+          {note.customerBranch ? ` · ${branchDisplay(note.customerBranch)}` : ""}
         </div>
       </div>
 

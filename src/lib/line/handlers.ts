@@ -6,6 +6,7 @@
 import { prisma } from "@/lib/prisma";
 import { ttlForTab, invalidateTab } from "@/server/lib/cache";
 import { findDuplicateBills, duplicateWarningText } from "@/lib/duplicate-bill";
+import { classifyOcrPurchaseDoc } from "@/lib/input-vat-rules";
 import {
   replyMessage,
   pushMessage,
@@ -507,7 +508,9 @@ function buildSummaryFromOcr(ocr: OcrParsedReceipt): string {
   const vendor = ocr.vendorName || "ไม่ระบุ";
   const docNo = ocr.invoiceNumber || "";
   const docTypeLabel =
-    ocr.documentType === "tax_invoice" ? "ใบกำกับภาษี"
+    ocr.documentType === "tax_invoice" && String(ocr.buyerTaxId ?? "").replace(/\D/g, "").length !== 13
+      ? "ใบกำกับภาษีอย่างย่อ" // PUR-04b
+      : ocr.documentType === "tax_invoice" ? "ใบกำกับภาษี"
     : ocr.documentType === "receipt" ? "ใบเสร็จรับเงิน"
     : ocr.documentType === "invoice" ? "ใบแจ้งหนี้"
     : ocr.documentType === "quotation" ? "ใบเสนอราคา"
@@ -1291,6 +1294,15 @@ async function writeDraftToSheets(
     ? `Manual text entry | LINE draft ${draft.id}`
     : `OCR confidence ${Math.round((ocr.confidence ?? 0) * 100)}% | LINE draft ${draft.id}`;
 
+  // PUR-04b: จัดประเภทใบกำกับจากเลขผู้ซื้อที่ OCR อ่านได้ (เทียบเลขของกิจการ)
+  let orgTaxId: string | null = null;
+  try {
+    orgTaxId = (await prisma.organization.findUnique({ where: { id: draft.orgId }, select: { taxId: true } }))?.taxId ?? null;
+  } catch (err) {
+    console.warn(`[LINE] org taxId read failed for draft ${draft.id}:`, err);
+  }
+  const purchaseDoc = classifyOcrPurchaseDoc(ocr.documentType, ocr.buyerTaxId, orgTaxId);
+
   // PUR-06: บิลซ้ำ (เลขผู้ขาย + เลขที่ใบ) — เตือน ไม่บล็อก · อ่านผ่าน cache เดียวกับ LINE-33 (ไม่เสีย read เพิ่ม)
   let duplicates: ReturnType<typeof findDuplicateBills> = [];
   try {
@@ -1335,7 +1347,9 @@ async function writeDraftToSheets(
     ReceiptNumber: ocr.invoiceNumber || "",
     ReceiptDate: ocr.documentDate || "",
     // Tax compliance — เหมือน browser
-    DocumentType: ocr.documentType === "tax_invoice" ? "tax_invoice" : "receipt",
+    // PUR-04b: ใบกำกับอย่างย่อ / ใบกำกับที่ออกให้คนอื่น ขอคืนภาษีซื้อไม่ได้
+    DocumentType: purchaseDoc.documentType,
+    NonDeductibleVat: purchaseDoc.nonDeductibleVat,
     ExpenseNature: "",
     CategoryMain: "",
     CategorySub: "",

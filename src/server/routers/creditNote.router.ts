@@ -97,7 +97,7 @@ async function loadSource(
     customerId: b.CustomerID || "",
     customerName: b.CustomerNameSnapshot || "",
     customerTaxId: b.CustomerTaxIdSnapshot || "",
-    customerBranch: "",
+    customerBranch: b.CustomerBranchSnapshot || "", // SALE-23
     customerAddress: b.CustomerAddressSnapshot || "",
     issuerBranch: b.IssuerBranchSnapshot || "",
     issuerAddress: b.IssuerAddressSnapshot || "",

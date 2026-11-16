@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { DriveSaveStatus, type DriveSaveProps } from "@/components/documents/drive-save-status";
 import { formatDate as formatThaiDate } from "@/lib/utils/date";
 import { FitLine } from "@/components/shared/fit-line";
+import { branchDisplay } from "@/lib/branch-label";
 
 interface DocData {
   org: {
@@ -24,6 +25,8 @@ interface DocData {
     customerName: string;
     customerTaxId: string;
     customerAddress: string;
+    /** SALE-22: รหัสสาขาผู้ซื้อ (พิมพ์เมื่อเป็นใบเสร็จรับเงิน/ใบกำกับภาษี) */
+    customerBranch?: string;
     projectName: string;
     subtotal: number;
     discountAmount: number;
@@ -643,6 +646,8 @@ function DocPage({
           {header.customerTaxId && (
             <div className="info-line">
               เลขผู้เสียภาษี: {formatTaxId(header.customerTaxId)}
+              {/* SALE-22: ใบเสร็จรับเงิน/ใบกำกับภาษี ต้องระบุสาขาของผู้ซื้อ */}
+              {header.receipt?.taxInvoice && header.customerBranch ? ` • ${branchDisplay(header.customerBranch)}` : ""}
             </div>
           )}
           {header.customerAddress && (

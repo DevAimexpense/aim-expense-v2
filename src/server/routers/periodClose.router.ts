@@ -19,12 +19,15 @@ async function loadOrg(orgId: string) {
   return { ...org, period: readPeriodClose(org.settings) };
 }
 
-async function savePeriod(orgId: string, settings: unknown, period: PeriodCloseSettings) {
-  const base = settings && typeof settings === "object" && !Array.isArray(settings) ? (settings as Record<string, unknown>) : {};
-  await prisma.organization.update({
-    where: { id: orgId },
-    data: { settings: { ...base, periodClose: period } as Prisma.InputJsonValue },
-  });
+/**
+ * CTRL-17: เขียนเฉพาะคีย์ periodClose แบบ atomic (jsonb_set) — ไม่อ่าน-แล้ว-เขียนทั้งก้อน
+ * (ถ้ามีคนแก้ตั้งค่าองค์กรอื่นพร้อมกัน เช่น receiptMode ค่าของเขาต้องไม่ถูกทับ)
+ */
+async function savePeriod(orgId: string, _settings: unknown, period: PeriodCloseSettings) {
+  const json = JSON.stringify(period);
+  await prisma.$executeRaw(
+    Prisma.sql`UPDATE organizations SET settings = jsonb_set(COALESCE(settings, '{}'::jsonb), '{periodClose}', ${json}::jsonb, true) WHERE id = ${orgId}`,
+  );
 }
 
 export const periodCloseRouter = router({

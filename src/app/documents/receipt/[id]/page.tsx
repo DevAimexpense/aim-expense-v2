@@ -121,6 +121,7 @@ export default async function ReceiptDocumentPage({
         customerName: header.CustomerNameSnapshot,
         customerTaxId: header.CustomerTaxIdSnapshot,
         customerAddress: header.CustomerAddressSnapshot,
+        customerBranch: header.CustomerBranchSnapshot || "", // SALE-22
         projectName: header.ProjectName || "",
         subtotal: parseFloat(header.Subtotal) || 0,
         discountAmount: parseFloat(header.DiscountAmount) || 0,

@@ -18,6 +18,8 @@ import {
   branchLabelOf,
 } from "@/lib/wht-form-utils";
 import { whtPeriodDate } from "@/lib/wht-doc-utils";
+import { vendorTaxIdFor } from "@/lib/period-close";
+import { getClosedThrough } from "@/server/lib/period-lock";
 import { isSettled } from "@/lib/payment-status";
 import { PND53AttachDocument, type PND53AttachRow } from "./document";
 
@@ -46,6 +48,7 @@ export default async function PND53AttachPage({
   if (!orgCtx) redirect("/");
   // CTRL-06: ใบแนบ ภ.ง.ด. มีเลขภาษี/ยอดของผู้รับเงินทุกราย — เฉพาะผู้มีสิทธิ์ดูรายงาน (เหมือนเมนู)
   if (orgCtx.role !== "admin" && !orgCtx.permissions.viewReports) redirect("/dashboard");
+  const closedThrough = await getClosedThrough(orgCtx.orgId); // PUR-09b
 
   const { period } = await params;
   const periodInfo = parsePeriod(period);
@@ -83,7 +86,7 @@ export default async function PND53AttachPage({
     if (paidDate < periodInfo.fromISO || paidDate > periodInfo.toISO) continue;
 
     const info = payeeMap.get(p.PayeeID);
-    const taxId = p.VendorTaxIdSnapshot || info?.taxId || "" /* PUR-09: ตามที่บันทึกตอนจ่าย (แก้ทะเบียนทีหลังไม่ทำให้รายงานที่ยื่นแล้วเปลี่ยน) */;
+    const taxId = vendorTaxIdFor(p.VendorTaxIdSnapshot, info?.taxId, paidDateOf(p), closedThrough) /* PUR-09b */;
 
     // Filter to ภ.ง.ด.53 (juristic — TaxID 13 digits starting with "0")
     if (vendorTypeOf(taxId, info?.branchType) !== "pnd53") continue;

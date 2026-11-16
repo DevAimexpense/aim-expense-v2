@@ -39,6 +39,8 @@ import { todayBangkok } from "@/lib/utils/date";
 import { taxableBaseFromVat } from "@/lib/calculations";
 import { isInputVatClaimable, resolveNonDeductibleVat, nonDeductibleLabel } from "@/lib/input-vat-rules";
 import { noteOutputVatRows } from "@/lib/credit-note";
+import { vendorTaxIdFor } from "@/lib/period-close";
+import { getClosedThrough } from "../lib/period-lock";
 import { getSheetsService } from "../lib/sheets-context";
 import { SHEET_TABS } from "../services/google-sheets.service";
 
@@ -936,6 +938,7 @@ export const reportRouter = router({
     .input(WHTInput)
     .query(async ({ ctx, input }) => {
       const sheets = await getSheetsService(ctx.org.orgId);
+      const closedThrough = await getClosedThrough(ctx.org.orgId); // PUR-09b
       // NOTE: skip ensureAllTabsExist (read-only — same as other reports).
 
       const [payments, events, payees] = await Promise.all([
@@ -1039,7 +1042,7 @@ export const reportRouter = router({
         if (paidDate < input.from || paidDate > input.to) continue;
 
         const info = payeeMap.get(p.PayeeID);
-        const taxId = p.VendorTaxIdSnapshot || info?.taxId || "" /* PUR-09: ตามที่บันทึกตอนจ่าย (แก้ทะเบียนทีหลังไม่ทำให้รายงานที่ยื่นแล้วเปลี่ยน) */;
+        const taxId = vendorTaxIdFor(p.VendorTaxIdSnapshot, info?.taxId, paidDate, closedThrough) /* PUR-09b: งวดปิด = ตามที่บันทึกตอนจ่าย · งวดเปิด = ทะเบียนปัจจุบัน */;
 
         const incomeAmount = num(p.TTLAmount);
         const rate = num(p.PctWTH);
@@ -1171,6 +1174,7 @@ export const reportRouter = router({
     .input(VatInput)
     .query(async ({ ctx, input }) => {
       const sheets = await getSheetsService(ctx.org.orgId);
+      const closedThrough = await getClosedThrough(ctx.org.orgId); // PUR-09b
       // NOTE: skip ensureAllTabsExist (read-only — same as other reports).
 
       const [payments, events, payees] = await Promise.all([
@@ -1274,7 +1278,7 @@ export const reportRouter = router({
         if (date < input.from || date > input.to) continue;
 
         const info = payeeMap.get(p.PayeeID);
-        const taxId = p.VendorTaxIdSnapshot || info?.taxId || "" /* PUR-09: ตามที่บันทึกตอนจ่าย (แก้ทะเบียนทีหลังไม่ทำให้รายงานที่ยื่นแล้วเปลี่ยน) */;
+        const taxId = vendorTaxIdFor(p.VendorTaxIdSnapshot, info?.taxId, date, closedThrough) /* PUR-09b: งวดปิด = ตามที่บันทึกตอนจ่าย · งวดเปิด = ทะเบียนปัจจุบัน */;
 
         rows.push({
           paymentId: p.PaymentID,
@@ -1529,6 +1533,7 @@ export const reportRouter = router({
     )
     .query(async ({ ctx, input }) => {
       const sheets = await getSheetsService(ctx.org.orgId);
+      const closedThrough = await getClosedThrough(ctx.org.orgId); // PUR-09b
 
       const [payments, payees, batch] = await Promise.all([
         sheets.getPayments(),
@@ -1606,7 +1611,7 @@ export const reportRouter = router({
           receiptNumber: p.ReceiptNumber || "",
           payeeId: p.PayeeID,
           payeeName: info?.name || p.PayeeID || "—",
-          taxId: p.VendorTaxIdSnapshot || info?.taxId || "" /* PUR-09: ตามที่บันทึกตอนจ่าย (แก้ทะเบียนทีหลังไม่ทำให้รายงานที่ยื่นแล้วเปลี่ยน) */,
+          taxId: vendorTaxIdFor(p.VendorTaxIdSnapshot, info?.taxId, date, closedThrough) /* PUR-09b: งวดปิด = ตามที่บันทึกตอนจ่าย · งวดเปิด = ทะเบียนปัจจุบัน */,
           baseAmount: taxableBaseFromVat(num(p.TTLAmount), vat), // PUR-02d
           vatAmount: vat,
         });

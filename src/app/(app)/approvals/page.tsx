@@ -327,7 +327,9 @@ export default function ApprovalsPage() {
                       {/* CTRL-04: กลับมารออนุมัติเพราะถูกแก้หลังอนุมัติ */}
                       {p.reapprovalOf && (
                         <div style={{ fontSize: "0.7rem", color: "#b45309", fontWeight: 600 }}>
-                          🔁 แก้ไขหลัง{p.reapprovalOf === "approved" ? "อนุมัติ" : p.reapprovalOf === "paid" ? "จ่ายแล้ว" : "เคลียร์แล้ว"} — อนุมัติแล้วจะคืนสถานะเดิม
+                          🔁 แก้ไขหลัง{p.reapprovalOf === "approved" ? "อนุมัติ" : p.reapprovalOf === "paid" ? "จ่ายแล้ว" : "เคลียร์แล้ว"}
+                          {p.reapprovalPrevAmount > 0 ? ` · ยอดเดิม ฿${formatNumber(p.reapprovalPrevAmount)} → ใหม่ ฿${formatNumber(p.gttlAmount)}` : ""}
+                          {" "}— อนุมัติ = ใช้ยอดใหม่ · ปฏิเสธ = คืนยอดเดิม
                         </div>
                       )}
                       {/* PUR-06: อาจเป็นบิลซ้ำ */}

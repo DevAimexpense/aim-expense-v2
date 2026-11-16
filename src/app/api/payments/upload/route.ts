@@ -19,6 +19,7 @@ import { prisma } from "@/lib/prisma";
 import { validateUploadedFile } from "@/lib/security/file-validation";
 import { safeAuditLog } from "@/server/lib/audit";
 import { todayBangkok } from "@/lib/utils/date";
+import { assertPaymentPeriodOpen } from "@/server/lib/period-lock";
 
 export async function POST(req: NextRequest) {
   const session = await getSession();
@@ -77,6 +78,28 @@ export async function POST(req: NextRequest) {
           { error: "ไม่มีสิทธิ์แนบไฟล์ให้รายการนี้" },
           { status: 403 }
         );
+      }
+    }
+
+    // CTRL-14: route นี้เขียน ReceiptDate ตรง → ต้องผ่านด่านเดียวกับ payment.recordReceipt
+    //   CTRL-05: เปลี่ยนวันที่ใบเสร็จที่บันทึกไว้แล้วของรายการที่จ่ายแล้ว = ต้องมีสิทธิ์แก้หลังอนุมัติ
+    //   CTRL-01: งวดเดิมและงวดใหม่ต้องยังไม่ปิด
+    if (
+      fileType === "receipt" &&
+      clientReceiptDate &&
+      clientReceiptDate.slice(0, 10) !== (payment.ReceiptDate || "").slice(0, 10)
+    ) {
+      const settled = payment.Status === "paid" || payment.Status === "cleared";
+      if (settled && payment.ReceiptDate && org.role !== "admin" && !org.permissions.editPaymentAfterApproval) {
+        return NextResponse.json(
+          { error: "เปลี่ยนวันที่ใบเสร็จของรายการที่จ่ายแล้วได้เฉพาะผู้มีสิทธิ์แก้ไขหลังอนุมัติ (งวดภาษีจะเปลี่ยน)" },
+          { status: 403 },
+        );
+      }
+      try {
+        await assertPaymentPeriodOpen(org.orgId, [payment, { ...payment, ReceiptDate: clientReceiptDate }], "แก้วันที่ใบเสร็จ");
+      } catch (e) {
+        return NextResponse.json({ error: e instanceof Error ? e.message : "งวดปิดแล้ว" }, { status: 403 });
       }
     }
 

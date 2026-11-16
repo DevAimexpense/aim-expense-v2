@@ -34,6 +34,52 @@ export function materialChanges(existing: Row, updates: Row): string[] {
   return changed;
 }
 
+/** CTRL-15: ฟิลด์ที่เก็บไว้คืนตอน "ปฏิเสธการแก้" — สาระสำคัญ + ค่าที่คำนวณ/อ้างอิงตามกัน */
+export const SNAPSHOT_FIELDS = [
+  ...MONEY_FIELDS,
+  ...TEXT_FIELDS,
+  "CostPerUnit",
+  "Days",
+  "NoOfPPL",
+  "PctWTH",
+  "WthTypeId",
+  "VendorTaxIdSnapshot",
+  "VendorBranchInfo",
+  "NonDeductibleVat",
+  "ApprovedBy",
+  "ApprovedAt",
+] as const;
+
+/** ค่าก่อนแก้ — แก้หลายครั้งก่อนอนุมัติ ใช้ snapshot แรก (ค่าที่เคยอนุมัติจริง) */
+export function reapprovalSnapshot(existing: Row): string {
+  if (existing.ReapprovalSnapshot) return String(existing.ReapprovalSnapshot);
+  const snap: Record<string, string> = {};
+  for (const f of SNAPSHOT_FIELDS) snap[f] = String(existing[f] ?? "");
+  return JSON.stringify(snap);
+}
+
+/**
+ * CTRL-15: "ปฏิเสธ" รายการที่กลับมารออนุมัติเพราะถูกแก้ = ปฏิเสธการแก้ → คืนค่าเดิม + สถานะเดิม
+ * (ไม่ใช่ทำให้รายการที่จ่ายเงินไปแล้วกลายเป็น rejected) · ไม่มี snapshot → คืนแค่สถานะ
+ */
+export function revertReapproval(existing: Row): Record<string, string> {
+  let snap: Record<string, string> = {};
+  try {
+    const parsed = JSON.parse(String(existing.ReapprovalSnapshot || "{}"));
+    if (parsed && typeof parsed === "object") snap = parsed as Record<string, string>;
+  } catch {
+    snap = {};
+  }
+  const restored: Record<string, string> = {};
+  for (const f of SNAPSHOT_FIELDS) if (f in snap) restored[f] = String(snap[f] ?? "");
+  return {
+    ...restored,
+    Status: String(existing.ReapprovalOf || "approved"),
+    ReapprovalOf: "",
+    ReapprovalSnapshot: "",
+  };
+}
+
 /** สถานะหลังอนุมัติใหม่: คืนสถานะก่อนแก้ (จ่ายแล้ว/เคลียร์แล้ว) · ไม่มี = อนุมัติตามปกติ */
 export function statusAfterReapproval(reapprovalOf: string | undefined): "approved" | "paid" | "cleared" {
   return reapprovalOf === "paid" || reapprovalOf === "cleared" ? reapprovalOf : "approved";

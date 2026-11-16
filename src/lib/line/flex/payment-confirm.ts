@@ -11,7 +11,11 @@ function fmt(n: number | null | undefined): string {
   return n.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-function docTypeLabel(dt: string | null): string {
+// PUR-04b: ใบกำกับที่ไม่มีเลขผู้ซื้อ = อย่างย่อ (บันทึกแบบนี้ — การ์ดต้องบอกตรงกับที่บันทึก)
+function docTypeLabel(dt: string | null, buyerTaxId?: string | null): string {
+  if (dt === "tax_invoice" && String(buyerTaxId ?? "").replace(/\D/g, "").length !== 13) {
+    return "ใบกำกับภาษีอย่างย่อ (ขอคืน VAT ไม่ได้)";
+  }
   switch (dt) {
     case "tax_invoice": return "ใบกำกับภาษี";
     case "receipt": return "ใบเสร็จรับเงิน";
@@ -62,7 +66,7 @@ export function buildOcrConfirmFlex(
 
   // -- Document info --
   contents.push(
-    row("ประเภท", docTypeLabel(ocr.documentType)),
+    row("ประเภท", docTypeLabel(ocr.documentType, ocr.buyerTaxId)),
     row("เลขที่", ocr.invoiceNumber || "-"),
     row("วันที่", ocr.documentDate || "-"),
   );
@@ -112,7 +116,7 @@ export function buildOcrConfirmFlex(
 
   return {
     type: "flex",
-    altText: `${docTypeLabel(ocr.documentType)} ${fmt(total)} - ${vendor}`,
+    altText: `${docTypeLabel(ocr.documentType, ocr.buyerTaxId)} ${fmt(total)} - ${vendor}`,
     contents: {
       type: "bubble",
       body: {
@@ -121,7 +125,7 @@ export function buildOcrConfirmFlex(
         spacing: "sm",
         contents: [
           // Title bar
-          { type: "text", text: docTypeLabel(ocr.documentType), weight: "bold", size: "md", color: "#4F46E5" },
+          { type: "text", text: docTypeLabel(ocr.documentType, ocr.buyerTaxId), weight: "bold", size: "md", color: "#4F46E5" },
           { type: "text", text: meta.orgName, size: "xxs", color: "#888888" },
           { type: "separator", margin: "lg" },
           // Main content

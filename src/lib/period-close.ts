@@ -61,3 +61,18 @@ export function paymentReportDates(p: PaymentRow): string[] {
   const dates = [p.ReceiptDate, p.PaymentDate, (p.PaidAt || "").slice(0, 10)].filter((d): d is string => !!d);
   return Array.from(new Set(dates.map((d) => d.slice(0, 10))));
 }
+
+/**
+ * PUR-09b: เลขผู้เสียภาษีผู้รับเงินในรายงาน — งวดที่ปิดแล้วใช้ค่าที่บันทึกไว้ตอนจ่าย (รายงานที่ยื่นแล้วต้องไม่เปลี่ยน)
+ * · งวดที่ยังเปิดใช้ทะเบียนปัจจุบัน (แก้เลขที่พิมพ์ผิดในทะเบียนแล้ว ภ.ง.ด. ที่ยังไม่ยื่นต้องถูกตาม)
+ */
+export function vendorTaxIdFor(
+  snapshot: string | undefined,
+  registry: string | undefined,
+  reportDate: string | undefined,
+  closedThrough: string,
+): string {
+  return isDateInClosedPeriod(reportDate, closedThrough)
+    ? snapshot || registry || ""
+    : registry || snapshot || "";
+}

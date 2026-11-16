@@ -46,3 +46,23 @@ export function isInputVatClaimable(p: { DocumentType?: string; NonDeductibleVat
   if (p.DocumentType !== "tax_invoice") return false; // รวม tax_invoice_abbr (อย่างย่อ) — ขอคืนไม่ได้
   return resolveNonDeductibleVat(p.CategoryMain, p.NonDeductibleVat) === "";
 }
+
+/**
+ * PUR-04b: ประเภทเอกสารของใบที่ส่งเข้ามาทาง LINE (OCR)
+ *   - OCR ไม่ได้บอกว่าเป็นใบกำกับ → ใบเสร็จ
+ *   - ใบกำกับแต่ไม่มีเลขผู้ซื้อ 13 หลัก → ใบกำกับอย่างย่อ (ปั๊ม/ร้านสะดวกซื้อ) ขอคืนไม่ได้ ม.82/5(6)
+ *   - มีเลขผู้ซื้อแต่ไม่ใช่เลขของกิจการ → ใบกำกับที่ออกให้คนอื่น = ต้องห้าม ม.82/5(1)(2)
+ * อ่านพลาด = จัดเป็นแบบที่ขอคืนไม่ได้ไว้ก่อน (ปลอดภัยกว่าขอคืนเกิน) — ผู้ใช้แก้บนเว็บได้
+ */
+export function classifyOcrPurchaseDoc(
+  ocrDocumentType: string | null | undefined,
+  buyerTaxId: string | null | undefined,
+  orgTaxId: string | null | undefined,
+): { documentType: "receipt" | "tax_invoice" | "tax_invoice_abbr"; nonDeductibleVat: string } {
+  if (ocrDocumentType !== "tax_invoice") return { documentType: "receipt", nonDeductibleVat: "" };
+  const buyer = String(buyerTaxId ?? "").replace(/\D/g, "");
+  if (buyer.length !== 13) return { documentType: "tax_invoice_abbr", nonDeductibleVat: "" };
+  const org = String(orgTaxId ?? "").replace(/\D/g, "");
+  if (org.length === 13 && buyer !== org) return { documentType: "tax_invoice", nonDeductibleVat: "invalid_tax_invoice" };
+  return { documentType: "tax_invoice", nonDeductibleVat: "" };
+}

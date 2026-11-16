@@ -26,7 +26,13 @@ export type DuplicateHit = { paymentId: string; description: string; amount: num
  */
 export function findDuplicateBills(
   payments: Row[],
-  bill: { vendorTaxId?: string; docNumbers: (string | undefined)[]; excludePaymentId?: string },
+  bill: {
+    vendorTaxId?: string;
+    docNumbers: (string | undefined)[];
+    excludePaymentId?: string;
+    /** PUR-06b: รายการที่สร้างจากใบเดียวกันในรอบเดียวกัน (แยกหลายบรรทัด) — ไม่ใช่บิลซ้ำ */
+    excludePaymentIds?: string[];
+  },
 ): DuplicateHit[] {
   const taxId = normalizeTaxId(bill.vendorTaxId);
   if (taxId.length !== 13) return [];
@@ -35,6 +41,7 @@ export function findDuplicateBills(
   const hits: DuplicateHit[] = [];
   for (const p of payments) {
     if (p.PaymentID === bill.excludePaymentId) continue;
+    if (p.PaymentID && bill.excludePaymentIds?.includes(p.PaymentID)) continue;
     if (IGNORED.has(p.Status || "")) continue;
     if (normalizeTaxId(p.VendorTaxIdSnapshot) !== taxId) continue;
     const theirs = [p.InvoiceNumber, p.ReceiptNumber].map(normalizeDocNo).filter(Boolean);
