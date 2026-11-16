@@ -3,6 +3,7 @@
 // Session 6 — Ultra-safe Flex for reliable rendering
 // ===========================================
 
+import { ocrDocTypeLabel } from "@/lib/input-vat-rules";
 import type { LineFlexMessage } from "@/lib/line/messaging";
 import type { OcrParsedReceipt } from "@/lib/ocr";
 
@@ -11,21 +12,11 @@ function fmt(n: number | null | undefined): string {
   return n.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-// PUR-04b: ใบกำกับที่ไม่มีเลขผู้ซื้อ = อย่างย่อ (บันทึกแบบนี้ — การ์ดต้องบอกตรงกับที่บันทึก)
-function docTypeLabel(dt: string | null, buyerTaxId?: string | null): string {
-  if (dt === "tax_invoice" && String(buyerTaxId ?? "").replace(/\D/g, "").length !== 13) {
-    return "ใบกำกับภาษีอย่างย่อ (ขอคืน VAT ไม่ได้)";
-  }
-  switch (dt) {
-    case "tax_invoice": return "ใบกำกับภาษี";
-    case "receipt": return "ใบเสร็จรับเงิน";
-    case "invoice": return "ใบแจ้งหนี้";
-    case "quotation": return "ใบเสนอราคา";
-    default: return "เอกสาร";
-  }
+// PUR-04b/c: ใช้กติกาเดียวกับตอนบันทึก (อย่างย่อ / เลขผู้ซื้อไม่ใช่ของบริษัท) — การ์ดต้องบอกตรงกับที่บันทึก
+function docTypeLabel(dt: string | null, buyerTaxId?: string | null, orgTaxId?: string | null): string {
+  return ocrDocTypeLabel(dt, buyerTaxId, orgTaxId);
 }
 
-// Simple horizontal row: label | value
 function row(label: string, value: string): Record<string, unknown> {
   return {
     type: "box",
@@ -48,7 +39,7 @@ function sectionTitle(title: string): Record<string, unknown> {
 export function buildOcrConfirmFlex(
   draft: { id: string },
   ocr: OcrParsedReceipt,
-  meta: { orgName: string; projectName: string; appBaseUrl: string }
+  meta: { orgName: string; projectName: string; appBaseUrl: string; orgTaxId?: string | null }
 ): LineFlexMessage {
   const total = ocr.totalAmount ?? ocr.subtotal ?? 0;
   const vendor = ocr.vendorName || "ไม่ระบุ";
@@ -66,7 +57,7 @@ export function buildOcrConfirmFlex(
 
   // -- Document info --
   contents.push(
-    row("ประเภท", docTypeLabel(ocr.documentType, ocr.buyerTaxId)),
+    row("ประเภท", docTypeLabel(ocr.documentType, ocr.buyerTaxId, meta.orgTaxId)),
     row("เลขที่", ocr.invoiceNumber || "-"),
     row("วันที่", ocr.documentDate || "-"),
   );
@@ -116,7 +107,7 @@ export function buildOcrConfirmFlex(
 
   return {
     type: "flex",
-    altText: `${docTypeLabel(ocr.documentType, ocr.buyerTaxId)} ${fmt(total)} - ${vendor}`,
+    altText: `${docTypeLabel(ocr.documentType, ocr.buyerTaxId, meta.orgTaxId)} ${fmt(total)} - ${vendor}`,
     contents: {
       type: "bubble",
       body: {
@@ -125,7 +116,7 @@ export function buildOcrConfirmFlex(
         spacing: "sm",
         contents: [
           // Title bar
-          { type: "text", text: docTypeLabel(ocr.documentType, ocr.buyerTaxId), weight: "bold", size: "md", color: "#4F46E5" },
+          { type: "text", text: docTypeLabel(ocr.documentType, ocr.buyerTaxId, meta.orgTaxId), weight: "bold", size: "md", color: "#4F46E5" },
           { type: "text", text: meta.orgName, size: "xxs", color: "#888888" },
           { type: "separator", margin: "lg" },
           // Main content

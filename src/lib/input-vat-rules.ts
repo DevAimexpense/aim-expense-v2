@@ -66,3 +66,45 @@ export function classifyOcrPurchaseDoc(
   if (org.length === 13 && buyer !== org) return { documentType: "tax_invoice", nonDeductibleVat: "invalid_tax_invoice" };
   return { documentType: "tax_invoice", nonDeductibleVat: "" };
 }
+
+/**
+ * PUR-04c: ข้อความประเภทเอกสารบนการ์ดยืนยัน LINE — ใช้กติกาเดียวกับตอนบันทึก (classifyOcrPurchaseDoc)
+ * ผู้ส่งต้องเห็นก่อนกดยืนยันว่าใบนี้ขอคืน VAT ได้หรือไม่ (พรีวิว = ที่บันทึก)
+ */
+export function ocrDocTypeLabel(
+  ocrDocumentType: string | null | undefined,
+  buyerTaxId: string | null | undefined,
+  orgTaxId: string | null | undefined,
+): string {
+  switch (ocrDocumentType) {
+    case "tax_invoice": {
+      const c = classifyOcrPurchaseDoc(ocrDocumentType, buyerTaxId, orgTaxId);
+      if (c.documentType === "tax_invoice_abbr") return "ใบกำกับภาษีอย่างย่อ (ขอคืน VAT ไม่ได้)";
+      if (c.nonDeductibleVat) return "ใบกำกับภาษี — เลขผู้ซื้อไม่ใช่ของบริษัท (ขอคืน VAT ไม่ได้)";
+      return "ใบกำกับภาษี";
+    }
+    case "receipt":
+      return "ใบเสร็จรับเงิน";
+    case "invoice":
+      return "ใบแจ้งหนี้";
+    case "quotation":
+      return "ใบเสนอราคา";
+    default:
+      return "เอกสาร";
+  }
+}
+
+/** PUR-04c: ข้อความแจ้งหลังบันทึกเมื่อภาษีซื้อของใบนี้จะไม่ถูกนำไปขอคืน · undefined = ขอคืนได้/ไม่มี VAT */
+export function nonClaimableNotice(
+  c: { documentType: string; nonDeductibleVat: string },
+  hasVat: boolean,
+): string | undefined {
+  if (!hasVat) return undefined;
+  if (c.documentType === "tax_invoice_abbr") {
+    return "ℹ️ บันทึกเป็นใบกำกับภาษีอย่างย่อ — VAT ใบนี้ไม่นำไปขอคืน · ถ้าเป็นใบกำกับเต็มรูปที่ออกให้บริษัท ให้แก้ประเภทเอกสารบนเว็บ";
+  }
+  if (c.nonDeductibleVat === "invalid_tax_invoice") {
+    return "ℹ️ เลขผู้เสียภาษีผู้ซื้อบนใบไม่ตรงกับบริษัท — VAT ใบนี้ไม่นำไปขอคืน · ถ้าระบบอ่านเลขผิด ให้แก้บนเว็บ";
+  }
+  return undefined;
+}

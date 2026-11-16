@@ -17,7 +17,7 @@ import {
 } from "../lib/receipt-output-vat";
 import { withReplacementNote, receiptReplacementNote } from "../lib/ti-replacement";
 import { filedVatPeriodWarning } from "../lib/vat-period";
-import { branchCode } from "@/lib/branch-label";
+import { branchCode, combinedReceiptBuyerBranchError } from "@/lib/branch-label";
 import { assertPeriodOpen } from "../lib/period-lock";
 import { activeNotesFor } from "./creditNote.router";
 import { getSheetsService, ensureTabsCached } from "../lib/sheets-context";
@@ -938,6 +938,9 @@ export const billingRouter = router({
                 ?.settings,
             )
           : "";
+      // SALE-24: ใบเสร็จรับเงิน/ใบกำกับภาษี ให้ผู้ซื้อที่มีเลขผู้เสียภาษี ต้องระบุสาขาผู้ซื้อ
+      const missingBranch = combinedReceiptBuyerBranchError(taxDocMode, customer);
+      if (missingBranch) throw new TRPCError({ code: "PRECONDITION_FAILED", message: missingBranch });
 
       try {
         // เลขเอกสาร: อ่าน max สด + append header ภายใน lock ต่อ org/ประเภท/เดือน (DOC-03 / CO-04)
@@ -1117,6 +1120,8 @@ export const billingRouter = router({
             )
           : "separate",
       );
+      const missingBranch = combinedReceiptBuyerBranchError(taxDocMode, customer); // SALE-24
+      if (missingBranch) throw new TRPCError({ code: "PRECONDITION_FAILED", message: missingBranch });
       await deleteDraftPairedTaxInvoices(sheets, pairedTis, {
         orgId: ctx.org.orgId,
         userId: ctx.session.userId,

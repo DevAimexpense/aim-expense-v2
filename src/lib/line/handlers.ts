@@ -6,7 +6,7 @@
 import { prisma } from "@/lib/prisma";
 import { ttlForTab, invalidateTab } from "@/server/lib/cache";
 import { findDuplicateBills, duplicateWarningText } from "@/lib/duplicate-bill";
-import { classifyOcrPurchaseDoc } from "@/lib/input-vat-rules";
+import { classifyOcrPurchaseDoc, nonClaimableNotice } from "@/lib/input-vat-rules";
 import {
   replyMessage,
   pushMessage,
@@ -22,6 +22,7 @@ import {
   resolveLineContext,
   resolveGroupContext,
   getUserActiveOrgs,
+  getOrgTaxId,
   type LineUserContext,
   type GroupResolveError,
 } from "@/lib/line/user-org";
@@ -610,6 +611,7 @@ async function pushProjectPicker(
         orgName: org.orgName,
         projectName: "LINE (ไม่ระบุโปรเจกต์)",
         appBaseUrl: APP_BASE_URL,
+        orgTaxId: await getOrgTaxId(org.orgId), // PUR-04c
       }),
     ]);
     return;
@@ -976,6 +978,7 @@ export async function handlePostback(event: LineWebhookEvent): Promise<void> {
           orgName: ctx?.orgName || "",
           projectName: eventName,
           appBaseUrl: APP_BASE_URL,
+          orgTaxId: await getOrgTaxId(draft.orgId), // PUR-04c: ตรวจกับองค์กรของ draft (ที่จะบันทึกจริง)
         }
       );
 
@@ -1295,12 +1298,7 @@ async function writeDraftToSheets(
     : `OCR confidence ${Math.round((ocr.confidence ?? 0) * 100)}% | LINE draft ${draft.id}`;
 
   // PUR-04b: จัดประเภทใบกำกับจากเลขผู้ซื้อที่ OCR อ่านได้ (เทียบเลขของกิจการ)
-  let orgTaxId: string | null = null;
-  try {
-    orgTaxId = (await prisma.organization.findUnique({ where: { id: draft.orgId }, select: { taxId: true } }))?.taxId ?? null;
-  } catch (err) {
-    console.warn(`[LINE] org taxId read failed for draft ${draft.id}:`, err);
-  }
+  const orgTaxId = await getOrgTaxId(draft.orgId);
   const purchaseDoc = classifyOcrPurchaseDoc(ocr.documentType, ocr.buyerTaxId, orgTaxId);
 
   // PUR-06: บิลซ้ำ (เลขผู้ขาย + เลขที่ใบ) — เตือน ไม่บล็อก · อ่านผ่าน cache เดียวกับ LINE-33 (ไม่เสีย read เพิ่ม)
@@ -1390,11 +1388,14 @@ async function writeDraftToSheets(
     console.error(`[LINE] audit log failed for ${paymentId} (row already saved):`, err);
   }
 
-  // PUR-06: แจ้งผู้ส่งว่าอาจเป็นบิลซ้ำ (บันทึกไปแล้ว — ผู้อนุมัติเห็นป้ายเตือนในหน้าอนุมัติ)
-  const dupText = duplicateWarningText(duplicates);
-  if (dupText) {
-    await pushMessage(draft.lineUserId, [text(dupText)]).catch((err) =>
-      console.error(`[LINE] duplicate warning push failed for ${paymentId}:`, err),
+  // PUR-06: แจ้งผู้ส่งว่าอาจเป็นบิลซ้ำ · PUR-04c: แจ้งว่า VAT ใบนี้ไม่นำไปขอคืน (อย่างย่อ/เลขผู้ซื้อไม่ตรง)
+  // รวมเป็น push เดียว (โควตา LINE นับต่อครั้งที่ส่ง)
+  const notices = [duplicateWarningText(duplicates), nonClaimableNotice(purchaseDoc, vatAmount > 0)].filter(
+    (t): t is string => !!t,
+  );
+  if (notices.length > 0) {
+    await pushMessage(draft.lineUserId, notices.map((t) => text(t))).catch((err) =>
+      console.error(`[LINE] notice push failed for ${paymentId}:`, err),
     );
   }
 

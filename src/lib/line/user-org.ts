@@ -128,3 +128,13 @@ export async function resolveGroupContext(
     groupEventName: group.eventName,
   };
 }
+
+/** PUR-04b/c: เลขผู้เสียภาษีขององค์กร (ใช้ตรวจเลขผู้ซื้อบนใบกำกับ) · อ่านไม่ได้ = null (ไม่ล้มงาน LINE) */
+export async function getOrgTaxId(orgId: string): Promise<string | null> {
+  try {
+    return (await prisma.organization.findUnique({ where: { id: orgId }, select: { taxId: true } }))?.taxId ?? null;
+  } catch (err) {
+    console.warn(`[LINE] org taxId read failed for ${orgId}:`, err);
+    return null;
+  }
+}
