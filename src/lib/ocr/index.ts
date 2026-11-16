@@ -94,18 +94,19 @@ export async function parseReceipt(
       const msg = err instanceof Error ? err.message : String(err);
       console.warn(`[OCR] ✗ ${provider.name} failed:`, msg);
       errors.push(`${provider.name}: ${msg}`);
+      // OCR-01: เครดิตเจ้านี้หมด → เตือนทีมทันที แม้เจ้าถัดไปจะสำเร็จ (ไม่งั้นค้างหมดไปเงียบ ๆ)
+      // fingerprint ต่อ provider → Sentry รวมเป็น issue เดียว ไม่สแปม · ข้อความไม่มีข้อมูลลูกค้า
+      if (isOutOfCreditError(msg)) {
+        Sentry.captureMessage(`OCR provider out of credit: ${provider.name}`, {
+          level: "fatal",
+          fingerprint: ["ocr-out-of-credit", provider.name],
+        });
+      }
       if (isTimeoutError(err)) timedOut = true;
     }
   }
 
   // LINE-24: log รายละเอียดภาษาอังกฤษที่นี่ — ผู้เรียกได้ error ภาษาไทยไปแสดงผู้ใช้
   console.error(`[OCR] All OCR providers failed${timedOut ? " (timeout)" : ""}: ${errors.join(" | ")}`);
-  const failure = new OcrFailedError(errors, timedOut);
-  // เครดิต Akson/OpenAI หมด = สแกนพังทั้งระบบ → แจ้งทีมผ่าน Sentry (ข้อความไม่มีข้อมูลลูกค้า)
-  for (const e of errors) {
-    if (isOutOfCreditError(e)) {
-      Sentry.captureMessage(`OCR provider out of credit: ${e.split(":")[0]}`, "fatal");
-    }
-  }
-  throw failure;
+  throw new OcrFailedError(errors, timedOut);
 }

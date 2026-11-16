@@ -43,10 +43,31 @@ export async function buildWhtCertPdf(data: WhtCertData): Promise<Uint8Array> {
   });
 }
 
+/** สถานะที่ถือว่าจ่ายเงินแล้ว (หักภาษีเกิดขึ้นจริง) */
+const PAID_STATUSES = new Set(["paid", "cleared"]);
+
+/**
+ * เหตุที่ไม่บันทึก 50 ทวิ อัตโนมัติ (null = บันทึกได้) — แยกเป็นฟังก์ชันล้วนให้เทสต์ได้
+ * ลำดับ: ไม่มี WHT → ยังไม่จ่าย (WHT-01) → มีไฟล์แล้ว (dedup เหมือน save-pdf) → มีเอกสารระบบอื่นในช่องเดียวกัน
+ */
+export function whtAutoSaveSkipReason(payment: {
+  WTHAmount?: string;
+  Status?: string;
+  GeneratedDocUrl?: string;
+  GeneratedDocType?: string;
+}): "no_wht" | "not_paid" | "exists" | "other_doc" | null {
+  if (!((parseFloat(payment.WTHAmount || "") || 0) > 0)) return "no_wht";
+  // WHT-01: ออกเฉพาะรายการที่จ่ายเงินแล้ว — รายการรออนุมัติ (เช่นจาก LINE ที่มีวันที่ใบเสร็จ)
+  // ถ้าออกตอนนี้จะใช้เลข 50 ทวิ ไปก่อน (ไม่อนุมัติ = เลขหาย) และลงวันที่ใบเสร็จแทนวันจ่ายจริง
+  if (!PAID_STATUSES.has(payment.Status || "")) return "not_paid";
+  if (payment.GeneratedDocUrl) return payment.GeneratedDocType === "wht-cert" ? "exists" : "other_doc";
+  return null;
+}
+
 export type AutoSaveWhtResult =
   | { status: "saved"; fileUrl: string }
   | { status: "exists"; fileUrl: string }
-  | { status: "skipped"; reason: "no_wht" | "no_date" | "not_found" | "other_doc" }
+  | { status: "skipped"; reason: "no_wht" | "not_paid" | "no_date" | "not_found" | "other_doc" }
   | { status: "error"; error: string };
 
 /**
@@ -82,13 +103,9 @@ async function saveLocked(
     if (spreadsheetId) await invalidateTab(spreadsheetId, SHEET_TABS.PAYMENTS);
     const payment = await sheets.getById(SHEET_TABS.PAYMENTS, "PaymentID", paymentId);
     if (!payment) return { status: "skipped", reason: "not_found" };
-    if (!((parseFloat(payment.WTHAmount) || 0) > 0)) return { status: "skipped", reason: "no_wht" };
-    // DEDUP เหมือน /api/documents/save-pdf — มีไฟล์ 50 ทวิ แล้วไม่สร้างซ้ำ
-    if (payment.GeneratedDocUrl) {
-      return payment.GeneratedDocType === "wht-cert"
-        ? { status: "exists", fileUrl: payment.GeneratedDocUrl }
-        : { status: "skipped", reason: "other_doc" };
-    }
+    const skip = whtAutoSaveSkipReason(payment);
+    if (skip === "exists") return { status: "exists", fileUrl: payment.GeneratedDocUrl };
+    if (skip) return { status: "skipped", reason: skip };
 
     let data: WhtCertData | null;
     try {

@@ -25,7 +25,7 @@ export function WthCertDocument({ paymentId }: WthCertProps) {
   const [loadError, setLoadError] = useState("");
 
   // Save PDF to Drive
-  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error" | "skipped">("idle");
   const [savedUrl, setSavedUrl] = useState("");
   const [saveError, setSaveError] = useState("");
   const handleSavePdfRef = useRef<(() => Promise<void>) | null>(null);
@@ -121,7 +121,13 @@ export function WthCertDocument({ paymentId }: WthCertProps) {
     setSaveError("");
     try {
       const res = await fetch(`/api/documents/wht-cert/${encodeURIComponent(paymentId)}/save`, { method: "POST" });
-      const d = (await res.json().catch(() => ({}))) as { success?: boolean; fileUrl?: string; error?: string };
+      const d = (await res.json().catch(() => ({}))) as { success?: boolean; fileUrl?: string; error?: string; reason?: string };
+      // ยังไม่จ่าย / มีเอกสารอื่น / ยังไม่มีวันที่ = ไม่ใช่ข้อผิดพลาด → แจ้งเฉย ๆ ไม่มีปุ่มลองใหม่
+      if (d.reason === "not_paid" || d.reason === "other_doc" || d.reason === "no_date") {
+        setSaveError(d.error || "");
+        setSaveState("skipped");
+        return;
+      }
       if (!res.ok || !d.success || !d.fileUrl) throw new Error(d.error || "บันทึกไม่สำเร็จ");
       setSavedUrl(d.fileUrl);
       setSaveState("saved");
@@ -160,7 +166,7 @@ export function WthCertDocument({ paymentId }: WthCertProps) {
             >
               ✅ บันทึกแล้ว — ดูใน Drive
             </a>
-          ) : (
+          ) : saveState === "skipped" ? null : (
             <button
               onClick={handleSavePdf}
               disabled={saveState === "saving" || !doc}
@@ -171,7 +177,14 @@ export function WthCertDocument({ paymentId }: WthCertProps) {
           )}
         </div>
       </div>
-      {saveError && <div className="wth-error">⚠️ {saveError}</div>}
+      {saveError &&
+        (saveState === "skipped" ? (
+          <div className="wth-error" style={{ background: "#f8fafc", color: "#475569", borderColor: "#e2e8f0" }}>
+            ℹ️ {saveError}
+          </div>
+        ) : (
+          <div className="wth-error">⚠️ {saveError}</div>
+        ))}
 
       {loadError ? (
         <div className="wth-doc wth-msg">

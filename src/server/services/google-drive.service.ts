@@ -293,13 +293,20 @@ export class GoogleDriveService {
     const paddedMonth = String(date.getMonth() + 1).padStart(2, "0");
     const folderPath = `Documents/${year}/${paddedMonth}`;
 
+    const monthFolderId = await this.getOrCreateYearMonthFolder(params.documentsFolderId, year, date.getMonth() + 1);
     const existingId = params.existingUrl?.match(/\/d\/([A-Za-z0-9_-]{10,})/)?.[1];
     if (existingId) {
       try {
+        // DOC-01: วันที่เอกสารย้ายข้ามเดือน → ย้ายไฟล์ไปโฟลเดอร์เดือนใหม่ด้วย (ลิงก์เดิมใช้ได้)
+        const current = await this.drive.files.get({ fileId: existingId, fields: "parents" });
+        const oldParents = (current.data.parents || []).filter((p) => p !== monthFolderId);
         const res = await this.drive.files.update({
           fileId: existingId,
           requestBody: { name: params.fileName },
           media: { mimeType: "application/pdf", body: Readable.from(params.fileBuffer) },
+          ...(oldParents.length > 0 || !(current.data.parents || []).includes(monthFolderId)
+            ? { addParents: monthFolderId, removeParents: oldParents.join(",") || undefined }
+            : {}),
           fields: "id, webViewLink, trashed",
         });
         if (!res.data.trashed) {
@@ -316,7 +323,6 @@ export class GoogleDriveService {
       }
     }
 
-    const monthFolderId = await this.getOrCreateYearMonthFolder(params.documentsFolderId, year, date.getMonth() + 1);
     const result = await this.uploadFile(monthFolderId, params.fileName, "application/pdf", params.fileBuffer);
     return { ...result, fileName: params.fileName, folderPath, replaced: false };
   }

@@ -5,6 +5,7 @@ import { todayBangkok } from "@/lib/utils/date";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { trpc } from "@/lib/trpc/client";
+import { ensureSalesDocSaved } from "@/lib/utils/auto-gen-doc";
 import DateInput from "@/components/shared/date-input";
 import {
   VatModePicker,
@@ -321,6 +322,9 @@ export function NewBillingClient({
         utils.billing.getById.invalidate({ billingId: result.billingId });
         // DOC-25: ย้ายวันที่ข้ามเดือนหลังมีเลขแล้ว → แจ้งว่าเลขยังเป็นของเดือนเดิม
         if ("warning" in result && result.warning) alert(result.warning);
+        // DOC-02: บันทึก PDF ลง Drive เบื้องหลังทันที — ไม่พึ่งแท็บเอกสาร (Safari/iPad บล็อก popup หลัง await)
+        // iframe อยู่ใน document.body จึงทำงานต่อได้แม้เปลี่ยนหน้าไป /receipts
+        ensureSalesDocSaved({ kind: "receipt", id: result.billingId, version: `saved-${Date.now()}`, savedFor: "", savedUrl: "" });
         window.open(`/documents/receipt/${result.billingId}`, "_blank", "noopener");
         router.push("/receipts");
         return;

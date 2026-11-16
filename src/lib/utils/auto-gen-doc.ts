@@ -38,7 +38,7 @@ export type AutoGenResult = {
 };
 
 export type AutoGenOptions = {
-  onProgress?: (status: "started" | "loaded" | "capturing" | "uploading" | "done" | "error", info?: { message?: string; fileUrl?: string }) => void;
+  onProgress?: (status: "started" | "loaded" | "capturing" | "uploading" | "done" | "error" | "skipped", info?: { message?: string; fileUrl?: string }) => void;
   timeoutMs?: number; // default 90s (Thai fonts + html2canvas + Drive upload ต้องการเวลา)
 };
 
@@ -68,7 +68,13 @@ export function triggerBackgroundDocGen(
       onProgress?.("uploading");
       fetch(`/api/documents/wht-cert/${encodeURIComponent(paymentId)}/save`, { method: "POST" })
         .then(async (res) => {
-          const d = (await res.json().catch(() => ({}))) as { success?: boolean; fileUrl?: string; error?: string };
+          const d = (await res.json().catch(() => ({}))) as { success?: boolean; fileUrl?: string; error?: string; reason?: string };
+          // ยังไม่จ่าย / ยังไม่มีวันที่ = ไม่ใช่ข้อผิดพลาด — server จะบันทึกเองตอนบันทึกจ่ายเงิน
+          if (d.reason === "not_paid" || d.reason === "no_date") {
+            onProgress?.("skipped", { message: d.error });
+            resolve({ success: false, error: d.reason });
+            return;
+          }
           if (res.ok && d.success) {
             onProgress?.("done", { fileUrl: d.fileUrl });
             resolve({ success: true, fileUrl: d.fileUrl });
@@ -286,6 +292,7 @@ export function fireAutoGenDoc(
     else if (status === "uploading") toast.setStatus("uploading");
     else if (status === "done") toast.setStatus("done", info);
     else if (status === "error") toast.setStatus("error", info);
+    else if (status === "skipped") toast.close();
   };
 
   triggerBackgroundDocGen(paymentId, docType, { ...rest, onProgress: combinedProgress }).then((result) => {

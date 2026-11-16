@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { trpc } from "@/lib/trpc/client";
+import { ensureSalesDocSaved } from "@/lib/utils/auto-gen-doc";
 import { formatDate } from "@/lib/utils/date";
 
 const formatTHB = (n: number) =>
@@ -28,6 +29,24 @@ export function ReceiptsClient() {
   const issued = all
     .filter((b) => !!b.receiptNumber)
     .sort((a, b) => b.receiptNumber.localeCompare(a.receiptNumber));
+  // DOC-02: ใบเสร็จที่ PDF ยังไม่เข้า Drive (หรือเก่ากว่าข้อมูล) → บันทึกเบื้องหลังทีละ 3 ใบ
+  // (ใบเสร็จที่ออกตรงไม่มีหน้ารายละเอียด และแท็บเอกสารอาจถูก Safari บล็อก)
+  const pendingPdf = issued.filter((b) => b.status !== "draft" && (!b.receiptPdfUrl || b.receiptPdfFor !== b.updatedAt));
+  const pendingKey = pendingPdf.slice(0, 3).map((b) => `${b.billingId}:${b.updatedAt}`).join("|");
+  useEffect(() => {
+    for (const b of pendingPdf.slice(0, 3)) {
+      ensureSalesDocSaved({
+        kind: "receipt",
+        id: b.billingId,
+        version: b.updatedAt,
+        savedFor: b.receiptPdfFor,
+        savedUrl: b.receiptPdfUrl,
+        onDone: () => utils.billing.list.invalidate(),
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingKey]);
+
   const ready = all.filter(
     (b) =>
       b.status === "paid" &&
