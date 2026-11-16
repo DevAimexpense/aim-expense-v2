@@ -88,12 +88,24 @@ export function ReceiptsClient() {
     }
   };
 
-  const handleVoid = async (billingId: string, receiptNumber: string) => {
-    if (!window.confirm(`ยกเลิกใบเสร็จรับเงิน ${receiptNumber}? (เลขที่นี้จะไม่ถูกนำกลับมาใช้)`)) return;
+  const handleVoid = async (billingId: string, receiptNumber: string, hasVat: boolean) => {
+    // SALE-01b: ใบที่มี VAT (ใบเสร็จ/ใบกำกับ หรือมีใบกำกับคู่) ต้องระบุเหตุผล — ใบกำกับคู่ถูกยกเลิกพร้อมกัน
+    const reason = window.prompt(
+      hasVat
+        ? `ยกเลิกใบเสร็จรับเงิน ${receiptNumber}\nถ้ามีใบกำกับภาษีคู่ จะถูกยกเลิกพร้อมกัน · เลขที่จะไม่ถูกนำกลับมาใช้\n\nเหตุผลการยกเลิก (จำเป็น):`
+        : `ยกเลิกใบเสร็จรับเงิน ${receiptNumber}? (เลขที่นี้จะไม่ถูกนำกลับมาใช้)\n\nเหตุผลการยกเลิก:`,
+      "",
+    );
+    if (reason === null) return;
+    if (hasVat && reason.trim().length < 3) {
+      setError("กรุณาระบุเหตุผลการยกเลิก (อย่างน้อย 3 ตัวอักษร)");
+      return;
+    }
     setError(null);
     try {
-      await voidMut.mutateAsync({ billingId });
+      await voidMut.mutateAsync({ billingId, reason: reason.trim() || undefined });
       utils.billing.list.invalidate();
+      utils.taxInvoice.list.invalidate();
     } catch (e) {
       setError(e instanceof Error ? e.message : "เกิดข้อผิดพลาด");
     }
@@ -259,7 +271,7 @@ export function ReceiptsClient() {
                       className="app-btn app-btn-ghost app-btn-sm"
                       style={{ color: "#dc2626", marginRight: "0.375rem" }}
                       disabled={voidMut.isPending}
-                      onClick={() => handleVoid(b.billingId, b.receiptNumber)}
+                      onClick={() => handleVoid(b.billingId, b.receiptNumber, vatRegistered && b.isVat && b.vatAmount > 0)}
                     >
                       ยกเลิก
                     </button>

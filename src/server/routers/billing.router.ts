@@ -8,6 +8,7 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { router, featureProcedure, createCallerFactory, type TRPCContext } from "../trpc";
 import { taxInvoiceRouter } from "./taxInvoice.router";
+import { receiptVoidPlan } from "../lib/receipt-output-vat";
 import { getSheetsService, ensureTabsCached } from "../lib/sheets-context";
 import {
   GoogleSheetsService,
@@ -1076,18 +1077,57 @@ export const billingRouter = router({
 
   /** ยกเลิกใบเสร็จรับเงินที่ออกโดยตรง (เลขที่ยังคงอยู่ ไม่นำกลับมาใช้ซ้ำ) */
   voidReceipt: featureProcedure("revenueModule", "manageBillings")
-    .input(z.object({ billingId: z.string() }))
+    .input(z.object({ billingId: z.string(), reason: z.string().trim().max(500).optional() }))
     .mutation(async ({ ctx, input }) => {
       const sheets = await getSheetsService(ctx.org.orgId);
+      await ensureTabsCached(sheets, ctx.org.orgId); // คอลัมน์ VoidReason ในชีตเดิม
       const existing = await sheets.getBillingById(input.billingId);
       if (!existing || existing.DocKind !== "receipt") {
         throw new TRPCError({ code: "NOT_FOUND", message: "ไม่พบใบเสร็จรับเงิน" });
       }
       if (existing.Status === "void") {
-        return { success: true };
+        return { success: true, voidedTaxInvoice: undefined as string | undefined };
       }
+      const receiptNo = existing.ReceiptNumber || existing.DocNumber;
+      const reason = (input.reason || "").trim();
+
+      // SALE-01b: ใบกำกับภาษีคู่ (โหมดแยก) ต้องถูกยกเลิกพร้อมกัน — ไม่งั้นรายได้หายแต่ภาษีขายยังนับใน ภ.พ.30
+      if (ctx.org.googleSpreadsheetId) await invalidateTab(ctx.org.googleSpreadsheetId, SHEET_TABS.TAX_INVOICES);
+      // ใบเสร็จที่เป็นใบกำกับภาษีด้วย (โหมดรวม) หรือมีใบกำกับคู่ → ต้องมีเหตุผล (เหมือนยกเลิกใบกำกับภาษี)
+      const plan = receiptVoidPlan(existing, await sheets.getAll(SHEET_TABS.TAX_INVOICES));
+      const pairedTis = plan.paired;
+      const issuedTi = plan.issued;
+      if (plan.reasonRequired && reason.length < 3) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: issuedTi
+            ? `กรุณาระบุเหตุผลการยกเลิก — ใบกำกับภาษีคู่ ${issuedTi.DocNumber} จะถูกยกเลิกพร้อมกัน`
+            : "กรุณาระบุเหตุผลการยกเลิก — ใบนี้เป็นใบเสร็จรับเงิน/ใบกำกับภาษี",
+        });
+      }
+
+      const tiCaller = createCallerFactory(taxInvoiceRouter)(ctx);
+      for (const ti of pairedTis) {
+        try {
+          if (ti.Status === "issued") {
+            await tiCaller.void({ taxInvoiceId: ti.TaxInvoiceID, reason: `${reason} (ยกเลิกพร้อมใบเสร็จ ${receiptNo})` });
+          } else {
+            await tiCaller.delete({ taxInvoiceId: ti.TaxInvoiceID });
+          }
+        } catch (e) {
+          const forbidden = e instanceof TRPCError && e.code === "FORBIDDEN";
+          throw new TRPCError({
+            code: forbidden ? "FORBIDDEN" : "INTERNAL_SERVER_ERROR",
+            message: forbidden
+              ? `ใบเสร็จนี้มีใบกำกับภาษีคู่ ${ti.DocNumber || "(ร่าง)"} — ต้องให้ผู้มีสิทธิ์ยกเลิกใบกำกับภาษีเป็นผู้ยกเลิก`
+              : `ยกเลิกใบกำกับภาษีคู่ ${ti.DocNumber || "(ร่าง)"} ไม่สำเร็จ — ใบเสร็จยังไม่ถูกยกเลิก: ${e instanceof Error ? e.message : String(e)}`,
+          });
+        }
+      }
+
       await sheets.updateById(SHEET_TABS.BILLINGS, "BillingID", input.billingId, {
         Status: "void",
+        VoidReason: reason,
         UpdatedAt: new Date().toISOString(),
       });
       await safeAuditLog({
@@ -1097,10 +1137,10 @@ export const billingRouter = router({
           action: "update",
           entityType: "receipt",
           entityRef: input.billingId,
-          summary: `ยกเลิกใบเสร็จรับเงิน ${existing.ReceiptNumber || existing.DocNumber}`,
+          summary: `ยกเลิกใบเสร็จรับเงิน ${receiptNo}${issuedTi ? ` + ใบกำกับภาษี ${issuedTi.DocNumber}` : ""}${reason ? `: ${reason}` : ""}`,
         },
       });
-      return { success: true };
+      return { success: true, voidedTaxInvoice: issuedTi?.DocNumber };
     }),
 
   /**

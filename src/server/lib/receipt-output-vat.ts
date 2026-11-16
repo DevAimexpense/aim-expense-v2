@@ -60,3 +60,20 @@ export function receiptOutputVatRows(billings: Row[], taxInvoices: Row[]): Recei
   }
   return out;
 }
+
+/**
+ * SALE-01b: เงื่อนไขการยกเลิกใบเสร็จออกตรง — ใบกำกับคู่ (issued/draft) ต้องจัดการก่อน
+ * และต้องมีเหตุผลเมื่อใบเสร็จเป็นใบกำกับภาษีด้วย (โหมดรวม) หรือมีใบกำกับคู่ที่ออกเลขแล้ว
+ */
+export function receiptVoidPlan(receipt: Row, taxInvoices: Row[]) {
+  const paired = taxInvoices.filter(
+    (t) => t.SourceBillingID === receipt.BillingID && (t.Status === "issued" || t.Status === "draft"),
+  );
+  const issued = paired.find((t) => t.Status === "issued");
+  return {
+    /** ใบกำกับคู่ที่ต้องยกเลิก (issued) หรือลบ (draft) ก่อนยกเลิกใบเสร็จ */
+    paired,
+    issued,
+    reasonRequired: receipt.TaxDocMode === "combined" || !!issued,
+  };
+}

@@ -296,7 +296,15 @@ export function UploadReceiptModal({ events, payees, onClose, onSuccess, attachT
         });
         payeeId = p.payeeId;
       }
-      const costPerUnit = form.hasVat ? form.totalAmount / 1.07 : form.totalAmount;
+      // PUR-02b: VAT ตามใบ (ผู้ใช้กรอก/OCR อ่าน) → ฐาน = ยอดชำระ − VAT ตามใบ · ไม่มี → คิดย้อน 7% แบบเดิม
+      // (server ตรวจซ้ำว่า VAT ไม่เกิน 7% ของฐาน — assertVatOverride)
+      const vatFromInvoice =
+        form.hasVat && form.vatAmount > 0 ? Math.round(form.vatAmount * 100) / 100 : undefined;
+      const costPerUnit = !form.hasVat
+        ? form.totalAmount
+        : vatFromInvoice !== undefined
+          ? form.totalAmount - vatFromInvoice
+          : form.totalAmount / 1.07;
       const taxFields = {
         documentType: form.documentType || undefined,
         expenseNature: form.expenseNature || undefined,
@@ -349,6 +357,7 @@ export function UploadReceiptModal({ events, payees, onClose, onSuccess, attachT
           description: form.description.trim() || form.vendorName.trim() || "ค่าใช้จ่าย",
           costPerUnit: Math.round(costPerUnit * 100) / 100, days: 1, numberOfPeople: 1,
           pctWTH: effectiveWthRate, isVatPayee: form.hasVat,
+          vatAmount: vatFromInvoice,
           initialStatus: "paid",
           ...taxFields,
         });
