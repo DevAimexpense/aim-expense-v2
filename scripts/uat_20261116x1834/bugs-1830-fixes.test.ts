@@ -2,7 +2,14 @@
 // รัน: npx -y tsx scripts/uat_20261116x1834/bugs-1830-fixes.test.ts
 (async () => {
   const { lockedMonthTotals, periodTotalsDiffs } = await import("../../src/lib/period-close");
-  const empty = { payments: [], billings: [], taxInvoices: [], creditNotes: [], purchaseNotes: [] };
+  type Rows = Record<string, string>[];
+  const empty: { payments: Rows; billings: Rows; taxInvoices: Rows; creditNotes: Rows; purchaseNotes: Rows } = {
+    payments: [],
+    billings: [],
+    taxInvoices: [],
+    creditNotes: [],
+    purchaseNotes: [],
+  };
   const req = { PaymentID: "R1", TTLAmount: "5000", VATAmount: "0", DueDate: "2026-10-28", CreatedAt: "2026-10-20T03:00:00Z" };
   const oct = (d: Partial<typeof empty>) => lockedMonthTotals({ ...empty, ...d }, "2026-10");
 

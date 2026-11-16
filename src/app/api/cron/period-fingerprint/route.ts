@@ -50,12 +50,11 @@ export async function GET(req: NextRequest) {
 
   let checked = 0;
   let alerted = 0;
-  let skipped = 0;
+  let processed = 0;
+  const failed: string[] = [];
   for (const o of due) {
-    if (Date.now() - started > TIME_BUDGET_MS) {
-      skipped = due.length - checked - alerted;
-      break;
-    }
+    if (Date.now() - started > TIME_BUDGET_MS) break;
+    processed++;
     try {
       const months = snapshotMonthsToVerify(o.period, 3);
       if (months.length > 0) {
@@ -116,10 +115,13 @@ export async function GET(req: NextRequest) {
         Prisma.sql`UPDATE organizations SET settings = jsonb_set(settings, '{periodClose,lastVerified}', to_jsonb(${thisMonth}::text), true) WHERE id = ${o.id} AND settings ? 'periodClose'`,
       );
     } catch (err) {
-      // อ่านชีตไม่ได้ (token หมดอายุ / โควตา) → ไม่ mark — ลองใหม่พรุ่งนี้
+      // อ่านชีตไม่ได้ (token หมดอายุ / โควตา) → ไม่ mark — ลองใหม่พรุ่งนี้ · รายชื่ออยู่ใน response/log ให้ทีมตามได้
+      failed.push(o.id);
       console.error(`[cron/period-fingerprint] org=${o.id} failed`, err);
     }
   }
 
-  return NextResponse.json({ success: true, due: due.length, ok: checked, alerted, deferred: skipped });
+  const deferred = due.length - processed; // ไม่ทันงบเวลา → ตรวจวันถัดไป
+  if (failed.length > 0) console.warn(`[cron/period-fingerprint] ${failed.length} org(s) failed: ${failed.join(",")}`);
+  return NextResponse.json({ success: true, due: due.length, ok: checked, alerted, failed: failed.length, failedOrgIds: failed, deferred });
 }
