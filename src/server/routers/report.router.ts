@@ -38,6 +38,7 @@ import { getPndForm, whtPeriodDate } from "@/lib/wht-doc-utils";
 import { todayBangkok } from "@/lib/utils/date";
 import { taxableBaseFromVat } from "@/lib/calculations";
 import { isInputVatClaimable, resolveNonDeductibleVat, nonDeductibleLabel } from "@/lib/input-vat-rules";
+import { noteOutputVatRows } from "@/lib/credit-note";
 import { getSheetsService } from "../lib/sheets-context";
 import { SHEET_TABS } from "../services/google-sheets.service";
 
@@ -1351,6 +1352,7 @@ export const reportRouter = router({
         SHEET_TABS.TAX_INVOICES,
         SHEET_TABS.TAX_INVOICE_LINES,
         SHEET_TABS.BILLINGS,
+        SHEET_TABS.CREDIT_NOTES, // SALE-02
       ]);
       const headers = batch[SHEET_TABS.TAX_INVOICES] || [];
       const allLines = batch[SHEET_TABS.TAX_INVOICE_LINES] || [];
@@ -1360,7 +1362,9 @@ export const reportRouter = router({
       type SalesRow = {
         taxInvoiceId: string;
         /** SALE-01: tax_invoice = แท็บใบกำกับ · receipt = ใบเสร็จออกตรงที่มี VAT (ใบเสร็จ/ใบกำกับ หรือยังไม่มีใบกำกับคู่) */
-        kind?: "tax_invoice" | "receipt";
+        kind?: "tax_invoice" | "receipt" | "credit_note" | "debit_note";
+        /** SALE-02: ใบลด/เพิ่มหนี้ อ้างใบกำกับเลขที่ */
+        refDocNumber?: string;
         docNumber: string;
         docDate: string;
         customerId: string;
@@ -1441,6 +1445,28 @@ export const reportRouter = router({
               : linkableTaxInvoices(r.customerId, r.vatAmount, scopedHeaders).map((c) => c.docNumber),
         });
       }
+      // SALE-02: ใบลดหนี้ (ติดลบ) / ใบเพิ่มหนี้ — ลงงวดตามวันที่ออกใบ (ม.82/9-10)
+      for (const n of noteOutputVatRows(batch[SHEET_TABS.CREDIT_NOTES] || [])) {
+        if (scope !== null && !scope.includes(n.eventId)) continue;
+        if (n.date < input.from || n.date > input.to) continue;
+        if (input.customerId && n.customerId !== input.customerId) continue;
+        rows.push({
+          taxInvoiceId: n.noteId,
+          kind: n.kind === "credit" ? "credit_note" : "debit_note",
+          refDocNumber: n.sourceDocNumber,
+          docNumber: n.docNumber,
+          docDate: n.date,
+          customerId: n.customerId,
+          customerName: n.customerName,
+          customerTaxId: n.customerTaxId,
+          customerBranch: "",
+          projectName: "",
+          baseAmount: n.baseAmount,
+          vatAmount: n.vatAmount,
+          goodsBase: 0,
+          serviceBase: n.baseAmount,
+        });
+      }
       // VAT-21: ใบเสร็จจากใบวางบิลที่มี VAT แต่ยังไม่มีใบกำกับ — ไม่อยู่ในรายงาน (ยังไม่มีใบกำกับ) แต่บอกจำนวนไว้
       const uncoveredInPeriod = uncoveredBillingReceipts(batch[SHEET_TABS.BILLINGS] || [], headers).filter(
         (r) =>
@@ -1511,6 +1537,7 @@ export const reportRouter = router({
           SHEET_TABS.TAX_INVOICES,
           SHEET_TABS.TAX_INVOICE_LINES,
           SHEET_TABS.BILLINGS,
+          SHEET_TABS.CREDIT_NOTES, // SALE-02
         ]),
       ]);
 
@@ -1595,8 +1622,10 @@ export const reportRouter = router({
       type OutputRow = {
         taxInvoiceId: string;
         /** SALE-01: receipt = ใบเสร็จออกตรงที่มี VAT (ใบเสร็จ/ใบกำกับ หรือยังไม่มีใบกำกับคู่) */
-        kind?: "tax_invoice" | "receipt";
+        kind?: "tax_invoice" | "receipt" | "credit_note" | "debit_note";
         receiptMode?: "combined" | "separate";
+        /** SALE-02: ใบลด/เพิ่มหนี้ อ้างใบกำกับเลขที่ */
+        refDocNumber?: string;
         docNumber: string;
         date: string;
         customerName: string;
@@ -1638,6 +1667,22 @@ export const reportRouter = router({
           vatAmount: r.vatAmount,
           // โหมดรวม = ตัวใบเสร็จเป็นใบกำกับ → ไม่เสนอผูก (ถ้าซ้ำต้องยกเลิกใบใดใบหนึ่ง)
           linkCandidates: r.mode === "combined" ? [] : linkableTaxInvoices(r.customerId, r.vatAmount, scopedTis),
+        });
+      }
+      // SALE-02: ใบลดหนี้ (ติดลบ) / ใบเพิ่มหนี้ ลดหรือเพิ่มภาษีขายในเดือนที่ออกใบ (ม.82/9-10)
+      for (const n of noteOutputVatRows(batch[SHEET_TABS.CREDIT_NOTES] || [])) {
+        if (scope !== null && !scope.includes(n.eventId)) continue;
+        if (n.date < input.from || n.date > input.to) continue;
+        outputRows.push({
+          taxInvoiceId: n.noteId,
+          kind: n.kind === "credit" ? "credit_note" : "debit_note",
+          refDocNumber: n.sourceDocNumber,
+          docNumber: n.docNumber,
+          date: n.date,
+          customerName: n.customerName,
+          customerTaxId: n.customerTaxId,
+          baseAmount: n.baseAmount,
+          vatAmount: n.vatAmount,
         });
       }
       // SALE-01d: ใบเสร็จจากใบวางบิลที่มี VAT แต่ยังไม่มีใบกำกับ — ไม่รวมในยอด แสดงเป็นรายการยกเว้น

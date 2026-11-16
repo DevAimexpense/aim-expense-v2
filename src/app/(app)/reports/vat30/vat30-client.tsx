@@ -491,8 +491,9 @@ function OutputTab({
 }: {
   rows: {
     taxInvoiceId: string;
-    kind?: "tax_invoice" | "receipt";
+    kind?: "tax_invoice" | "receipt" | "credit_note" | "debit_note";
     receiptMode?: "combined" | "separate";
+    refDocNumber?: string;
     docNumber: string;
     date: string;
     customerName: string;
@@ -540,6 +541,15 @@ function OutputTab({
                     {r.receiptMode === "combined"
                       ? "ใบเสร็จรับเงิน/ใบกำกับภาษี"
                       : "ใบเสร็จ — ยังไม่มีใบกำกับภาษีคู่"}
+                  </div>
+                )}
+                {/* SALE-02: ใบลด/เพิ่มหนี้ ลงงวดที่ออกใบ */}
+                {(r.kind === "credit_note" || r.kind === "debit_note") && (
+                  <div style={{ fontSize: "0.75rem", color: r.kind === "credit_note" ? "#b91c1c" : "#1d4ed8" }}>
+                    <Link href={`/documents/credit-note/${r.taxInvoiceId}`} target="_blank" style={{ color: "inherit" }}>
+                      {r.kind === "credit_note" ? "ใบลดหนี้" : "ใบเพิ่มหนี้"}
+                    </Link>{" "}
+                    อ้าง {r.refDocNumber}
                   </div>
                 )}
                 {r.kind === "receipt" && (

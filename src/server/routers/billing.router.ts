@@ -17,6 +17,8 @@ import {
 } from "../lib/receipt-output-vat";
 import { withReplacementNote, receiptReplacementNote } from "../lib/ti-replacement";
 import { filedVatPeriodWarning } from "../lib/vat-period";
+import { assertPeriodOpen } from "../lib/period-lock";
+import { activeNotesFor } from "./creditNote.router";
 import { getSheetsService, ensureTabsCached } from "../lib/sheets-context";
 import {
   GoogleSheetsService,
@@ -381,6 +383,7 @@ export const billingRouter = router({
     .mutation(async ({ ctx, input }) => {
       // org ไม่จด VAT ออกเอกสารมี VAT ไม่ได้ — บังคับฝั่ง server (DOC-06)
       await assertVatAllowed(ctx.org.orgId, input.isVat, "ใบวางบิล");
+      await assertPeriodOpen(ctx.org.orgId, input.docDate, "สร้างใบวางบิล"); // CTRL-01
       const sheets = await getSheetsService(ctx.org.orgId);
       await ensureTabsCached(sheets, ctx.org.orgId);
 
@@ -528,6 +531,7 @@ export const billingRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      await assertPeriodOpen(ctx.org.orgId, input.docDate, "บันทึกรายรับ"); // CTRL-01
       const sheets = await getSheetsService(ctx.org.orgId);
       await ensureTabsCached(sheets, ctx.org.orgId);
 
@@ -652,6 +656,7 @@ export const billingRouter = router({
       if (!existing) {
         throw new TRPCError({ code: "NOT_FOUND", message: "ไม่พบใบวางบิล" });
       }
+      await assertPeriodOpen(ctx.org.orgId, [existing.DocDate, input.docDate], "แก้ไขใบวางบิล"); // CTRL-01
       // แก้ไขได้ทุกสถานะยกเว้นยกเลิก (เดิมแก้ได้เฉพาะ draft)
       // SALE-19: แต่ห้ามเมื่อออกใบเสร็จ (ใบเสร็จอ่านจากแถวนี้ — แก้แล้วใบที่ลูกค้าถือเปลี่ยน เลขเดิม)
       // หรือมีใบกำกับภาษีที่ออกเลขแล้ว (ยอดใบวางบิล ≠ ใบกำกับ) — ต้องยกเลิกเอกสารนั้นก่อน
@@ -815,6 +820,7 @@ export const billingRouter = router({
       if (!existing) {
         throw new TRPCError({ code: "NOT_FOUND", message: "ไม่พบใบวางบิล" });
       }
+      await assertPeriodOpen(ctx.org.orgId, existing.DocDate, "ยกเลิกใบวางบิล"); // CTRL-01
       if (existing.Status === "void" || existing.Status === "paid") {
         throw new TRPCError({
           code: "PRECONDITION_FAILED",
@@ -887,6 +893,7 @@ export const billingRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       await assertVatAllowed(ctx.org.orgId, input.isVat, "ใบเสร็จรับเงิน"); // DOC-06
+      await assertPeriodOpen(ctx.org.orgId, input.docDate, "ออกใบเสร็จรับเงิน"); // CTRL-01
       const sheets = await getSheetsService(ctx.org.orgId);
       await ensureTabsCached(sheets, ctx.org.orgId);
 
@@ -1070,6 +1077,7 @@ export const billingRouter = router({
       if (!existing || existing.DocKind !== "receipt") {
         throw new TRPCError({ code: "NOT_FOUND", message: "ไม่พบใบเสร็จรับเงิน" });
       }
+      await assertPeriodOpen(ctx.org.orgId, [existing.ReceiptDate || existing.DocDate, input.docDate], "แก้ไขใบเสร็จรับเงิน"); // CTRL-01
       // SALE-13: โหมดรวม (= ใบกำกับภาษี) แก้ไม่ได้ · SALE-01: มีใบกำกับคู่ที่ออกเลขแล้ว → แก้ใบเสร็จฝั่งเดียว
       // จะทำให้ 2 เอกสารไม่ตรงกัน (ภาษีขายนับจากใบกำกับ) — ต้องยกเลิกใบกำกับก่อน แล้วค่อยแก้
       if (ctx.org.googleSpreadsheetId) await invalidateTab(ctx.org.googleSpreadsheetId, SHEET_TABS.TAX_INVOICES);
@@ -1205,6 +1213,15 @@ export const billingRouter = router({
       if (!existing || existing.DocKind !== "receipt") {
         throw new TRPCError({ code: "NOT_FOUND", message: "ไม่พบใบเสร็จรับเงิน" });
       }
+      await assertPeriodOpen(ctx.org.orgId, existing.ReceiptDate || existing.DocDate, "ยกเลิกใบเสร็จรับเงิน"); // CTRL-01
+      // SALE-02: ใบเสร็จ/ใบกำกับ (โหมดรวม) ที่มีใบลด/เพิ่มหนี้ใช้อยู่ → ยกเลิกใบเหล่านั้นก่อน
+      const activeNotes = await activeNotesFor(sheets, input.billingId);
+      if (activeNotes.length > 0) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: `ใบนี้มีใบลด/เพิ่มหนี้ ${activeNotes.join(", ")} — ยกเลิกใบเหล่านั้นก่อน`,
+        });
+      }
       if (existing.Status === "void") {
         return { success: true, voidedTaxInvoice: undefined as string | undefined };
       }
@@ -1289,6 +1306,7 @@ export const billingRouter = router({
       if (!existing || existing.DocKind !== "receipt") {
         throw new TRPCError({ code: "NOT_FOUND", message: "ไม่พบใบเสร็จรับเงิน" });
       }
+      await assertPeriodOpen(ctx.org.orgId, existing.ReceiptDate || existing.DocDate, "ออกใบกำกับภาษีคู่"); // CTRL-01
       if (existing.Status === "void") {
         throw new TRPCError({ code: "PRECONDITION_FAILED", message: "ใบเสร็จรับเงินนี้ถูกยกเลิกแล้ว" });
       }
@@ -1370,6 +1388,7 @@ export const billingRouter = router({
         input.receiptDate ||
         existing.PaidDate ||
         todayBangkok(); // DOC-05
+      await assertPeriodOpen(ctx.org.orgId, receiptDate, "ออกใบเสร็จรับเงิน"); // CTRL-01
       // อ่าน max สด + เขียนเลข ภายใน lock ต่อ org/RC/เดือน (DOC-03)
       const receiptNumber = await withDocNumberLock(ctx.org.orgId, "RC", receiptDate, async () => {
         const no = await computeNextDocNumber(
@@ -1417,6 +1436,7 @@ export const billingRouter = router({
         if (ctx.org.googleSpreadsheetId) await invalidateTab(ctx.org.googleSpreadsheetId, SHEET_TABS.BILLINGS);
         const existing = await sheets.getBillingById(input.billingId);
         if (!existing) throw new TRPCError({ code: "NOT_FOUND", message: "ไม่พบใบวางบิล" });
+        await assertPeriodOpen(ctx.org.orgId, existing.ReceiptDate || existing.PaidDate, "ยกเลิกใบเสร็จรับเงิน"); // CTRL-01
         if (existing.DocKind === "receipt") {
           throw new TRPCError({ code: "BAD_REQUEST", message: "ใบเสร็จที่ออกโดยตรง ยกเลิกที่ปุ่มยกเลิกของใบนั้น" });
         }
@@ -1512,6 +1532,7 @@ export const billingRouter = router({
         }
         const existing = await sheets.getBillingById(input.billingId);
         if (!existing) throw new TRPCError({ code: "NOT_FOUND", message: "ไม่พบใบวางบิล" });
+        await assertPeriodOpen(ctx.org.orgId, [existing.ReceiptDate || existing.PaidDate, input.receiptDate], "แก้วันที่ใบเสร็จ"); // CTRL-01
         if (existing.DocKind === "receipt") {
           throw new TRPCError({ code: "BAD_REQUEST", message: "ใบเสร็จที่ออกโดยตรง แก้ไขได้ที่เมนูใบเสร็จรับเงิน" });
         }

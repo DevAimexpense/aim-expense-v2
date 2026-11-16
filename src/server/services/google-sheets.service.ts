@@ -40,6 +40,7 @@ export const SHEET_TABS = {
   TAX_INVOICES: "TaxInvoices",
   TAX_INVOICE_LINES: "TaxInvoiceLines",
   BANK_STATEMENTS: "BankStatements", // statement ธนาคารรายเดือน (ไฟล์อยู่ใน Drive Reports/ปี/เดือน) — ส่งสำนักงานบัญชี
+  CREDIT_NOTES: "CreditNotes", // SALE-02: ใบลดหนี้/ใบเพิ่มหนี้ (ม.86/9-10) — อ้างใบกำกับภาษีเดิม
 } as const;
 
 // ===== Column Headers per Tab =====
@@ -332,6 +333,44 @@ export const SHEET_HEADERS: Record<string, string[]> = {
     "DiscountPercent",
     "LineTotal",
     "Notes",
+  ],
+  [SHEET_TABS.CREDIT_NOTES]: [
+    "NoteID",
+    "Kind", // credit = ใบลดหนี้ · debit = ใบเพิ่มหนี้
+    "DocNumber", // CN-YYYY-MM-### / DN-YYYY-MM-### (เลขรันต่อเดือน ยกเลิกแล้วเลขไม่กลับมาใช้)
+    "DocDate", // วันที่ออก = งวดภาษีที่ลด/เพิ่มภาษีขาย (ม.82/9-10)
+    "SourceType", // tax_invoice | receipt (ใบเสร็จรับเงิน/ใบกำกับภาษี โหมดรวม)
+    "SourceID",
+    "SourceDocNumber", // เลขที่ใบกำกับเดิม
+    "SourceDocDate", // วันที่ใบกำกับเดิม
+    "OriginalSubtotal", // มูลค่าตามใบกำกับเดิม (ก่อน VAT)
+    "PriorAdjustment", // ปรับไปแล้วโดยใบลด/เพิ่มหนี้ก่อนหน้า (+/−)
+    "CorrectSubtotal", // มูลค่าที่ถูกต้อง (ก่อน VAT)
+    "DiffAmount", // ผลต่าง (บวกเสมอ — ทิศทางตาม Kind)
+    "VATAmount", // ภาษีของผลต่าง
+    "GrandTotal", // ผลต่าง + ภาษี
+    "ReasonCode", // lib/credit-note.ts
+    "Reason", // คำอธิบายเหตุ (บังคับ)
+    "Description", // รายการที่ลด/เพิ่ม
+    "CustomerID",
+    "CustomerNameSnapshot",
+    "CustomerTaxIdSnapshot",
+    "CustomerBranchSnapshot",
+    "CustomerAddressSnapshot",
+    "IssuerBranchSnapshot",
+    "IssuerAddressSnapshot",
+    "EventID",
+    "ProjectName",
+    "Status", // issued | void
+    "VoidedAt",
+    "VoidReason",
+    "PreparedBy",
+    "PreparedByUserId",
+    "CreatedAt",
+    "UpdatedAt",
+    "PdfUrl",
+    "PdfFor",
+    "PdfContentFor",
   ],
   [SHEET_TABS.BANK_STATEMENTS]: [
     "StatementID",

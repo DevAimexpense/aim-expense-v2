@@ -17,6 +17,7 @@ import { safeAuditLog } from "@/server/lib/audit";
 import { materialChanges, statusAfterReapproval } from "@/lib/payment-reapproval";
 import { NON_DEDUCTIBLE_VALUES, resolveNonDeductibleVat } from "@/lib/input-vat-rules";
 import { findDuplicateBills, duplicateWarningText } from "@/lib/duplicate-bill";
+import { assertPeriodOpen, assertPaymentPeriodOpen } from "../lib/period-lock";
 
 const PaymentInputSchema = z.object({
   eventId: z.string().min(1),
@@ -246,6 +247,10 @@ export const paymentRouter = router({
 
       // PM may only record into their assigned events.
       assertPmWriteScope(ctx, { eventId: input.eventId });
+      // CTRL-01: บันทึกค่าใช้จ่ายที่จ่ายแล้ว (เข้ารายงานทันที) ลงงวดที่ปิดแล้วไม่ได้
+      if (input.initialStatus === "paid") {
+        await assertPeriodOpen(ctx.org.orgId, input.paymentDate || todayBangkok(), "บันทึกค่าใช้จ่าย");
+      }
       // PUR-15: ใบรับรองแทนใบเสร็จ (ผู้ขายไม่ออกเอกสาร) ขอคืน VAT ไม่ได้
       if (input.documentType === "substitute_receipt" && input.isVatPayee) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "ใบรับรองแทนใบเสร็จรับเงินไม่มี VAT — ยกเลิกการติ๊ก VAT" });
@@ -371,6 +376,8 @@ export const paymentRouter = router({
       await ensureTabsCached(sheets, ctx.org.orgId); // คอลัมน์ ReapprovalOf/WthTypeId ในชีตเดิม (updateById ข้ามคอลัมน์ที่ไม่มีเงียบ ๆ)
       const existing = await sheets.getById(SHEET_TABS.PAYMENTS, "PaymentID", input.paymentId);
       if (!existing) throw new Error("ไม่พบรายการจ่าย");
+      // CTRL-01: รายการที่จ่ายแล้วในงวดที่ปิด แก้ไม่ได้ (ภาษีซื้อ/ภ.ง.ด. ที่ยื่นแล้วจะเปลี่ยน)
+      await assertPaymentPeriodOpen(ctx.org.orgId, [existing], "แก้ไขรายการ");
 
       // R6 Ownership Gate:
       // - admin / manager → แก้ของใครก็ได้
@@ -557,6 +564,12 @@ export const paymentRouter = router({
       await ensureTabsCached(sheets, ctx.org.orgId); // คอลัมน์ NonDeductibleVat / DuplicateOf ในชีตเดิม
       const existing = await sheets.getById(SHEET_TABS.PAYMENTS, "PaymentID", input.paymentId);
       if (!existing) throw new Error("ไม่พบรายการ");
+      // CTRL-01: แนบ/แก้ใบเสร็จของรายการที่จ่ายแล้ว — ทั้งงวดเดิมและงวดใหม่ต้องยังเปิด
+      await assertPaymentPeriodOpen(
+        ctx.org.orgId,
+        [existing, { ...existing, ReceiptDate: input.receiptDate ?? existing.ReceiptDate }],
+        "แก้ข้อมูลใบเสร็จ",
+      );
       if (existing.Status !== "approved" && existing.Status !== "paid" && existing.Status !== "cleared") {
         throw new Error("บันทึกใบเสร็จได้เฉพาะรายการที่อนุมัติหรือจ่ายแล้ว");
       }
@@ -739,6 +752,7 @@ export const paymentRouter = router({
         const existing = await sheets.getById(SHEET_TABS.PAYMENTS, "PaymentID", id);
         if (!existing) continue;
         if (!CANCELLABLE.includes(existing.Status)) continue;
+        await assertPaymentPeriodOpen(ctx.org.orgId, [existing], "ยกเลิกรายการ"); // CTRL-01
         const ok = await sheets.updateById(SHEET_TABS.PAYMENTS, "PaymentID", id, {
           Status: "cancelled",
           Notes: (existing.Notes || "") + (input.reason ? ` | ยกเลิก: ${input.reason}` : " | ยกเลิกรายการ"),
@@ -775,6 +789,7 @@ export const paymentRouter = router({
       const batchId = input.batchId || GoogleSheetsService.generateId("BATCH");
       // วันที่จ่าย default = "วันนี้" ตามเวลาไทย (ISO/UTC ให้วันก่อนหน้าช่วง 00:00–07:00) DOC-05
       const paymentDate = input.paymentDate || todayBangkok();
+      await assertPeriodOpen(ctx.org.orgId, paymentDate, "บันทึกจ่ายเงิน"); // CTRL-01: วันที่จ่ายย้อนเข้างวดที่ปิดไม่ได้
       let success = 0;
       const paidWithWht: string[] = [];
 
@@ -937,6 +952,7 @@ export const paymentRouter = router({
           "รายการนี้ออกหนังสือรับรองหัก ณ ที่จ่าย (50 ทวิ) แล้ว ลบไม่ได้ — ให้ใช้ \"ยกเลิกรายการ\" แทน เพื่อเก็บเลขที่และหลักฐานไว้",
         );
       }
+      await assertPaymentPeriodOpen(ctx.org.orgId, [existing], "ลบรายการ"); // CTRL-01
 
       // PM may only delete team expenses inside their assigned events.
       assertPmWriteScope(ctx, {

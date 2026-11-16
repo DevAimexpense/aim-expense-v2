@@ -8,7 +8,7 @@
 
 import { createHash } from "crypto";
 
-export type SalesDocKind = "quotation" | "billing" | "tax-invoice" | "receipt";
+export type SalesDocKind = "quotation" | "billing" | "tax-invoice" | "receipt" | "credit-note";
 
 type Row = Record<string, string | undefined>;
 
@@ -57,6 +57,7 @@ const KIND_SKIP: Record<SalesDocKind, Set<string> | undefined> = {
   "tax-invoice": TAX_INVOICE_SKIP,
   quotation: QUOTATION_SKIP,
   receipt: undefined,
+  "credit-note": undefined,
 };
 
 /** คอลัมน์ของรายการสินค้าที่ไม่ได้พิมพ์ */

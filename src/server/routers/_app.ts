@@ -25,6 +25,8 @@ import { affiliateAdminRouter } from "./affiliate-admin.router";
 import { backofficeRouter } from "./backoffice.router";
 import { googleAccessRouter } from "./google-access.router";
 import { statementRouter } from "./statement.router";
+import { creditNoteRouter } from "./creditNote.router";
+import { periodCloseRouter } from "./periodClose.router";
 
 export const appRouter = router({
   event: eventRouter,
@@ -43,6 +45,8 @@ export const appRouter = router({
   quotation: quotationRouter,
   billing: billingRouter,
   taxInvoice: taxInvoiceRouter,
+  creditNote: creditNoteRouter, // SALE-02
+  periodClose: periodCloseRouter, // CTRL-01
   lineGroup: lineGroupRouter,
   affiliate: affiliateRouter,
   affiliateAdmin: affiliateAdminRouter,

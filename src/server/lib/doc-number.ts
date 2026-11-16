@@ -9,13 +9,16 @@ import { invalidateTab } from "./cache";
 import { withLock } from "./lock";
 
 // RC = ใบเสร็จรับเงิน (ออกจากใบวางบิลที่รับเงินครบ — เลขเก็บในคอลัมน์ ReceiptNumber ของ Billings)
-export type DocPrefixType = "QT" | "BIL" | "TI" | "RC";
+// SALE-02: CN = ใบลดหนี้ · DN = ใบเพิ่มหนี้
+export type DocPrefixType = "QT" | "BIL" | "TI" | "RC" | "CN" | "DN";
 
 const CONFIG_KEYS: Record<DocPrefixType, string> = {
   QT: "DOC_PREFIX_QT",
   BIL: "DOC_PREFIX_BIL",
   TI: "DOC_PREFIX_TI",
   RC: "DOC_PREFIX_RC",
+  CN: "DOC_PREFIX_CN",
+  DN: "DOC_PREFIX_DN",
 };
 
 /**
@@ -43,6 +46,8 @@ export async function getAllDocPrefixes(
     BIL: (config[CONFIG_KEYS.BIL] || "BIL").trim() || "BIL",
     TI: (config[CONFIG_KEYS.TI] || "TI").trim() || "TI",
     RC: (config[CONFIG_KEYS.RC] || "RC").trim() || "RC",
+    CN: (config[CONFIG_KEYS.CN] || "CN").trim() || "CN",
+    DN: (config[CONFIG_KEYS.DN] || "DN").trim() || "DN",
   };
 }
 

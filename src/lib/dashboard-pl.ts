@@ -75,6 +75,8 @@ export function computeDashboardPL(params: {
   billings: PlBilling[];
   /** RPT-02: ใบกำกับภาษีที่ออกโดยไม่มีใบวางบิล (จากใบเสนอราคาโดยตรง / สร้างเอง) */
   taxInvoices?: PlTaxInvoice[];
+  /** SALE-02: ใบลดหนี้ (ลดรายได้) / ใบเพิ่มหนี้ (เพิ่มรายได้) ตามวันที่ออกใบ */
+  notes?: { status: string; kind: "credit" | "debit"; docDate: string; eventId: string; diffAmount: number }[];
   /** YYYY-MM · "" = ทั้งหมด */
   month: string;
   /** "all" หรือ EventID */
@@ -128,6 +130,13 @@ export function computeDashboardPL(params: {
     revenueFromTaxInvoices += t.subtotal || 0;
   }
   revenue += revenueFromTaxInvoices;
+  let noteAdjustment = 0;
+  for (const n of params.notes || []) {
+    if (n.status !== "issued") continue;
+    if (!inEvent(n.eventId, eventId) || !inPeriod(n.docDate, month)) continue;
+    noteAdjustment += (n.kind === "debit" ? 1 : -1) * (n.diffAmount || 0);
+  }
+  revenue += noteAdjustment;
 
   let expense = 0;
   let pendingCount = 0;
@@ -152,6 +161,8 @@ export function computeDashboardPL(params: {
     revenue,
     /** RPT-02: ส่วนของรายได้ที่มาจากใบกำกับภาษีที่ไม่มีใบวางบิล (แสดงใต้การ์ด) */
     revenueFromTaxInvoices: round2(revenueFromTaxInvoices),
+    /** SALE-02: ปรับรายได้จากใบลด/เพิ่มหนี้ (+/−) */
+    noteAdjustment: round2(noteAdjustment),
     /** RPT-03: ใบกำกับที่ไม่นับเพราะน่าจะซ้ำกับใบวางบิล/ใบเสร็จ (ควรผูก) */
     possibleDuplicates,
     expense,

@@ -240,6 +240,19 @@ export function TaxInvoiceDetailClient({
             >
               📄 พิมพ์เอกสาร (PDF)
             </a>
+            {/* SALE-02: แก้มูลค่าหลังออกใบกำกับ → ใบลด/เพิ่มหนี้ (ไม่ใช่ยกเลิกแล้วออกใหม่) */}
+            <a
+              href={`/credit-notes/new?kind=credit&sourceType=tax_invoice&sourceId=${taxInvoiceId}`}
+              className="app-btn app-btn-secondary"
+            >
+              ↩️ ออกใบลดหนี้
+            </a>
+            <a
+              href={`/credit-notes/new?kind=debit&sourceType=tax_invoice&sourceId=${taxInvoiceId}`}
+              className="app-btn app-btn-secondary"
+            >
+              ↪️ ออกใบเพิ่มหนี้
+            </a>
             <button
               onClick={() => setShowVoidModal(true)}
               disabled={isLoading}

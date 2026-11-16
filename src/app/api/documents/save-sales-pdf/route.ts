@@ -25,7 +25,7 @@ import { salesDocFingerprint } from "@/server/lib/sales-doc-fingerprint";
 
 export const runtime = "nodejs";
 
-type Kind = "quotation" | "billing" | "tax-invoice" | "receipt";
+type Kind = "quotation" | "billing" | "tax-invoice" | "receipt" | "credit-note";
 
 const KIND: Record<
   Kind,
@@ -45,6 +45,8 @@ const KIND: Record<
   billing: { tab: SHEET_TABS.BILLINGS, idCol: "BillingID", perm: "manageBillings", urlCol: "PdfUrl", forCol: "PdfFor", fpCol: "PdfContentFor", linesTab: SHEET_TABS.BILLING_LINES, label: "ใบวางบิล" },
   "tax-invoice": { tab: SHEET_TABS.TAX_INVOICES, idCol: "TaxInvoiceID", perm: "manageTaxInvoices", urlCol: "PdfUrl", forCol: "PdfFor", fpCol: "PdfContentFor", linesTab: SHEET_TABS.TAX_INVOICE_LINES, label: "ใบกำกับภาษี" },
   receipt: { tab: SHEET_TABS.BILLINGS, idCol: "BillingID", perm: "manageBillings", urlCol: "ReceiptPdfUrl", forCol: "ReceiptPdfFor", fpCol: "ReceiptPdfContentFor", linesTab: SHEET_TABS.BILLING_LINES, label: "ใบเสร็จรับเงิน" },
+  // SALE-02: ใบลด/เพิ่มหนี้ไม่มีแท็บรายการ (linesTab ว่าง = ลายนิ้วมือจากหัวเอกสารอย่างเดียว)
+  "credit-note": { tab: SHEET_TABS.CREDIT_NOTES, idCol: "NoteID", perm: "manageTaxInvoices", urlCol: "PdfUrl", forCol: "PdfFor", fpCol: "PdfContentFor", linesTab: "", label: "ใบลด/เพิ่มหนี้" },
 };
 
 const sanitize = (s: string) =>
@@ -109,7 +111,7 @@ export async function POST(req: NextRequest) {
           if (!current || row[cfg.fpCol]) {
             return { status: 200 as const, body: { success: false, skipped: current ? "has_fingerprint" : "stale" } };
           }
-          const bfLines = (await sheets.getAll(cfg.linesTab)).filter((l) => l[cfg.idCol] === id);
+          const bfLines = cfg.linesTab ? (await sheets.getAll(cfg.linesTab)).filter((l) => l[cfg.idCol] === id) : [];
           await sheets.updateById(cfg.tab, cfg.idCol, id, { [cfg.fpCol]: salesDocFingerprint(kind, row, bfLines) });
           return { status: 200 as const, body: { success: true, backfilled: true } };
         }
@@ -119,7 +121,7 @@ export async function POST(req: NextRequest) {
         }
         // CTRL-10: UpdatedAt เปลี่ยนแต่สิ่งที่พิมพ์บนเอกสารเหมือนเดิม (แนบสลิป/ออกใบเสร็จจากใบวางบิล ฯลฯ)
         // → ใช้ไฟล์เดิม ไม่สร้าง _v2 · จด forCol ใหม่ให้หน้าเว็บเลิกสั่งบันทึก
-        const lines = (await sheets.getAll(cfg.linesTab)).filter((l) => l[cfg.idCol] === id);
+        const lines = cfg.linesTab ? (await sheets.getAll(cfg.linesTab)).filter((l) => l[cfg.idCol] === id) : [];
         const fingerprint = salesDocFingerprint(kind, row, lines);
         if (row[cfg.urlCol] && row[cfg.fpCol] === fingerprint) {
           await sheets.updateById(cfg.tab, cfg.idCol, id, { [cfg.forCol]: versionFor });

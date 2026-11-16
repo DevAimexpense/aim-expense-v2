@@ -66,6 +66,8 @@ export function DashboardClient({
   const paymentsQuery = trpc.payment.list.useQuery(undefined, { enabled: features.pl });
   // RPT-02: ใบกำกับที่ออกโดยไม่มีใบวางบิล (จากใบเสนอราคา/สร้างเอง) ก็เป็นรายได้
   const taxInvoicesQuery = trpc.taxInvoice.list.useQuery(undefined, { enabled: features.pl });
+  // SALE-02: ใบลด/เพิ่มหนี้ ปรับรายได้ตามวันที่ออกใบ
+  const notesQuery = trpc.creditNote.list.useQuery(undefined, { enabled: features.pl });
   const billings = billingsQuery.data || [];
   const quotations = quotationsQuery.data || [];
 
@@ -82,11 +84,12 @@ export function DashboardClient({
         payments: paymentsQuery.data || [],
         billings: billingsQuery.data || [],
         taxInvoices: taxInvoicesQuery.data || [],
+        notes: notesQuery.data || [],
         month: filterMonth,
         eventId: filterEvent,
         vatRegistered,
       }),
-    [paymentsQuery.data, billingsQuery.data, taxInvoicesQuery.data, filterMonth, filterEvent, vatRegistered],
+    [paymentsQuery.data, billingsQuery.data, taxInvoicesQuery.data, notesQuery.data, filterMonth, filterEvent, vatRegistered],
   );
   const totalInvoiced = pl.revenue;
   const totalProfit = pl.profit;

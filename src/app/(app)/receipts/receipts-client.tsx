@@ -334,10 +334,20 @@ export function ReceiptsClient() {
                   {b.status !== "void" && b.taxDocMode === "combined" && (
                     <span
                       style={{ marginRight: "0.375rem", fontSize: "0.75rem", color: "#64748b" }}
-                      title="ใบเสร็จรับเงิน/ใบกำกับภาษี แก้ไขไม่ได้ — ยกเลิก (ระบุเหตุผล) แล้วออกใบใหม่"
+                      title="ใบเสร็จรับเงิน/ใบกำกับภาษี แก้ไขไม่ได้ — ยกเลิก (ระบุเหตุผล) แล้วออกใบใหม่ หรือออกใบลด/เพิ่มหนี้"
                     >
                       🔒 ใบกำกับภาษี
                     </span>
+                  )}
+                  {/* SALE-02: แก้มูลค่าใบเสร็จ/ใบกำกับ (โหมดรวม) หลังออก → ใบลด/เพิ่มหนี้ */}
+                  {b.docKind === "receipt" && b.status !== "void" && b.taxDocMode === "combined" && (
+                    <Link
+                      href={`/credit-notes/new?kind=credit&sourceType=receipt&sourceId=${encodeURIComponent(b.billingId)}`}
+                      className="app-btn app-btn-secondary app-btn-sm"
+                      style={{ marginRight: "0.375rem" }}
+                    >
+                      ↩️ ลด/เพิ่มหนี้
+                    </Link>
                   )}
                   {b.docKind === "receipt" && b.status !== "void" && b.taxDocMode !== "combined" && (
                     <Link

@@ -28,6 +28,8 @@ import { prisma } from "@/lib/prisma";
 import { safeAuditLog } from "@/server/lib/audit";
 import { replacementNote, withReplacementNote } from "../lib/ti-replacement";
 import { filedVatPeriodWarning } from "../lib/vat-period";
+import { assertPeriodOpen } from "../lib/period-lock";
+import { activeNotesFor } from "./creditNote.router";
 import { linkSourceBlockReason, linkableTaxInvoices, type LinkCandidate } from "../lib/receipt-output-vat";
 
 // ===== Schemas =====
@@ -525,6 +527,7 @@ export const taxInvoiceRouter = router({
       await assertVatAllowed(ctx.org.orgId, true, "ใบกำกับภาษี"); // DOC-06
 
       const docDate = existing.DocDate || todayBangkok();
+      await assertPeriodOpen(ctx.org.orgId, docDate, "ออกเลขใบกำกับภาษี"); // CTRL-01
       // Sequential numbering — นับ issued **และ void** (เลขที่ยกเลิกต้องคงอยู่ในลำดับตามกฎสรรพากร
       // ห้ามนำกลับมาใช้ซ้ำ — DOC-01) · ข้าม draft (ยังไม่มีเลข)
       // อ่าน max สด + เขียน ภายใน lock ต่อ org/ประเภท/เดือน กันเลขชนเมื่อออกพร้อมกัน (DOC-03)
@@ -596,6 +599,15 @@ export const taxInvoiceRouter = router({
         throw new TRPCError({
           code: "PRECONDITION_FAILED",
           message: "ลบ draft แทนการยกเลิกได้เลย — void สำหรับใบที่ออกเลขแล้วเท่านั้น",
+        });
+      }
+      await assertPeriodOpen(ctx.org.orgId, existing.DocDate, "ยกเลิกใบกำกับภาษี"); // CTRL-01
+      // SALE-02: มีใบลด/เพิ่มหนี้ที่ใช้อยู่ → ต้องยกเลิกใบเหล่านั้นก่อน (ไม่งั้นอ้างใบกำกับที่ไม่มีผลแล้ว)
+      const activeNotes = await activeNotesFor(sheets, input.taxInvoiceId);
+      if (activeNotes.length > 0) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: `ใบกำกับนี้มีใบลด/เพิ่มหนี้ ${activeNotes.join(", ")} — ยกเลิกใบเหล่านั้นก่อน`,
         });
       }
 
@@ -715,6 +727,8 @@ export const taxInvoiceRouter = router({
         const doc = await sheets.getBillingById(input.billingId);
         const block = linkSourceBlockReason(ti, doc, tis);
         if (block) throw new TRPCError({ code: "PRECONDITION_FAILED", message: block });
+        // CTRL-01: ผูกแล้วยอดภาษีขายของทั้งสองเดือนเปลี่ยน
+        await assertPeriodOpen(ctx.org.orgId, [ti!.DocDate, doc!.ReceiptDate || doc!.DocDate], "ผูกใบกำกับภาษี");
         await sheets.updateById(SHEET_TABS.TAX_INVOICES, "TaxInvoiceID", input.taxInvoiceId, {
           SourceBillingID: input.billingId,
         });

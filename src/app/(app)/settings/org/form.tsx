@@ -7,6 +7,7 @@ import { imageFileToDataUrl } from "@/lib/utils/image-to-dataurl";
 import { CompanyBanksSection } from "./company-banks-section";
 import { BranchesSection } from "./branches-section";
 import { DocPrefixSection } from "./doc-prefix-section";
+import { PeriodCloseSection } from "./period-close-section";
 
 interface Props {
   org: {
@@ -572,6 +573,11 @@ export function OrgSettingsForm({
 
           <div style={{ marginTop: "1rem" }}>
             <DocPrefixSection isAdmin={isAdmin} />
+          </div>
+
+          {/* CTRL-01: ปิดงวดบัญชี — เจ้าของ + ผู้ได้รับมอบสิทธิ์ */}
+          <div style={{ marginTop: "1rem" }}>
+            <PeriodCloseSection />
           </div>
 
           <div className="app-card" style={{ marginTop: "1rem" }}>

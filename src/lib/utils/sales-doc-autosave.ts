@@ -11,7 +11,7 @@
 
 import { useEffect, useState } from "react";
 
-export type SalesDocKind = "quotation" | "billing" | "tax-invoice" | "receipt";
+export type SalesDocKind = "quotation" | "billing" | "tax-invoice" | "receipt" | "credit-note";
 
 /** สร้าง PDF จากทุก .doc-page ในหน้า (A4) → Blob */
 export async function buildDocPagesPdf(): Promise<Blob> {

@@ -124,6 +124,15 @@ const NAV_GROUPS: NavGroup[] = [
         permission: "manageTaxInvoices",
         companyOnly: true,
       },
+      {
+        // SALE-02: ใบลดหนี้/ใบเพิ่มหนี้ (ม.86/9-10)
+        label: "ใบลดหนี้ / ใบเพิ่มหนี้",
+        feature: "revenueModule",
+        href: "/credit-notes",
+        icon: "↩️",
+        permission: "manageTaxInvoices",
+        companyOnly: true,
+      },
     ],
   },
   {
