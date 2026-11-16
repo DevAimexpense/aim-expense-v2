@@ -57,6 +57,30 @@ export function triggerBackgroundDocGen(
     }
 
     const tag = `[auto-gen ${docType} ${paymentId}]`;
+
+    // 50 ทวิ = vector PDF สร้างบน server → บันทึกผ่าน endpoint ตรง ๆ (ไม่ต้องเปิด iframe)
+    // server ก็บันทึกเองหลัง mutation อยู่แล้ว — lock ต่อรายการกันไฟล์ซ้ำ
+    if (docType === "wht-cert") {
+      onProgress?.("started");
+      onProgress?.("uploading");
+      fetch(`/api/documents/wht-cert/${encodeURIComponent(paymentId)}/save`, { method: "POST" })
+        .then(async (res) => {
+          const d = (await res.json().catch(() => ({}))) as { success?: boolean; fileUrl?: string; error?: string };
+          if (res.ok && d.success) {
+            onProgress?.("done", { fileUrl: d.fileUrl });
+            resolve({ success: true, fileUrl: d.fileUrl });
+          } else {
+            onProgress?.("error", { message: d.error });
+            resolve({ success: false, error: d.error || `HTTP ${res.status}` });
+          }
+        })
+        .catch((e) => {
+          onProgress?.("error", { message: String(e) });
+          resolve({ success: false, error: String(e) });
+        });
+      return;
+    }
+
     console.log(`${tag} creating iframe...`);
     onProgress?.("started");
 

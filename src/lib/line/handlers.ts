@@ -50,6 +50,7 @@ import {
   SHEET_TABS,
 } from "@/server/services/google-sheets.service";
 import { getSheetsService, getDriveService } from "@/server/lib/sheets-context";
+import { autoSaveWhtCert } from "@/server/lib/wht-cert-pdf";
 import { calculatePayment } from "@/lib/calculations";
 import { safeAuditLog } from "@/server/lib/audit";
 
@@ -1368,6 +1369,12 @@ async function writeDraftToSheets(
     amount: gttlAmount,
     projectName: eventName || "ไม่ระบุ",
   });
+
+  // spec: 50 ทวิ บันทึกลง Drive อัตโนมัติ — ทาง LINE ไม่มีเบราว์เซอร์จึงต้องทำที่ server
+  // (หลังแจ้งผู้ใช้แล้ว ไม่ให้ข้อความ "บันทึกแล้ว" ช้า · ไม่ throw · ข้ามเองถ้าไม่มี WHT/วันที่)
+  if ((calc.wthAmount || 0) > 0) {
+    await autoSaveWhtCert({ orgId: draft.orgId, paymentId, userId: draft.userId });
+  }
 }
 
 /**

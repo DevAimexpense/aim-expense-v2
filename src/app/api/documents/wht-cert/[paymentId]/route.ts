@@ -8,7 +8,7 @@ import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session";
 import { getOrgContext } from "@/lib/auth/middleware";
 import { loadWhtCertData, WhtCertNoDateError } from "@/server/lib/wht-cert-data";
-import { generateWhtCertPdf } from "@/lib/wht-cert/generate";
+import { buildWhtCertPdf } from "@/server/lib/wht-cert-pdf";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -36,31 +36,7 @@ export async function GET(
     if (!data) {
       return NextResponse.json({ error: "ไม่พบรายการ" }, { status: 404 });
     }
-    const withBranch = (name: string, branch: string) =>
-      branch ? `${name} (${branch})` : name;
-    const bytes = await generateWhtCertPdf({
-      bookNo: data.docNumber.book,
-      docNo: data.docNumber.number,
-      // ลำดับที่ในแบบ ภ.ง.ด. = ลำดับ running ของเดือน (ส่วนท้ายของเลขที่เอกสาร)
-      sequenceNo: String(parseInt(data.docNumber.number.split("/")[1] || "1", 10) || 1),
-      pndForm: data.pndForm,
-      payer: {
-        name: withBranch(data.payer.name, data.payer.branchInfo),
-        taxId: data.payer.taxId,
-        address: data.payer.address || "",
-        signatureUrl: data.payer.signatureUrl,
-      },
-      payee: {
-        name: withBranch(data.payee.name, data.payee.branchInfo),
-        taxId: data.payee.taxId,
-        address: data.payee.address || "",
-      },
-      incomeSection: data.incomeSection,
-      incomeNote: [data.incomeLabel, data.payment.description].filter(Boolean).join(" — "),
-      paidDate: data.payment.paymentDate,
-      amount: data.payment.totalBeforeTax,
-      tax: data.payment.wthAmount,
-    });
+    const bytes = await buildWhtCertPdf(data);
 
     const download = new URL(req.url).searchParams.get("download") === "1";
     const filename = `50tawi-${data.docNumber.book}-${data.docNumber.number.replace("/", "-")}.pdf`;

@@ -7,7 +7,7 @@
 // ===========================================
 
 import { useEffect, useRef, useState } from "react";
-import { saveDocumentPdf, runAutoSaveIfRequested } from "@/lib/utils/save-doc-pdf";
+import { runAutoSaveIfRequested } from "@/lib/utils/save-doc-pdf";
 import { todayBangkok } from "@/lib/utils/date";
 
 interface WthCertProps {
@@ -28,6 +28,7 @@ export function WthCertDocument({ paymentId }: WthCertProps) {
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [savedUrl, setSavedUrl] = useState("");
   const [saveError, setSaveError] = useState("");
+  const handleSavePdfRef = useRef<(() => Promise<void>) | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -53,6 +54,9 @@ export function WthCertDocument({ paymentId }: WthCertProps) {
           filename: res.headers.get("x-doc-filename") || "50tawi.pdf",
         };
         setDoc(loaded);
+
+        // spec: บันทึกลง Drive อัตโนมัติ — เปิดหน้านี้ก็บันทึก (หรือได้ลิงก์ไฟล์เดิม) ไม่ต้องกดเอง
+        if (!isAuto) void handleSavePdfRef.current?.();
 
         // Auto-save mode: ?auto=1 → บันทึกลง Drive อัตโนมัติ + postMessage กลับ parent
         await runAutoSaveIfRequested({
@@ -97,6 +101,8 @@ export function WthCertDocument({ paymentId }: WthCertProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  handleSavePdfRef.current = () => handleSavePdf();
+
   // พิมพ์ PDF ตัวจริง (ไม่ใช่ภาพหน้าจอ) — ถ้า browser ไม่ยอมให้สั่งพิมพ์ใน iframe ให้เปิดแท็บใหม่
   const handlePrint = () => {
     try {
@@ -109,19 +115,15 @@ export function WthCertDocument({ paymentId }: WthCertProps) {
     }
   };
 
+  // บันทึกลง Drive ผ่าน server (vector PDF ชุดเดียวกับที่แสดง) — มีไฟล์แล้วได้ลิงก์เดิมกลับมา
   const handleSavePdf = async () => {
-    if (!doc) return;
     setSaveState("saving");
     setSaveError("");
     try {
-      const result = await saveDocumentPdf({
-        selector: ".wth-doc",
-        pdfBlob: doc.blob,
-        paymentId,
-        docType: "wht-cert",
-        docDate: doc.docDate,
-      });
-      setSavedUrl(result.fileUrl);
+      const res = await fetch(`/api/documents/wht-cert/${encodeURIComponent(paymentId)}/save`, { method: "POST" });
+      const d = (await res.json().catch(() => ({}))) as { success?: boolean; fileUrl?: string; error?: string };
+      if (!res.ok || !d.success || !d.fileUrl) throw new Error(d.error || "บันทึกไม่สำเร็จ");
+      setSavedUrl(d.fileUrl);
       setSaveState("saved");
     } catch (e) {
       setSaveError(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ");
@@ -164,7 +166,7 @@ export function WthCertDocument({ paymentId }: WthCertProps) {
               disabled={saveState === "saving" || !doc}
               className="app-btn app-btn-primary"
             >
-              {saveState === "saving" ? "⏳ กำลังบันทึก..." : "💾 บันทึก PDF ลง Drive"}
+              {saveState === "saving" ? "⏳ กำลังบันทึกลง Drive..." : saveState === "error" ? "🔁 ลองบันทึกลง Drive อีกครั้ง" : "💾 บันทึก PDF ลง Drive"}
             </button>
           )}
         </div>

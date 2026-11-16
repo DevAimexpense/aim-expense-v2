@@ -12,6 +12,7 @@ import { calculatePayment } from "@/lib/calculations";
 import { TRPCError } from "@trpc/server";
 import { scopedEventIds } from "@/lib/permissions";
 import { todayBangkok } from "@/lib/utils/date";
+import { autoSaveWhtCert } from "../lib/wht-cert-pdf";
 import { safeAuditLog } from "@/server/lib/audit";
 
 const PaymentInputSchema = z.object({
@@ -323,6 +324,8 @@ export const paymentRouter = router({
         },
       });
 
+      // spec: 50 ทวิ บันทึกลง Drive อัตโนมัติ (ข้ามเองถ้าไม่มี WHT/ยังไม่มีวันที่/มีไฟล์แล้ว — ไม่ throw)
+      await autoSaveWhtCert({ orgId: ctx.org.orgId, paymentId: paymentId, userId: ctx.session.userId, spreadsheetId: ctx.org.googleSpreadsheetId });
       return { success: true, paymentId, calc };
     }),
 
@@ -452,6 +455,8 @@ export const paymentRouter = router({
         },
       });
 
+      // spec: 50 ทวิ บันทึกลง Drive อัตโนมัติ (ข้ามเองถ้าไม่มี WHT/ยังไม่มีวันที่/มีไฟล์แล้ว — ไม่ throw)
+      await autoSaveWhtCert({ orgId: ctx.org.orgId, paymentId: input.paymentId, userId: ctx.session.userId, spreadsheetId: ctx.org.googleSpreadsheetId });
       return { success: true };
     }),
 
@@ -505,6 +510,8 @@ export const paymentRouter = router({
         },
       });
 
+      // spec: 50 ทวิ บันทึกลง Drive อัตโนมัติ (ข้ามเองถ้าไม่มี WHT/ยังไม่มีวันที่/มีไฟล์แล้ว — ไม่ throw)
+      await autoSaveWhtCert({ orgId: ctx.org.orgId, paymentId: input.paymentId, userId: ctx.session.userId, spreadsheetId: ctx.org.googleSpreadsheetId });
       return { success: true };
     }),
 
@@ -644,6 +651,7 @@ export const paymentRouter = router({
       // วันที่จ่าย default = "วันนี้" ตามเวลาไทย (ISO/UTC ให้วันก่อนหน้าช่วง 00:00–07:00) DOC-05
       const paymentDate = input.paymentDate || todayBangkok();
       let success = 0;
+      const paidWithWht: string[] = [];
 
       for (const id of input.paymentIds) {
         const existing = await sheets.getById(SHEET_TABS.PAYMENTS, "PaymentID", id);
@@ -656,7 +664,18 @@ export const paymentRouter = router({
           BatchID: batchId,
           UpdatedAt: now,
         });
-        if (ok) success++;
+        if (ok) {
+          success++;
+          if ((parseFloat(existing.WTHAmount) || 0) > 0) paidWithWht.push(id);
+        }
+      }
+
+      // spec: 50 ทวิ บันทึกลง Drive อัตโนมัติ — ทีละรายการภายในงบเวลา 20 วิ (รายการที่เหลือ
+      // หน้า payment-prep สั่งต่อเอง / เปิดดูเอกสารแล้วบันทึกได้ — lock + อ่านสดกันไฟล์ซ้ำ)
+      const whtDeadline = Date.now() + 20_000;
+      for (const id of paidWithWht) {
+        if (Date.now() > whtDeadline) break;
+        await autoSaveWhtCert({ orgId: ctx.org.orgId, paymentId: id, userId: ctx.session.userId, spreadsheetId: ctx.org.googleSpreadsheetId });
       }
 
       await safeAuditLog({
@@ -769,6 +788,8 @@ export const paymentRouter = router({
         },
       });
 
+      // spec: 50 ทวิ บันทึกลง Drive อัตโนมัติ (ข้ามเองถ้าไม่มี WHT/ยังไม่มีวันที่/มีไฟล์แล้ว — ไม่ throw)
+      await autoSaveWhtCert({ orgId: ctx.org.orgId, paymentId: input.paymentId, userId: ctx.session.userId, spreadsheetId: ctx.org.googleSpreadsheetId });
       return { success: true, actualExpense: input.actualExpense, budgeted: gttl, difference: diff };
     }),
 
