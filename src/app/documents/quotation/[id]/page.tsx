@@ -83,6 +83,7 @@ export default async function QuotationDocumentPage({
         version: header.UpdatedAt || "",
         savedFor: header.PdfFor || "",
         savedUrl: header.PdfUrl || "",
+        savedContentFor: header.PdfContentFor || "", // CTRL-12
         enabled: (header.Status || "draft") !== "draft",
       }}
       org={{

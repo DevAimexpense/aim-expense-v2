@@ -26,6 +26,7 @@ import { todayBangkok } from "@/lib/utils/date";
 import { resolveIssuerBranch } from "../lib/issuer-branch";
 import { prisma } from "@/lib/prisma";
 import { safeAuditLog } from "@/server/lib/audit";
+import { replacementNote, withReplacementNote } from "../lib/ti-replacement";
 
 // ===== Schemas =====
 
@@ -289,6 +290,17 @@ export const taxInvoiceRouter = router({
       );
 
       const issuer = await resolveIssuerBranch(ctx.org.orgId, input.branchId);
+      // SALE-17: สร้างจากเอกสารต้นทางที่เคยมีใบกำกับถูกยกเลิก → อ้างฉบับเดิม
+      const sourceNote =
+        input.sourceBillingId || input.sourceQuotationId
+          ? replacementNote(
+              (await sheets.getAll(SHEET_TABS.TAX_INVOICES)).filter((t) =>
+                input.sourceBillingId
+                  ? t.SourceBillingID === input.sourceBillingId
+                  : t.SourceQuotationID === input.sourceQuotationId,
+              ),
+            )
+          : "";
 
       const now = new Date().toISOString();
 
@@ -317,7 +329,7 @@ export const taxInvoiceRouter = router({
           VATAmount: totals.vatAmount,
           VATIncluded: input.vatIncluded ? "TRUE" : "FALSE",
           GrandTotal: totals.grandTotal,
-          Notes: input.notes || "",
+          Notes: withReplacementNote(input.notes || "", sourceNote),
           PreparedBy: ctx.session.displayName || "",
           PreparedByUserId: ctx.session.userId,
           IssuedAt: "",
@@ -668,9 +680,10 @@ export const taxInvoiceRouter = router({
       if (ctx.org.googleSpreadsheetId) {
         await invalidateTab(ctx.org.googleSpreadsheetId, SHEET_TABS.TAX_INVOICES);
       }
-      const existingTi = (await (await getSheetsService(ctx.org.orgId)).getAll(SHEET_TABS.TAX_INVOICES)).find(
-        (t) => t.SourceBillingID === input.billingId && t.Status !== "void",
+      const sameSourceTis = (await (await getSheetsService(ctx.org.orgId)).getAll(SHEET_TABS.TAX_INVOICES)).filter(
+        (t) => t.SourceBillingID === input.billingId,
       );
+      const existingTi = sameSourceTis.find((t) => t.Status !== "void");
       if (existingTi) {
         return { success: true, taxInvoiceId: existingTi.TaxInvoiceID, existing: true as boolean };
       }
@@ -745,7 +758,8 @@ export const taxInvoiceRouter = router({
           VATAmount: parseFloat(billing.VATAmount) || 0,
           VATIncluded: billing.VATIncluded || "FALSE",
           GrandTotal: parseFloat(billing.GrandTotal) || 0,
-          Notes: billing.Notes || "",
+          // SALE-17: ใบออกแทนฉบับที่ยกเลิก → อ้างเลขฉบับเดิม + เหตุผล
+          Notes: withReplacementNote(billing.Notes || "", replacementNote(sameSourceTis)),
           PreparedBy: ctx.session.displayName || "",
           PreparedByUserId: ctx.session.userId,
           IssuedAt: "",
@@ -818,9 +832,10 @@ export const taxInvoiceRouter = router({
       if (ctx.org.googleSpreadsheetId) {
         await invalidateTab(ctx.org.googleSpreadsheetId, SHEET_TABS.TAX_INVOICES);
       }
-      const existingTi = (await (await getSheetsService(ctx.org.orgId)).getAll(SHEET_TABS.TAX_INVOICES)).find(
-        (t) => t.SourceQuotationID === input.quotationId && t.Status !== "void",
+      const sameSourceTis = (await (await getSheetsService(ctx.org.orgId)).getAll(SHEET_TABS.TAX_INVOICES)).filter(
+        (t) => t.SourceQuotationID === input.quotationId,
       );
+      const existingTi = sameSourceTis.find((t) => t.Status !== "void");
       if (existingTi) {
         return { success: true, taxInvoiceId: existingTi.TaxInvoiceID, existing: true as boolean };
       }
@@ -898,7 +913,8 @@ export const taxInvoiceRouter = router({
           VATAmount: parseFloat(quotation.VATAmount) || 0,
           VATIncluded: quotation.VATIncluded || "FALSE",
           GrandTotal: parseFloat(quotation.GrandTotal) || 0,
-          Notes: quotation.Notes || "",
+          // SALE-17: ใบออกแทนฉบับที่ยกเลิก → อ้างเลขฉบับเดิม + เหตุผล
+          Notes: withReplacementNote(quotation.Notes || "", replacementNote(sameSourceTis)),
           PreparedBy: ctx.session.displayName || "",
           PreparedByUserId: ctx.session.userId,
           IssuedAt: "",

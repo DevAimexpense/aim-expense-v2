@@ -65,10 +65,14 @@ export async function POST(req: NextRequest) {
 
     if (!kind || !(kind in KIND)) return NextResponse.json({ error: "kind ไม่ถูกต้อง" }, { status: 400 });
     if (!/^[A-Za-z0-9._-]{1,80}$/.test(id)) return NextResponse.json({ error: "id ไม่ถูกต้อง" }, { status: 400 });
-    if (!(file instanceof File) || file.type !== "application/pdf") {
-      return NextResponse.json({ error: "ต้องเป็นไฟล์ PDF" }, { status: 400 });
+    // CTRL-12: backfill = จดลายนิ้วมือให้ไฟล์ที่ตรงกับข้อมูลอยู่แล้ว (ไม่ส่งไฟล์ ไม่อัปโหลด)
+    const backfill = formData.get("backfill") === "1";
+    if (!backfill) {
+      if (!(file instanceof File) || file.type !== "application/pdf") {
+        return NextResponse.json({ error: "ต้องเป็นไฟล์ PDF" }, { status: 400 });
+      }
+      if (file.size > 20 * 1024 * 1024) return NextResponse.json({ error: "ไฟล์ใหญ่เกิน 20 MB" }, { status: 400 });
     }
-    if (file.size > 20 * 1024 * 1024) return NextResponse.json({ error: "ไฟล์ใหญ่เกิน 20 MB" }, { status: 400 });
 
     const cfg = KIND[kind];
     // สิทธิ์ + แพ็กเกจเหมือน tRPC ของเอกสารประเภทนั้น (admin ข้ามสิทธิ์ได้ ข้ามแพ็กเกจไม่ได้)
@@ -81,7 +85,7 @@ export async function POST(req: NextRequest) {
 
     const sheets = await getSheetsService(org.orgId);
     await ensureTabsCached(sheets, org.orgId); // คอลัมน์ PdfFor / ReceiptPdfUrl ในชีตเก่า
-    const buffer = Buffer.from(await file.arrayBuffer());
+    const buffer = backfill || !(file instanceof File) ? Buffer.alloc(0) : Buffer.from(await file.arrayBuffer());
 
     const result = await withLock(
       `salesdoc:${org.orgId}:${kind}:${id}`,
@@ -98,6 +102,17 @@ export async function POST(req: NextRequest) {
         if (!docNumber) return { status: 200 as const, body: { success: false, skipped: "no_number" } };
 
         const versionFor = version || row.UpdatedAt || "";
+        // CTRL-12: จดลายนิ้วมือเฉพาะเมื่อไฟล์ใน Drive สร้างจากข้อมูลชุดปัจจุบันจริง (PdfFor = UpdatedAt ล่าสุด)
+        if (backfill) {
+          const current =
+            !!row[cfg.urlCol] && !!row.UpdatedAt && row[cfg.forCol] === row.UpdatedAt && versionFor === row.UpdatedAt;
+          if (!current || row[cfg.fpCol]) {
+            return { status: 200 as const, body: { success: false, skipped: current ? "has_fingerprint" : "stale" } };
+          }
+          const bfLines = (await sheets.getAll(cfg.linesTab)).filter((l) => l[cfg.idCol] === id);
+          await sheets.updateById(cfg.tab, cfg.idCol, id, { [cfg.fpCol]: salesDocFingerprint(kind, row, bfLines) });
+          return { status: 200 as const, body: { success: true, backfilled: true } };
+        }
         // ไม่มีอะไรเปลี่ยนตั้งแต่บันทึกครั้งก่อน → ใช้ไฟล์เดิม
         if (row[cfg.urlCol] && row[cfg.forCol] && row[cfg.forCol] === versionFor) {
           return { status: 200 as const, body: { success: true, fileUrl: row[cfg.urlCol], deduped: true } };

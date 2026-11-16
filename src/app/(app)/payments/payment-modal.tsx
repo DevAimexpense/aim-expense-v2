@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { todayBangkok } from "@/lib/utils/date";
 import { trpc } from "@/lib/trpc/client";
 import { calculatePayment } from "@/lib/calculations";
-import { WTH_TYPES, findWthTypeByRate } from "@/lib/wth-types";
+import { WTH_TYPES, findWthTypeByRate, wthTypeIdToSend } from "@/lib/wth-types";
 import SearchableSelect, { type SearchableSelectOption } from "@/components/searchable-select";
 import DateInput from "@/components/shared/date-input";
 import {
@@ -326,7 +326,14 @@ export function PaymentModal({
         days: form.days,
         numberOfPeople: form.numberOfPeople,
         pctWTH: effectiveWthRate,
-        wthTypeId: effectiveWthRate > 0 ? form.wthTypeId : "", // WHT-19
+        // WHT-19/19b: แก้รายการเก่าที่ไม่ได้เปลี่ยนประเภท → ไม่ส่ง (ไม่บันทึกประเภทที่เดาทับ)
+        wthTypeId: wthTypeIdToSend({
+          isEdit,
+          storedId: payment?.wthTypeId,
+          initialId: initialWthTypeId,
+          chosenId: form.wthTypeId,
+          rate: effectiveWthRate,
+        }),
         isVatPayee: form.isVatPayee,
         dueDate: form.dueDate,
         notes: form.notes.trim() || undefined,

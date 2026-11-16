@@ -88,6 +88,7 @@ export default async function TaxInvoiceDocumentPage({
         version: header.UpdatedAt || "",
         savedFor: header.PdfFor || "",
         savedUrl: header.PdfUrl || "",
+        savedContentFor: header.PdfContentFor || "", // CTRL-12
         enabled: (header.Status || "draft") !== "draft",
       }}
       org={{

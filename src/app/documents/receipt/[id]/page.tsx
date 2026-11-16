@@ -96,6 +96,7 @@ export default async function ReceiptDocumentPage({
         version: header.UpdatedAt || "",
         savedFor: header.ReceiptPdfFor || "",
         savedUrl: header.ReceiptPdfUrl || "",
+        savedContentFor: header.ReceiptPdfContentFor || "", // CTRL-12
         enabled: !!header.ReceiptNumber || header.DocKind === "receipt",
       }}
       org={{

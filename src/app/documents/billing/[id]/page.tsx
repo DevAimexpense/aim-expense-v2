@@ -83,6 +83,7 @@ export default async function BillingDocumentPage({
         version: header.UpdatedAt || "",
         savedFor: header.PdfFor || "",
         savedUrl: header.PdfUrl || "",
+        savedContentFor: header.PdfContentFor || "", // CTRL-12
         // ใบเสร็จออกตรง (DocKind=receipt) เปิดผ่าน /documents/receipt เท่านั้น
         enabled: (header.Status || "draft") !== "draft" && header.DocKind !== "receipt",
       }}

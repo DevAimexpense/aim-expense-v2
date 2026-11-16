@@ -56,10 +56,12 @@ export function useSalesDocAutoSave(params: {
   savedFor: string;
   /** ลิงก์ไฟล์ใน Drive ปัจจุบัน */
   savedUrl: string;
+  /** CTRL-12: ลายนิ้วมือเนื้อหาของไฟล์ปัจจุบัน (ว่าง = ยังไม่เคยจด) */
+  savedContentFor?: string;
   /** ร่าง → ไม่บันทึก */
   enabled: boolean;
 }): { state: SalesDocSaveState; fileUrl: string; error: string } {
-  const { kind, id, version, savedFor, savedUrl, enabled } = params;
+  const { kind, id, version, savedFor, savedUrl, savedContentFor, enabled } = params;
   const upToDate = !!savedUrl && !!savedFor && savedFor === version;
   const [state, setState] = useState<SalesDocSaveState>(upToDate ? "saved" : "idle");
   const [fileUrl, setFileUrl] = useState(savedUrl);
@@ -82,6 +84,20 @@ export function useSalesDocAutoSave(params: {
     }
     if (upToDate) {
       notifyParent(true, { fileUrl: savedUrl });
+      // CTRL-12: ไฟล์ตรงกับข้อมูลแต่ยังไม่มีลายนิ้วมือ (บันทึกก่อนมี CTRL-10) → ให้ server จดไว้
+      // (ไม่สร้าง/อัปโหลดไฟล์) — การเปลี่ยนที่ไม่กระทบหน้าเอกสารครั้งแรกจะได้ไม่เกิด _v2
+      const bfKey = `bf:${kind}:${id}:${version}`;
+      if (!savedContentFor && !started.has(bfKey)) {
+        started.add(bfKey);
+        const fd = new FormData();
+        fd.append("kind", kind);
+        fd.append("id", id);
+        fd.append("version", version);
+        fd.append("backfill", "1");
+        fetch("/api/documents/save-sales-pdf", { method: "POST", body: fd }).catch(() => {
+          /* best-effort */
+        });
+      }
       return;
     }
     const key = `${kind}:${id}:${version}`;

@@ -35,6 +35,30 @@ const COMMON_SKIP = new Set([
 /** ใบวางบิล: เลข/วันที่ใบเสร็จ (ออกทีหลังที่แถวเดียวกัน) ไม่ได้พิมพ์บนใบวางบิล */
 const BILLING_SKIP = new Set(["ReceiptNumber", "ReceiptDate", "VoidReason", "TaxDocMode"]);
 
+/**
+ * CTRL-11: ใบกำกับภาษี — หน้าเอกสารไม่พิมพ์การรับชำระ (taxInvoice.recordPayment)
+ * (ตรวจ documents/tax-invoice/[id]/document.tsx แล้ว) · สถานะยังนับ (ยกเลิก = มีตราประทับ)
+ */
+const TAX_INVOICE_SKIP = new Set([
+  "PaidAmount",
+  "PaidDate",
+  "PaymentMethod",
+  "PaymentWHTPercent",
+  "PaymentWHTAmount",
+  "PaymentAdjustmentAmount",
+  "PaymentAdjustmentNote",
+]);
+
+/** CTRL-11: ใบเสนอราคา — หน้าเอกสารไม่พิมพ์สถานะ (sent/accepted/converted …) */
+const QUOTATION_SKIP = new Set(["Status"]);
+
+const KIND_SKIP: Record<SalesDocKind, Set<string> | undefined> = {
+  billing: BILLING_SKIP,
+  "tax-invoice": TAX_INVOICE_SKIP,
+  quotation: QUOTATION_SKIP,
+  receipt: undefined,
+};
+
 /** คอลัมน์ของรายการสินค้าที่ไม่ได้พิมพ์ */
 const LINE_SKIP = new Set(["LineID", "BillingID", "QuotationID", "TaxInvoiceID"]);
 
@@ -48,7 +72,7 @@ function stable(row: Row, skip: Set<string>, extraSkip?: Set<string>): [string, 
 }
 
 export function salesDocFingerprint(kind: SalesDocKind, header: Row, lines: Row[]): string {
-  const head = stable(header, COMMON_SKIP, kind === "billing" ? BILLING_SKIP : undefined);
+  const head = stable(header, COMMON_SKIP, KIND_SKIP[kind]);
   const body = [...lines]
     .sort((a, b) => (parseInt(a.LineNumber || "0", 10) || 0) - (parseInt(b.LineNumber || "0", 10) || 0))
     .map((l) => stable(l, LINE_SKIP));

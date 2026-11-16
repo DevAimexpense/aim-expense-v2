@@ -91,6 +91,23 @@ export function getWthTypeById(id: string): WthType | undefined {
   return WTH_TYPES.find((t) => t.id === id);
 }
 
+/**
+ * WHT-19b: ค่า wthTypeId ที่จะส่งตอนบันทึกฟอร์มรายการจ่าย
+ * แก้รายการเก่าที่ไม่เคยเก็บประเภท และผู้ใช้ไม่ได้เปลี่ยน dropdown → undefined (ไม่แตะคอลัมน์)
+ * — ไม่งั้น "ประเภทที่เดาจาก %" (เช่น 1% → ค่าขนส่ง) จะถูกบันทึกทับ และ 50 ทวิ ได้ฉบับใหม่โดยไม่จำเป็น
+ */
+export function wthTypeIdToSend(p: {
+  isEdit: boolean;
+  storedId: string | undefined;
+  initialId: string;
+  chosenId: string;
+  rate: number;
+}): string | undefined {
+  if (p.rate <= 0) return p.isEdit && p.storedId ? "" : undefined;
+  if (!p.isEdit || p.storedId || p.chosenId !== p.initialId) return p.chosenId;
+  return undefined;
+}
+
 export function findWthTypeByRate(rate: number): WthType | undefined {
   return WTH_TYPES.find((t) => t.rate === rate && t.id !== "custom" && t.id !== "none") ||
     (rate === 0 ? WTH_TYPES[0] : undefined);

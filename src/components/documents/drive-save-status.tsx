@@ -13,6 +13,8 @@ export interface DriveSaveProps {
   version: string;
   savedFor: string;
   savedUrl: string;
+  /** CTRL-12: ลายนิ้วมือเนื้อหาของไฟล์ปัจจุบัน (ว่าง = เอกสารเก่า ยังไม่เคยจด) */
+  savedContentFor?: string;
   enabled: boolean;
 }
 
