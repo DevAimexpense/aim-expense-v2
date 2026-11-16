@@ -72,6 +72,7 @@ type WhtPaymentRow = {
   GeneratedDocUrl?: string;
   GeneratedDocType?: string;
   WhtCertFor?: string;
+  WthTypeId?: string;
 };
 
 /**
@@ -80,9 +81,13 @@ type WhtPaymentRow = {
  * (ชื่อ/ที่อยู่ในทะเบียนผู้รับเงินไม่อยู่ในนี้ — แก้ทะเบียนแล้วเปิดหน้า 50 ทวิ จะเห็นฉบับใหม่ แต่ไฟล์ใน Drive คงเดิม)
  */
 export function whtCertSignature(p: WhtPaymentRow): string {
-  return [p.WTHAmount, p.PctWTH, p.TTLAmount, p.PayeeID, p.PaymentDate, p.ReceiptDate, p.Description]
+  const base = [p.WTHAmount, p.PctWTH, p.TTLAmount, p.PayeeID, p.PaymentDate, p.ReceiptDate, p.Description]
     .map((v) => String(v ?? "").trim())
     .join("|");
+  // WHT-19: ประเภทเงินได้พิมพ์บนใบ → เปลี่ยนประเภท = ฉบับใหม่ · ต่อท้ายเฉพาะเมื่อมีค่า
+  // (แถวเก่าที่ไม่มี WthTypeId ได้ลายนิ้วมือเดิม → ไม่เกิด _v2 ทั้งชีตหลัง deploy)
+  const typeId = String(p.WthTypeId ?? "").trim();
+  return typeId ? `${base}|${typeId}` : base;
 }
 
 export function whtAutoSaveSkipReason(payment: WhtPaymentRow): "no_wht" | "not_paid" | "exists" | "other_doc" | null {

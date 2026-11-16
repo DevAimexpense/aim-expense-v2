@@ -300,6 +300,16 @@ export class GoogleDriveService {
     let fileName = params.fileName;
     if (params.existingUrl) {
       const base = params.fileName.replace(/\.pdf$/i, "");
+      // DOC-05: วันที่เอกสารย้ายข้ามเดือน → ย้ายฉบับก่อน ๆ (เนื้อไฟล์/ชื่อ/ลิงก์เดิม) มาไว้เดือนใหม่ด้วย
+      // ไม่ให้ใบเดียวกันค้างอยู่ 2 เดือน (สนง.บัญชีรวบเอกสารรายเดือน) · ย้ายไม่ได้ → ข้าม (ไม่ล้มการบันทึก)
+      const prevId = GoogleDriveService.fileIdFromUrl(params.existingUrl);
+      if (prevId) {
+        try {
+          await this.moveVersionsToFolder(prevId, base, monthFolderId);
+        } catch (err) {
+          console.warn("[drive] move previous versions failed — keep in old month", err);
+        }
+      }
       let maxSeen = 1; // ไฟล์เดิมนับเป็นเวอร์ชัน 1
       try {
         const q = `'${monthFolderId}' in parents and trashed=false and name contains '${base.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`;
@@ -325,6 +335,38 @@ export class GoogleDriveService {
 
     const result = await this.uploadFile(monthFolderId, fileName, "application/pdf", params.fileBuffer);
     return { ...result, fileName, folderPath, version };
+  }
+
+  /** file id จากลิงก์ Drive (…/d/<id>/view หรือ ?id=<id>) */
+  static fileIdFromUrl(url: string): string | null {
+    const m = /\/d\/([A-Za-z0-9_-]{10,})/.exec(url) || /[?&]id=([A-Za-z0-9_-]{10,})/.exec(url);
+    return m ? m[1] : null;
+  }
+
+  /**
+   * DOC-05: ย้ายไฟล์ฉบับเดิม (prevId) + ฉบับก่อนหน้าในโฟลเดอร์เดียวกันที่ชื่อขึ้นต้นด้วย base
+   * ไปโฟลเดอร์ปลายทาง — ย้ายเท่านั้น ไม่แก้เนื้อไฟล์/ชื่อ (ลิงก์ที่ส่งให้ลูกค้ายังใช้ได้)
+   */
+  private async moveVersionsToFolder(prevId: string, base: string, targetFolderId: string): Promise<void> {
+    const prev = await this.drive.files.get({ fileId: prevId, fields: "id,parents", supportsAllDrives: true });
+    const parents = prev.data.parents || [];
+    if (parents.length === 0 || parents.includes(targetFolderId)) return;
+    const oldFolderId = parents[0];
+    const ids = new Set<string>([prevId]);
+    const q = `'${oldFolderId}' in parents and trashed=false and name contains '${base.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`;
+    const res = await this.drive.files.list({ q, fields: "files(id,name)", pageSize: 100 });
+    for (const f of res.data.files || []) {
+      if (f.id && (f.name || "").startsWith(base)) ids.add(f.id);
+    }
+    for (const fileId of ids) {
+      await this.drive.files.update({
+        fileId,
+        addParents: targetFolderId,
+        removeParents: oldFolderId,
+        fields: "id",
+        supportsAllDrives: true,
+      });
+    }
   }
 
   /**

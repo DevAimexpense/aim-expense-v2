@@ -435,6 +435,7 @@ export function UploadInvoiceModal({
           days,
           numberOfPeople,
           pctWTH: effectiveWthRate,
+          wthTypeId: effectiveWthRate > 0 ? form.wthTypeId : undefined, // WHT-19
           isVatPayee: form.hasVat,
           vatAmount: form.hasVat && vatFromInvoice != null ? vatFromInvoice : undefined,
         });
@@ -454,6 +455,7 @@ export function UploadInvoiceModal({
             days: 1,
             numberOfPeople: 1,
             pctWTH: itemWthRate,
+            wthTypeId: itemWthRate > 0 ? item.wthTypeId : undefined, // WHT-19
             isVatPayee: item.hasVat,
           });
           if (i === 0) firstPaymentId = result.paymentId;

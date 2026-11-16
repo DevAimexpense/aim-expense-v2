@@ -26,6 +26,8 @@ const PaymentInputSchema = z.object({
   days: z.number().min(1).default(1),
   numberOfPeople: z.number().min(1).default(1),
   pctWTH: z.number().min(0).max(100).default(0),
+  // WHT-19: ประเภทหัก ณ ที่จ่ายที่เลือก (id ใน lib/wth-types) — ใช้พิมพ์ประเภทเงินได้บน 50 ทวิ
+  wthTypeId: z.string().max(40).optional(),
   isVatPayee: z.boolean().default(false),
   // PUR-02: VAT ตามใบกำกับจริง (ไม่ส่ง = 7% ของฐาน)
   vatAmount: z.number().min(0).optional(),
@@ -67,6 +69,7 @@ function toPaymentRow(payment: Record<string, string>) {
     numberOfPeople: parseInt(payment.NoOfPPL || "1", 10) || 1,
     ttlAmount: ttl,
     pctWTH: parseFloat(payment.PctWTH) || 0,
+    wthTypeId: payment.WthTypeId || "",
     wthAmount: wth,
     vatAmount: vat,
     gttlAmount: gttl,
@@ -286,6 +289,7 @@ export const paymentRouter = router({
         NoOfPPL: input.numberOfPeople,
         TTLAmount: calc.ttlAmount,
         PctWTH: input.pctWTH,
+        WthTypeId: input.pctWTH > 0 ? input.wthTypeId || "" : "",
         WTHAmount: calc.wthAmount,
         VATAmount: calc.vatAmount,
         GTTLAmount: calc.gttlAmount,
@@ -429,6 +433,7 @@ export const paymentRouter = router({
         if (input.numberOfPeople !== undefined) updates.NoOfPPL = input.numberOfPeople;
         if (input.pctWTH !== undefined) updates.PctWTH = input.pctWTH;
       }
+      if (input.wthTypeId !== undefined) updates.WthTypeId = input.wthTypeId;
 
       if (input.eventId !== undefined) updates.EventID = input.eventId;
       if (input.payeeId !== undefined) updates.PayeeID = input.payeeId;

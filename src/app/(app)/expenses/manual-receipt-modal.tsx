@@ -336,6 +336,7 @@ export function ManualReceiptModal({ events, payees, onClose, onSuccess, attachT
           description: form.description.trim() || form.vendorName.trim() || "ค่าใช้จ่าย",
           costPerUnit: Math.round(costPerUnit * 100) / 100, days: 1, numberOfPeople: 1,
           pctWTH: effectiveWthRate, isVatPayee: form.hasVat,
+          wthTypeId: effectiveWthRate > 0 ? form.wthTypeId : undefined, // WHT-19
           initialStatus: "paid",
           ...taxFields,
         });

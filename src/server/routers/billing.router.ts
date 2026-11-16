@@ -8,7 +8,7 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { router, featureProcedure, createCallerFactory, type TRPCContext } from "../trpc";
 import { taxInvoiceRouter } from "./taxInvoice.router";
-import { receiptVoidPlan } from "../lib/receipt-output-vat";
+import { receiptVoidPlan, receiptEditBlockReason, nextReceiptTaxDocMode } from "../lib/receipt-output-vat";
 import { getSheetsService, ensureTabsCached } from "../lib/sheets-context";
 import {
   GoogleSheetsService,
@@ -194,8 +194,27 @@ function shapeHeader(r: Record<string, string>) {
     docKind: (r.DocKind === "receipt" ? "receipt" : "billing") as
       | "billing"
       | "receipt",
+    // SALE-01: วิธีออกเอกสารภาษีที่ snapshot ไว้บนใบเสร็จออกตรง ("" = ไม่มี VAT / ใบเก่า)
+    taxDocMode: (r.TaxDocMode === "combined" || r.TaxDocMode === "separate" ? r.TaxDocMode : "") as
+      | ""
+      | "combined"
+      | "separate",
+    voidReason: r.VoidReason || "",
   };
 }
+
+/** ลบใบกำกับภาษีคู่ที่ยังเป็นร่าง (ยังไม่มีเลข = ไม่มีผลทางภาษี) — ใช้ตอนแก้/ยกเลิกใบเสร็จ (SALE-14/15) */
+async function deleteDraftPairedTaxInvoices(
+  sheets: GoogleSheetsService,
+  drafts: Record<string, string>[],
+): Promise<void> {
+  for (const ti of drafts) {
+    if (ti.Status !== "draft") continue;
+    await sheets.deleteById(SHEET_TABS.TAX_INVOICES, "TaxInvoiceID", ti.TaxInvoiceID);
+    await sheets.deleteRowsWhere(SHEET_TABS.TAX_INVOICE_LINES, "TaxInvoiceID", ti.TaxInvoiceID);
+  }
+}
+
 
 function shapeLine(r: Record<string, string>) {
   return {
@@ -979,22 +998,15 @@ export const billingRouter = router({
       if (!existing || existing.DocKind !== "receipt") {
         throw new TRPCError({ code: "NOT_FOUND", message: "ไม่พบใบเสร็จรับเงิน" });
       }
-      if (existing.Status === "void") {
-        throw new TRPCError({
-          code: "PRECONDITION_FAILED",
-          message: "ใบเสร็จรับเงินนี้ถูกยกเลิกแล้ว แก้ไขไม่ได้",
-        });
-      }
-      // SALE-01: มีใบกำกับภาษีคู่ที่ออกเลขแล้ว → แก้ยอด/ลูกค้าที่ใบเสร็จฝั่งเดียวจะทำให้ 2 เอกสารไม่ตรงกัน
-      // (ภาษีขายนับจากใบกำกับ) — ต้องยกเลิกใบกำกับก่อน แล้วค่อยแก้
-      const pairedTi = (await sheets.getAll(SHEET_TABS.TAX_INVOICES)).find(
-        (t) => t.SourceBillingID === input.billingId && t.Status === "issued",
+      // SALE-13: โหมดรวม (= ใบกำกับภาษี) แก้ไม่ได้ · SALE-01: มีใบกำกับคู่ที่ออกเลขแล้ว → แก้ใบเสร็จฝั่งเดียว
+      // จะทำให้ 2 เอกสารไม่ตรงกัน (ภาษีขายนับจากใบกำกับ) — ต้องยกเลิกใบกำกับก่อน แล้วค่อยแก้
+      if (ctx.org.googleSpreadsheetId) await invalidateTab(ctx.org.googleSpreadsheetId, SHEET_TABS.TAX_INVOICES);
+      const pairedTis = (await sheets.getAll(SHEET_TABS.TAX_INVOICES)).filter(
+        (t) => t.SourceBillingID === input.billingId,
       );
-      if (pairedTi) {
-        throw new TRPCError({
-          code: "PRECONDITION_FAILED",
-          message: `ใบเสร็จนี้มีใบกำกับภาษีคู่ ${pairedTi.DocNumber} แล้ว — แก้ไขไม่ได้ ให้ยกเลิกใบกำกับภาษีก่อน (หรือออกใบลดหนี้/เพิ่มหนี้)`,
-        });
+      const blocked = receiptEditBlockReason(existing, pairedTis);
+      if (blocked) {
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message: blocked });
       }
       const customer = await sheets.getCustomerById(input.customerId);
       if (!customer) {
@@ -1008,8 +1020,25 @@ export const billingRouter = router({
         input.whtPercent,
         input.isVat
       );
+      // SALE-14: แก้จากไม่มี VAT → มี VAT ต้องได้โหมดตามตั้งค่าองค์กร (snapshot ครั้งแรกที่เป็นเอกสารภาษี)
+      // · แก้เป็นไม่มี VAT → ล้างโหมด · ใบกำกับคู่ที่เป็นร่าง (ยอดเก่า) ลบทิ้ง แล้วออกใหม่จากยอดล่าสุด
+      const hasVatNow = input.isVat && totals.vatAmount > 0;
+      const hadVatBefore = existing.IsVAT !== "FALSE" && (parseFloat(existing.VATAmount) || 0) > 0;
+      const taxDocMode = nextReceiptTaxDocMode(
+        existing.TaxDocMode || "",
+        hasVatNow,
+        hadVatBefore,
+        hasVatNow && !hadVatBefore && !existing.TaxDocMode
+          ? readReceiptMode(
+              (await prisma.organization.findUnique({ where: { id: ctx.org.orgId }, select: { settings: true } }))
+                ?.settings,
+            )
+          : "separate",
+      );
+      await deleteDraftPairedTaxInvoices(sheets, pairedTis);
 
       await sheets.updateById(SHEET_TABS.BILLINGS, "BillingID", input.billingId, {
+        TaxDocMode: taxDocMode,
         DocDate: input.docDate,
         DueDate: input.docDate,
         CustomerID: customer.CustomerID,
@@ -1067,12 +1096,23 @@ export const billingRouter = router({
         },
       });
 
-      return {
-        success: true,
-        billingId: input.billingId,
-        // ย้าย DocDate ข้ามเดือนหลังมีเลขแล้ว: คงเลขเดิม แต่เตือนผู้ใช้ (DOC-07)
-        warning: monthMoveWarning(existing.DocDate, input.docDate, existing.ReceiptNumber || existing.DocNumber),
-      };
+      // SALE-14: โหมดแยก → ออกใบกำกับภาษีคู่จากยอดล่าสุด (ใบเดิมถูกยกเลิก/ร่างถูกลบไปแล้ว)
+      let taxInvoiceId: string | undefined;
+      let taxInvoiceNumber: string | undefined;
+      let pairedWarning: string | undefined;
+      if (taxDocMode === "separate") {
+        const paired = await issuePairedTaxInvoice(ctx, input.billingId, input.docDate, customer);
+        taxInvoiceId = paired.taxInvoiceId;
+        taxInvoiceNumber = paired.docNumber;
+        pairedWarning = paired.warning;
+      }
+
+      // ย้าย DocDate ข้ามเดือนหลังมีเลขแล้ว: คงเลขเดิม แต่เตือนผู้ใช้ (DOC-07)
+      const warning =
+        [monthMoveWarning(existing.DocDate, input.docDate, existing.ReceiptNumber || existing.DocNumber), pairedWarning]
+          .filter(Boolean)
+          .join("\n\n") || undefined;
+      return { success: true, billingId: input.billingId, taxInvoiceId, taxInvoiceNumber, warning };
     }),
 
   /** ยกเลิกใบเสร็จรับเงินที่ออกโดยตรง (เลขที่ยังคงอยู่ ไม่นำกลับมาใช้ซ้ำ) */
@@ -1107,13 +1147,20 @@ export const billingRouter = router({
       }
 
       const tiCaller = createCallerFactory(taxInvoiceRouter)(ctx);
+      // SALE-15: ร่าง (ยังไม่มีเลข) ไม่มีผลทางภาษี → ลบตรง ไม่ต้องใช้สิทธิ์ใบกำกับภาษี
+      // · ที่ออกเลขแล้วต้องยกเลิกผ่าน taxInvoice.void (สิทธิ์ manageTaxInvoices) เท่านั้น
+      try {
+        await deleteDraftPairedTaxInvoices(sheets, pairedTis);
+      } catch (e) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: `ลบใบกำกับภาษีคู่ (ร่าง) ไม่สำเร็จ — ใบเสร็จยังไม่ถูกยกเลิก: ${e instanceof Error ? e.message : String(e)}`,
+        });
+      }
       for (const ti of pairedTis) {
+        if (ti.Status !== "issued") continue;
         try {
-          if (ti.Status === "issued") {
-            await tiCaller.void({ taxInvoiceId: ti.TaxInvoiceID, reason: `${reason} (ยกเลิกพร้อมใบเสร็จ ${receiptNo})` });
-          } else {
-            await tiCaller.delete({ taxInvoiceId: ti.TaxInvoiceID });
-          }
+          await tiCaller.void({ taxInvoiceId: ti.TaxInvoiceID, reason: `${reason} (ยกเลิกพร้อมใบเสร็จ ${receiptNo})` });
         } catch (e) {
           const forbidden = e instanceof TRPCError && e.code === "FORBIDDEN";
           throw new TRPCError({
@@ -1141,6 +1188,53 @@ export const billingRouter = router({
         },
       });
       return { success: true, voidedTaxInvoice: issuedTi?.DocNumber };
+    }),
+
+  /**
+   * SALE-14: ออกใบกำกับภาษีคู่ให้ใบเสร็จออกตรงโหมดแยกที่ยังไม่มีใบกำกับที่ออกเลขแล้ว
+   * (ตอนออกใบเสร็จลูกค้ายังไม่มีเลขผู้เสียภาษี / ยกเลิกใบกำกับคู่เพื่อแก้ใบเสร็จ ฯลฯ)
+   * ลงวันที่เดียวกับใบเสร็จ (จุดความรับผิด ม.78/1) · ร่างเก่าถูกลบแล้วสร้างใหม่จากยอดล่าสุด
+   */
+  issueReceiptTaxInvoice: featureProcedure("revenueModule", "manageBillings")
+    .input(z.object({ billingId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const sheets = await getSheetsService(ctx.org.orgId);
+      await ensureTabsCached(sheets, ctx.org.orgId);
+      const existing = await sheets.getBillingById(input.billingId);
+      if (!existing || existing.DocKind !== "receipt") {
+        throw new TRPCError({ code: "NOT_FOUND", message: "ไม่พบใบเสร็จรับเงิน" });
+      }
+      if (existing.Status === "void") {
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message: "ใบเสร็จรับเงินนี้ถูกยกเลิกแล้ว" });
+      }
+      if (existing.TaxDocMode !== "separate" || existing.IsVAT === "FALSE" || !((parseFloat(existing.VATAmount) || 0) > 0)) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "ใบเสร็จนี้ไม่ได้ออกแบบแยกใบกำกับภาษี (ไม่มี VAT หรือเป็นใบเสร็จรับเงิน/ใบกำกับภาษีอยู่แล้ว)",
+        });
+      }
+      return withLock(`receipt-ti:${ctx.org.orgId}:${input.billingId}`, async () => {
+        if (ctx.org.googleSpreadsheetId) await invalidateTab(ctx.org.googleSpreadsheetId, SHEET_TABS.TAX_INVOICES);
+        const pairedTis = (await sheets.getAll(SHEET_TABS.TAX_INVOICES)).filter(
+          (t) => t.SourceBillingID === input.billingId,
+        );
+        const issued = pairedTis.find((t) => t.Status === "issued");
+        if (issued) {
+          return { success: true, taxInvoiceId: issued.TaxInvoiceID, taxInvoiceNumber: issued.DocNumber, existing: true };
+        }
+        const customer = await sheets.getCustomerById(existing.CustomerID);
+        if (!customer) throw new TRPCError({ code: "NOT_FOUND", message: "ไม่พบลูกค้า" });
+        await deleteDraftPairedTaxInvoices(sheets, pairedTis);
+        const docDate = (existing.ReceiptDate || existing.DocDate || "").slice(0, 10) || todayBangkok();
+        const paired = await issuePairedTaxInvoice(ctx, input.billingId, docDate, customer);
+        if (!paired.docNumber) {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: (paired.warning || "ออกใบกำกับภาษีคู่ไม่สำเร็จ").split("\n")[0],
+          });
+        }
+        return { success: true, taxInvoiceId: paired.taxInvoiceId, taxInvoiceNumber: paired.docNumber, existing: false };
+      }, { ttlMs: 60_000 });
     }),
 
   /**

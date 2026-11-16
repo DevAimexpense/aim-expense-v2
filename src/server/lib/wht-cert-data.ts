@@ -9,12 +9,11 @@ import { SHEET_TABS } from "@/server/services/google-sheets.service";
 import { prisma } from "@/lib/prisma";
 import { withLock } from "./lock";
 import { scopedEventIds } from "@/lib/permissions";
-import { findWthTypeByRate } from "@/lib/wth-types";
 import {
   parseWhtCertSeq,
   generateWhtDocNumber,
   getPndForm,
-  mapWhtToIncomeSection,
+  resolveWhtIncome,
   resolveWhtCertDate,
   type WhtIncomeSection,
 } from "@/lib/wht-doc-utils";
@@ -143,10 +142,8 @@ export async function loadWhtCertData(
   const paymentDate = resolveWhtCertDate(payment);
   if (!paymentDate) throw new WhtCertNoDateError();
 
-  // หา WHT type (best guess จาก rate)
-  const wthType = findWthTypeByRate(wthRate);
-  const wthTypeId = wthType?.id || "custom";
-  const { section: incomeSection, label: incomeLabel } = mapWhtToIncomeSection(wthTypeId);
+  // WHT-19: ประเภทที่เลือกตอนบันทึก (WthTypeId) ก่อน — ไม่มีค่อยเดาจาก rate
+  const { section: incomeSection, label: incomeLabel } = resolveWhtIncome(payment.WthTypeId, wthRate);
 
   // ตัดสิน ภ.ง.ด. form: 3 (บุคคล) หรือ 53 (นิติบุคคล)
   const pndForm = getPndForm(payee?.TaxID || "", payee?.BranchType);

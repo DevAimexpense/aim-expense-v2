@@ -59,6 +59,16 @@ export function EditReceiptClient({ billingId }: { billingId: string }) {
   if (header.status === "void") {
     return <Blocked icon="🔒" title="ใบเสร็จรับเงินนี้ถูกยกเลิกแล้ว" />;
   }
+  // SALE-13: ใบเสร็จรับเงิน/ใบกำกับภาษี = ใบกำกับภาษีที่ออกแล้ว แก้ไม่ได้ (server ปฏิเสธด้วย)
+  if (header.taxDocMode === "combined") {
+    return (
+      <Blocked
+        icon="🔒"
+        title="ใบนี้เป็นใบเสร็จรับเงิน/ใบกำกับภาษี — แก้ไขไม่ได้"
+        desc="ใบกำกับภาษีที่ออกแล้วแก้ไม่ได้ตามกฎสรรพากร ให้กด “ยกเลิก” (ระบุเหตุผล) ในหน้ารายการใบเสร็จ แล้วออกใบใหม่"
+      />
+    );
+  }
 
   const initial: InitialBillingData = {
     billingId: header.billingId,

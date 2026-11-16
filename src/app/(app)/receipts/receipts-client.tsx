@@ -18,8 +18,18 @@ export function ReceiptsClient() {
   const orgQuery = trpc.org.get.useQuery();
   const issueMut = trpc.billing.issueReceipt.useMutation();
   const voidMut = trpc.billing.voidReceipt.useMutation();
+  const issueTiMut = trpc.billing.issueReceiptTaxInvoice.useMutation();
+  // SALE-14: ใบเสร็จโหมดแยกที่ยังไม่มีใบกำกับคู่ที่ออกเลขแล้ว → แสดงปุ่มออกใบกำกับภาษีคู่
+  const tiList = trpc.taxInvoice.list.useQuery(undefined, { staleTime: 30_000 });
+  const issuedTiBySource = new Map(
+    (tiList.data || [])
+      .filter((t) => t.status === "issued" && t.sourceBillingId)
+      .map((t) => [t.sourceBillingId, t.docNumber] as const),
+  );
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [issuingId, setIssuingId] = useState<string | null>(null);
+  const [issuingTiId, setIssuingTiId] = useState<string | null>(null);
 
   // จด VAT + "รวมเป็นใบเดียว" → ใบวางบิลที่มี VAT ใช้ใบเสร็จรับเงิน/ใบกำกับภาษีแทน
   const vatRegistered = orgQuery.data?.vatRegistered ?? true;
@@ -88,6 +98,24 @@ export function ReceiptsClient() {
     }
   };
 
+  const handleIssueTi = async (billingId: string) => {
+    setError(null);
+    setNotice(null);
+    setIssuingTiId(billingId);
+    try {
+      const res = await issueTiMut.mutateAsync({ billingId });
+      utils.taxInvoice.list.invalidate();
+      if (res.taxInvoiceId) {
+        ensureSalesDocSaved({ kind: "tax-invoice", id: String(res.taxInvoiceId), version: `saved-${Date.now()}`, savedFor: "", savedUrl: "" });
+      }
+      setNotice(`ออกใบกำกับภาษี ${res.taxInvoiceNumber} คู่กับใบเสร็จแล้ว`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "เกิดข้อผิดพลาด");
+    } finally {
+      setIssuingTiId(null);
+    }
+  };
+
   const handleVoid = async (billingId: string, receiptNumber: string, hasVat: boolean) => {
     // SALE-01b: ใบที่มี VAT (ใบเสร็จ/ใบกำกับ หรือมีใบกำกับคู่) ต้องระบุเหตุผล — ใบกำกับคู่ถูกยกเลิกพร้อมกัน
     const reason = window.prompt(
@@ -126,6 +154,11 @@ export function ReceiptsClient() {
       </div>
 
       {error && <div className="app-error-msg">{error}</div>}
+      {notice && (
+        <div className="app-card" style={{ marginBottom: "1rem", background: "#f0fdf4", color: "#166534", fontSize: "0.875rem" }}>
+          {notice}
+        </div>
+      )}
 
       {/* วิธีออกใบเสร็จ */}
       <div
@@ -252,7 +285,34 @@ export function ReceiptsClient() {
                 </td>
                 <td className="num" style={{ textAlign: "right" }}>{formatTHB(b.grandTotal)}</td>
                 <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
-                  {b.status !== "void" && (
+                  {/* SALE-14: โหมดแยกที่ยังไม่มีใบกำกับคู่ (ออกไม่ได้ตอนสร้าง / ยกเลิกไปเพื่อแก้) */}
+                  {b.docKind === "receipt" &&
+                    b.status !== "void" &&
+                    b.taxDocMode === "separate" &&
+                    b.vatAmount > 0 &&
+                    tiList.isSuccess &&
+                    !issuedTiBySource.has(b.billingId) && (
+                      <button
+                        type="button"
+                        className="app-btn app-btn-primary app-btn-sm"
+                        style={{ marginRight: "0.375rem" }}
+                        disabled={issueTiMut.isPending}
+                        onClick={() => handleIssueTi(b.billingId)}
+                        title="ใบเสร็จนี้มี VAT แต่ยังไม่มีใบกำกับภาษีคู่ — ออกลงวันที่เดียวกับใบเสร็จ"
+                      >
+                        {issuingTiId === b.billingId ? "กำลังออก…" : "ออกใบกำกับภาษีคู่"}
+                      </button>
+                    )}
+                  {/* SALE-13: ใบเสร็จรับเงิน/ใบกำกับภาษี แก้ไม่ได้ — ต้องยกเลิกแล้วออกใหม่ */}
+                  {b.status !== "void" && b.taxDocMode === "combined" && (
+                    <span
+                      style={{ marginRight: "0.375rem", fontSize: "0.75rem", color: "#64748b" }}
+                      title="ใบเสร็จรับเงิน/ใบกำกับภาษี แก้ไขไม่ได้ — ยกเลิก (ระบุเหตุผล) แล้วออกใบใหม่"
+                    >
+                      🔒 ใบกำกับภาษี
+                    </span>
+                  )}
+                  {b.status !== "void" && b.taxDocMode !== "combined" && (
                     <Link
                       href={
                         b.docKind === "receipt"

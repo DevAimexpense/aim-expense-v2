@@ -4,7 +4,8 @@
 //   ใบเสนอราคา / ใบวางบิล / ใบกำกับภาษี / ใบเสร็จรับเงิน → Documents/{YYYY}/{MM}/{เลขที่}.pdf
 //
 // เอกสารพวกนี้ render เป็น HTML ในเบราว์เซอร์ → หน้าเอกสาร (หรือ iframe ?auto=1 จากหน้ารายละเอียด)
-// สร้าง PDF แล้วส่งมาที่นี่ · มีไฟล์เดิม → เขียนทับไฟล์เดิม (ลิงก์เดิม) · จด PdfFor = UpdatedAt ที่ใช้สร้าง
+// สร้าง PDF แล้วส่งมาที่นี่ · มีไฟล์เดิม → ไฟล์เวอร์ชันใหม่ _v2… (CTRL-09 ห้ามทับ) เฉพาะเมื่อสิ่งที่พิมพ์เปลี่ยน
+// (CTRL-10 ลายนิ้วมือใน PdfContentFor) · จด PdfFor = UpdatedAt ที่ใช้สร้าง
 // (แก้เอกสารทีหลัง UpdatedAt เปลี่ยน → หน้ารายละเอียดสั่งบันทึกใหม่เอง)
 //
 // FormData: file (PDF), kind (quotation|billing|tax-invoice|receipt), id, version (UpdatedAt ที่ render)
@@ -20,6 +21,7 @@ import { withLock } from "@/server/lib/lock";
 import { invalidateTab } from "@/server/lib/cache";
 import { hasFeature, PLAN_LABELS } from "@/lib/plans";
 import { todayBangkok } from "@/lib/utils/date";
+import { salesDocFingerprint } from "@/server/lib/sales-doc-fingerprint";
 
 export const runtime = "nodejs";
 
@@ -33,13 +35,16 @@ const KIND: Record<
     perm: "manageQuotations" | "manageBillings" | "manageTaxInvoices";
     urlCol: string;
     forCol: string;
+    /** CTRL-10: คอลัมน์ลายนิ้วมือเนื้อหาที่พิมพ์ */
+    fpCol: string;
+    linesTab: string;
     label: string;
   }
 > = {
-  quotation: { tab: SHEET_TABS.QUOTATIONS, idCol: "QuotationID", perm: "manageQuotations", urlCol: "PdfUrl", forCol: "PdfFor", label: "ใบเสนอราคา" },
-  billing: { tab: SHEET_TABS.BILLINGS, idCol: "BillingID", perm: "manageBillings", urlCol: "PdfUrl", forCol: "PdfFor", label: "ใบวางบิล" },
-  "tax-invoice": { tab: SHEET_TABS.TAX_INVOICES, idCol: "TaxInvoiceID", perm: "manageTaxInvoices", urlCol: "PdfUrl", forCol: "PdfFor", label: "ใบกำกับภาษี" },
-  receipt: { tab: SHEET_TABS.BILLINGS, idCol: "BillingID", perm: "manageBillings", urlCol: "ReceiptPdfUrl", forCol: "ReceiptPdfFor", label: "ใบเสร็จรับเงิน" },
+  quotation: { tab: SHEET_TABS.QUOTATIONS, idCol: "QuotationID", perm: "manageQuotations", urlCol: "PdfUrl", forCol: "PdfFor", fpCol: "PdfContentFor", linesTab: SHEET_TABS.QUOTATION_LINES, label: "ใบเสนอราคา" },
+  billing: { tab: SHEET_TABS.BILLINGS, idCol: "BillingID", perm: "manageBillings", urlCol: "PdfUrl", forCol: "PdfFor", fpCol: "PdfContentFor", linesTab: SHEET_TABS.BILLING_LINES, label: "ใบวางบิล" },
+  "tax-invoice": { tab: SHEET_TABS.TAX_INVOICES, idCol: "TaxInvoiceID", perm: "manageTaxInvoices", urlCol: "PdfUrl", forCol: "PdfFor", fpCol: "PdfContentFor", linesTab: SHEET_TABS.TAX_INVOICE_LINES, label: "ใบกำกับภาษี" },
+  receipt: { tab: SHEET_TABS.BILLINGS, idCol: "BillingID", perm: "manageBillings", urlCol: "ReceiptPdfUrl", forCol: "ReceiptPdfFor", fpCol: "ReceiptPdfContentFor", linesTab: SHEET_TABS.BILLING_LINES, label: "ใบเสร็จรับเงิน" },
 };
 
 const sanitize = (s: string) =>
@@ -97,6 +102,14 @@ export async function POST(req: NextRequest) {
         if (row[cfg.urlCol] && row[cfg.forCol] && row[cfg.forCol] === versionFor) {
           return { status: 200 as const, body: { success: true, fileUrl: row[cfg.urlCol], deduped: true } };
         }
+        // CTRL-10: UpdatedAt เปลี่ยนแต่สิ่งที่พิมพ์บนเอกสารเหมือนเดิม (แนบสลิป/ออกใบเสร็จจากใบวางบิล ฯลฯ)
+        // → ใช้ไฟล์เดิม ไม่สร้าง _v2 · จด forCol ใหม่ให้หน้าเว็บเลิกสั่งบันทึก
+        const lines = (await sheets.getAll(cfg.linesTab)).filter((l) => l[cfg.idCol] === id);
+        const fingerprint = salesDocFingerprint(kind, row, lines);
+        if (row[cfg.urlCol] && row[cfg.fpCol] === fingerprint) {
+          await sheets.updateById(cfg.tab, cfg.idCol, id, { [cfg.forCol]: versionFor });
+          return { status: 200 as const, body: { success: true, fileUrl: row[cfg.urlCol], deduped: true } };
+        }
 
         const docDate =
           (kind === "receipt" ? row.ReceiptDate || row.PaidDate || row.DocDate : row.DocDate) || todayBangkok();
@@ -115,6 +128,7 @@ export async function POST(req: NextRequest) {
         await sheets.updateById(cfg.tab, cfg.idCol, id, {
           [cfg.urlCol]: saved.webViewLink,
           [cfg.forCol]: versionFor,
+          [cfg.fpCol]: fingerprint,
         });
         await safeAuditLog({
           data: {

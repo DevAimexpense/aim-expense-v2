@@ -77,3 +77,32 @@ export function receiptVoidPlan(receipt: Row, taxInvoices: Row[]) {
     reasonRequired: receipt.TaxDocMode === "combined" || !!issued,
   };
 }
+
+/** SALE-13: ใบเสร็จออกตรงที่แก้ไม่ได้แล้ว — คืนข้อความเหตุผล หรือ null = แก้ได้ */
+export function receiptEditBlockReason(receipt: Row, taxInvoices: Row[]): string | null {
+  if (receipt.Status === "void") return "ใบเสร็จรับเงินนี้ถูกยกเลิกแล้ว แก้ไขไม่ได้";
+  // ใบเสร็จรับเงิน/ใบกำกับภาษี (โหมดรวม) = ใบกำกับภาษีที่ส่งลูกค้าแล้ว — แก้ยอด/ลูกค้า/วันที่ไม่ได้ (ม.86/9-10)
+  if (receipt.TaxDocMode === "combined") {
+    return "ใบนี้เป็นใบเสร็จรับเงิน/ใบกำกับภาษี — แก้ไขไม่ได้ ให้ยกเลิก (ระบุเหตุผล) แล้วออกใบใหม่";
+  }
+  const issued = taxInvoices.find((t) => t.SourceBillingID === receipt.BillingID && t.Status === "issued");
+  if (issued) {
+    return `ใบเสร็จนี้มีใบกำกับภาษีคู่ ${issued.DocNumber} แล้ว — แก้ไขไม่ได้ ให้ยกเลิกใบกำกับภาษีก่อน (หรือออกใบลดหนี้/เพิ่มหนี้)`;
+  }
+  return null;
+}
+
+/** SALE-14: โหมดเอกสารภาษีของใบเสร็จออกตรงหลังแก้ */
+export function nextReceiptTaxDocMode(
+  current: string,
+  hasVatNow: boolean,
+  hadVatBefore: boolean,
+  orgMode: "combined" | "separate",
+): "" | "combined" | "separate" {
+  if (!hasVatNow) return "";
+  if (current === "combined" || current === "separate") return current;
+  // ใบเก่าที่มี VAT อยู่แล้วก่อนมีโหมด (ออกก่อน SALE-01) → คงเดิม ไม่เปลี่ยนหัว/ไม่ออกใบกำกับคู่ย้อนหลัง
+  // (ลูกค้าอาจออกใบกำกับแยกเองไว้แล้ว — ออกซ้ำ = ภาษีขายนับซ้ำ)
+  if (hadVatBefore) return "";
+  return orgMode;
+}

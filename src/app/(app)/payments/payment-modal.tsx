@@ -42,6 +42,7 @@ interface PaymentData {
   numberOfPeople: number;
   ttlAmount: number;
   pctWTH: number;
+  wthTypeId?: string;
   wthAmount: number;
   vatAmount: number;
   gttlAmount: number;
@@ -183,7 +184,11 @@ export function PaymentModal({
 
   // หา WTH type เริ่มต้นจาก rate ของ payment ที่มีอยู่ (กรณี edit)
   // ถ้าหา match ไม่ได้ → fallback เป็น "custom" พร้อม rate จริง
-  const initialWthMatch = payment ? findWthTypeByRate(payment.pctWTH) : undefined;
+  // WHT-19: ประเภทที่บันทึกไว้ (ถ้าอัตรายังตรง) ก่อน — 3% มีหลายประเภท เดาจาก % จะได้ "ค่าบริการ" เสมอ
+  const storedWth = payment?.wthTypeId
+    ? WTH_TYPES.find((t) => t.id === payment.wthTypeId && t.id !== "custom" && t.rate === payment.pctWTH)
+    : undefined;
+  const initialWthMatch = payment ? storedWth ?? findWthTypeByRate(payment.pctWTH) : undefined;
   const initialWthTypeId =
     initialWthMatch?.id ?? (payment && payment.pctWTH > 0 ? "custom" : "none");
 
@@ -321,6 +326,7 @@ export function PaymentModal({
         days: form.days,
         numberOfPeople: form.numberOfPeople,
         pctWTH: effectiveWthRate,
+        wthTypeId: effectiveWthRate > 0 ? form.wthTypeId : "", // WHT-19
         isVatPayee: form.isVatPayee,
         dueDate: form.dueDate,
         notes: form.notes.trim() || undefined,

@@ -3,6 +3,8 @@
 // Helpers สำหรับ: generate เลขเล่มที่/เลขที่, map WHT type → income type, ภ.ง.ด. form
 // ===========================================
 
+import { getWthTypeById, findWthTypeByRate } from "./wth-types";
+
 /** ดึงลำดับ (SSS) จากเลขที่ที่เก็บไว้ "เล่มที่|MMDD/SSS" หรือ "MMDD/SSS" — null ถ้า parse ไม่ได้ */
 export function parseWhtCertSeq(certNo: string | undefined | null): number | null {
   if (!certNo) return null;
@@ -155,4 +157,24 @@ export function mapWhtToIncomeSection(wthTypeId: string): {
     "show-5": { section: "5", label: "ค่าแสดงของนักแสดงสาธารณะ" },
   };
   return MAP[wthTypeId] || { section: "6", label: "อื่น ๆ" };
+}
+
+/**
+ * WHT-19: ประเภทเงินได้บน 50 ทวิ — ใช้ประเภทที่เลือกตอนบันทึก (Payments.WthTypeId) ก่อน
+ * (อัตราเดียวกันมีหลายประเภท เช่น 3% = ค่าบริการ/รับเหมา/นายหน้า/วิชาชีพอิสระ)
+ * ไม่มี / ไม่ตรงกับอัตราที่บันทึก (แก้ % ทีหลัง) → เดาจากอัตราแบบเดิม
+ * รายการเก่า 1% ส่วนใหญ่คือ "ค่ารับเหมา (นิติบุคคล) 1%" ที่ถูกลบไป (WHT-10) → คงคำเดิม ไม่พิมพ์เป็น "ค่าขนส่ง"
+ */
+export function resolveWhtIncome(
+  storedTypeId: string | undefined,
+  rate: number,
+): { wthTypeId: string; section: WhtIncomeSection; label: string } {
+  const stored = storedTypeId ? getWthTypeById(storedTypeId) : undefined;
+  // "custom" = กรอก % เอง ไม่บอกประเภท → เดาจากอัตราเหมือนเดิม
+  if (stored && stored.id !== "none" && stored.id !== "custom" && stored.rate === rate) {
+    return { wthTypeId: stored.id, ...mapWhtToIncomeSection(stored.id) };
+  }
+  if (rate === 1) return { wthTypeId: "custom", section: "5", label: "ค่ารับเหมา/บริการ" };
+  const guessed = findWthTypeByRate(rate)?.id || "custom";
+  return { wthTypeId: guessed, ...mapWhtToIncomeSection(guessed) };
 }

@@ -140,6 +140,7 @@ export const SHEET_HEADERS: Record<string, string[]> = {
     "UpdatedAt",
     "WhtCertNo", // DOC-04: เลขหนังสือรับรอง 50 ทวิ ที่ออกครั้งแรก "เล่มที่|เลขที่" — คงที่ ไม่คำนวณใหม่
     "WhtCertFor", // WHT-03: ลายนิ้วมือข้อมูล (ยอด/อัตรา/ผู้รับเงิน/วันที่/รายละเอียด) ที่ใช้สร้าง 50 ทวิ ใน Drive — ไม่ตรง = เขียนทับไฟล์เดิม
+    "WthTypeId", // WHT-19: ประเภทหัก ณ ที่จ่ายที่เลือกตอนบันทึก (lib/wth-types) — ใช้พิมพ์ประเภทเงินได้บน 50 ทวิ
   ],
   [SHEET_TABS.EVENT_ASSIGNMENTS]: [
     "AssignmentID",
@@ -196,6 +197,7 @@ export const SHEET_HEADERS: Record<string, string[]> = {
     "PdfUrl", // ไฟล์ PDF ใน Drive (บันทึกอัตโนมัติ — /api/documents/save-sales-pdf)
     "IsVAT", // FALSE = ไม่มี VAT (ธุรกิจไม่จด VAT) — ว่าง/TRUE = มี VAT 7% (legacy rows)
     "PdfFor", // UpdatedAt ของข้อมูลที่ใช้สร้าง PdfUrl — ไม่ตรง = เอกสารถูกแก้ ต้องบันทึกใหม่
+    "PdfContentFor", // CTRL-10: ลายนิ้วมือเนื้อหาที่พิมพ์ (sales-doc-fingerprint) — ตรง = ไม่ต้องมีไฟล์เวอร์ชันใหม่
   ],
   [SHEET_TABS.QUOTATION_LINES]: [
     "LineID",
@@ -256,6 +258,8 @@ export const SHEET_HEADERS: Record<string, string[]> = {
     "ReceiptPdfFor", // UpdatedAt ของข้อมูลที่ใช้สร้าง ReceiptPdfUrl
     "VoidReason", // SALE-01b: เหตุผลการยกเลิกใบเสร็จ (บังคับเมื่อเป็นใบเสร็จ/ใบกำกับ หรือมีใบกำกับคู่)
     "TaxDocMode", // SALE-01: ใบเสร็จออกตรงที่มี VAT — "combined" = ใบเสร็จ/ใบกำกับ · "separate" = มีใบกำกับคู่ (snapshot ตอนออก)
+    "PdfContentFor", // CTRL-10: ลายนิ้วมือเนื้อหาที่พิมพ์บนใบวางบิล — ตรง = ไม่ต้องมีไฟล์เวอร์ชันใหม่
+    "ReceiptPdfContentFor", // CTRL-10: ลายนิ้วมือเนื้อหาที่พิมพ์บนใบเสร็จ
   ],
   [SHEET_TABS.BILLING_LINES]: [
     "LineID",
@@ -312,6 +316,7 @@ export const SHEET_HEADERS: Record<string, string[]> = {
     "WHTCertUrl", // ใบหัก ณ ที่จ่าย (Drive, optional — แนบทีหลังได้)
     "PaymentRecordedAt", // ISO timestamp
     "PdfFor", // UpdatedAt ของข้อมูลที่ใช้สร้าง PdfUrl — ไม่ตรง = ต้องบันทึกใหม่
+    "PdfContentFor", // CTRL-10: ลายนิ้วมือเนื้อหาที่พิมพ์ — ตรง = ไม่ต้องมีไฟล์เวอร์ชันใหม่
   ],
   [SHEET_TABS.TAX_INVOICE_LINES]: [
     "LineID",

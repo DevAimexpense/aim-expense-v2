@@ -320,6 +320,7 @@ export function NewBillingClient({
             : await receiptMut.mutateAsync({ ...receiptPayload, paymentMethod });
         utils.billing.list.invalidate();
         utils.billing.getById.invalidate({ billingId: result.billingId });
+        utils.taxInvoice.list.invalidate(); // SALE-14: ร่างเก่าถูกลบ / ใบกำกับคู่ใหม่
         // DOC-25: ย้ายวันที่ข้ามเดือนหลังมีเลขแล้ว → แจ้งว่าเลขยังเป็นของเดือนเดิม
         if ("warning" in result && result.warning) alert(result.warning);
         // DOC-02: บันทึก PDF ลง Drive เบื้องหลังทันที — ไม่พึ่งแท็บเอกสาร (Safari/iPad บล็อก popup หลัง await)
