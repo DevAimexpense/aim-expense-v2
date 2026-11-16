@@ -324,6 +324,18 @@ export default function ApprovalsPage() {
                           ? ` + VAT ฿${formatNumber(p.vatAmount)}`
                           : ""}
                       </div>
+                      {/* CTRL-04: กลับมารออนุมัติเพราะถูกแก้หลังอนุมัติ */}
+                      {p.reapprovalOf && (
+                        <div style={{ fontSize: "0.7rem", color: "#b45309", fontWeight: 600 }}>
+                          🔁 แก้ไขหลัง{p.reapprovalOf === "approved" ? "อนุมัติ" : p.reapprovalOf === "paid" ? "จ่ายแล้ว" : "เคลียร์แล้ว"} — อนุมัติแล้วจะคืนสถานะเดิม
+                        </div>
+                      )}
+                      {/* PUR-06: อาจเป็นบิลซ้ำ */}
+                      {p.duplicateOf && (
+                        <div style={{ fontSize: "0.7rem", color: "#b91c1c", fontWeight: 600 }}>
+                          ⚠️ อาจซ้ำกับรายการที่บันทึกไว้แล้ว (เลขผู้ขาย + เลขที่เอกสารเดียวกัน)
+                        </div>
+                      )}
                     </td>
                     <td style={{ fontSize: "0.8125rem" }}>
                       {eventMap[p.eventId] || "-"}

@@ -37,6 +37,7 @@ import { isSettled } from "@/lib/payment-status";
 import { getPndForm, whtPeriodDate } from "@/lib/wht-doc-utils";
 import { todayBangkok } from "@/lib/utils/date";
 import { taxableBaseFromVat } from "@/lib/calculations";
+import { isInputVatClaimable, resolveNonDeductibleVat, nonDeductibleLabel } from "@/lib/input-vat-rules";
 import { getSheetsService } from "../lib/sheets-context";
 import { SHEET_TABS } from "../services/google-sheets.service";
 
@@ -1256,7 +1257,8 @@ export const reportRouter = router({
         if (!isSettled(p.Status)) continue;
 
         // Document type filter — only tax invoices qualify for input VAT credit
-        if (p.DocumentType !== "tax_invoice") continue;
+        // PUR-03/04: ใบกำกับเต็มรูปเท่านั้น (อย่างย่อไม่ได้) และไม่ใช่ภาษีซื้อต้องห้าม ม.82/5
+        if (!isInputVatClaimable(p)) continue;
 
         // VAT amount must be positive
         const vatAmount = num(p.VATAmount);
@@ -1546,15 +1548,29 @@ export const reportRouter = router({
         vatAmount: number;
       };
       const inputRows: InputRow[] = [];
+      // PUR-03/04: ภาษีซื้อที่ไม่นำมาหัก (ต้องห้าม / ใบกำกับอย่างย่อ) — แสดงแยกให้ผู้ทำบัญชีเห็น ไม่รวมในยอด
+      const nonDeductibleRows: { paymentId: string; date: string; payeeName: string; vatAmount: number; reason: string }[] = [];
       for (const p of payments) {
         if (scope !== null && !scope.includes((p.EventID || "").trim())) continue;
         if (!isSettled(p.Status)) continue; // paid | cleared — DOC-02
-        if (p.DocumentType !== "tax_invoice") continue;
         const vat = num(p.VATAmount);
         if (vat <= 0) continue;
         const date = inputDateOf(p);
         if (!date) continue;
         if (date < input.from || date > input.to) continue;
+        if (!isInputVatClaimable(p)) {
+          const reasonCode = resolveNonDeductibleVat(p.CategoryMain, p.NonDeductibleVat);
+          if (p.DocumentType === "tax_invoice" || p.DocumentType === "tax_invoice_abbr") {
+            nonDeductibleRows.push({
+              paymentId: p.PaymentID,
+              date,
+              payeeName: payeeMap.get(p.PayeeID)?.name || p.PayeeID || "—",
+              vatAmount: vat,
+              reason: p.DocumentType === "tax_invoice_abbr" ? "ใบกำกับภาษีอย่างย่อ (ม.82/5(6))" : nonDeductibleLabel(reasonCode),
+            });
+          }
+          continue;
+        }
         const info = payeeMap.get(p.PayeeID);
         inputRows.push({
           paymentId: p.PaymentID,
@@ -1646,6 +1662,11 @@ export const reportRouter = router({
           totalCount: inputRows.length,
           totalBase: inputTotalBase,
           totalVAT: inputTotalVAT,
+          /** PUR-03/04: ภาษีซื้อที่ไม่นำมาหัก (ไม่รวมในยอดด้านบน) */
+          nonDeductible: {
+            rows: nonDeductibleRows,
+            totalVAT: nonDeductibleRows.reduce((s, r) => s + r.vatAmount, 0),
+          },
         },
         output: {
           rows: outputRows,

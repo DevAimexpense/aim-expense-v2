@@ -5,6 +5,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { ttlForTab, invalidateTab } from "@/server/lib/cache";
+import { findDuplicateBills, duplicateWarningText } from "@/lib/duplicate-bill";
 import {
   replyMessage,
   pushMessage,
@@ -1290,6 +1291,17 @@ async function writeDraftToSheets(
     ? `Manual text entry | LINE draft ${draft.id}`
     : `OCR confidence ${Math.round((ocr.confidence ?? 0) * 100)}% | LINE draft ${draft.id}`;
 
+  // PUR-06: บิลซ้ำ (เลขผู้ขาย + เลขที่ใบ) — เตือน ไม่บล็อก · อ่านผ่าน cache เดียวกับ LINE-33 (ไม่เสีย read เพิ่ม)
+  let duplicates: ReturnType<typeof findDuplicateBills> = [];
+  try {
+    duplicates = findDuplicateBills(await sheets.getPayments(), {
+      vendorTaxId: vendorTaxIdSnapshot,
+      docNumbers: [ocr.invoiceNumber ?? undefined],
+    });
+  } catch (err) {
+    console.warn(`[LINE] duplicate-bill check skipped for draft ${draft.id}:`, err);
+  }
+
   // Create payment record (เหมือน browser payment.create mutation) — ใช้ paymentId ที่ generate ไว้แล้ว
   const now = new Date().toISOString();
 
@@ -1331,6 +1343,7 @@ async function writeDraftToSheets(
     VendorTaxIdSnapshot: vendorTaxIdSnapshot,
     VendorBranchInfo: vendorBranchInfo,
     Notes: notes,
+    DuplicateOf: duplicates.map((d) => d.paymentId).join(","), // PUR-06
     CreatedAt: now,
     CreatedBy: "LINE OA",
     CreatedByUserId: draft.userId,
@@ -1361,6 +1374,14 @@ async function writeDraftToSheets(
     });
   } catch (err) {
     console.error(`[LINE] audit log failed for ${paymentId} (row already saved):`, err);
+  }
+
+  // PUR-06: แจ้งผู้ส่งว่าอาจเป็นบิลซ้ำ (บันทึกไปแล้ว — ผู้อนุมัติเห็นป้ายเตือนในหน้าอนุมัติ)
+  const dupText = duplicateWarningText(duplicates);
+  if (dupText) {
+    await pushMessage(draft.lineUserId, [text(dupText)]).catch((err) =>
+      console.error(`[LINE] duplicate warning push failed for ${paymentId}:`, err),
+    );
   }
 
   // Notify user — saved Flex card (savedLabel computed at the top of this function).

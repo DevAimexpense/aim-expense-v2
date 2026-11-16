@@ -25,7 +25,9 @@ export type ExpenseCategoryMain = (typeof EXPENSE_CATEGORIES_MAIN)[number];
 // Document Type & Expense Nature labels (ใช้ใน UI dropdown)
 export const DOCUMENT_TYPE_OPTIONS = [
   { value: "receipt", label: "ใบเสร็จรับเงิน" },
-  { value: "tax_invoice", label: "ใบกำกับภาษี" },
+  { value: "tax_invoice", label: "ใบกำกับภาษี (เต็มรูป)" },
+  // PUR-04: ใบกำกับภาษีอย่างย่อ (ร้านค้าปลีก/ปั๊ม — ไม่มีชื่อ/เลขผู้ซื้อ) ขอคืนภาษีซื้อไม่ได้ ม.82/5(6)
+  { value: "tax_invoice_abbr", label: "ใบกำกับภาษีอย่างย่อ (ขอคืน VAT ไม่ได้)" },
 ] as const;
 
 export const EXPENSE_NATURE_OPTIONS = [

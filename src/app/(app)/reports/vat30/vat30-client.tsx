@@ -154,7 +154,10 @@ export function Vat30Client({ orgName }: { orgName: string }) {
           />
         </>
       ) : (
-        <InputTab rows={q.data.input.rows} totals={q.data.input} />
+        <>
+          <InputTab rows={q.data.input.rows} totals={q.data.input} />
+          <NonDeductibleInput rows={q.data.input.nonDeductible.rows} totalVAT={q.data.input.nonDeductible.totalVAT} />
+        </>
       )}
     </div>
   );
@@ -316,6 +319,53 @@ function SummaryTab({
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** PUR-03/04: ภาษีซื้อที่ไม่นำมาหัก (ต้องห้าม ม.82/5 / ใบกำกับอย่างย่อ) — ไม่รวมในยอดภาษีซื้อ */
+function NonDeductibleInput({
+  rows,
+  totalVAT,
+}: {
+  rows: { paymentId: string; date: string; payeeName: string; vatAmount: number; reason: string }[];
+  totalVAT: number;
+}) {
+  if (rows.length === 0) return null;
+  return (
+    <div className="app-card" style={{ marginTop: "1rem", padding: 0, overflowX: "auto" }}>
+      <div className="app-card-header" style={{ padding: "1rem 1rem 0" }}>
+        <h2 className="app-card-title">🚫 ภาษีซื้อที่นำมาหักไม่ได้ (ไม่รวมในยอดด้านบน)</h2>
+      </div>
+      <p style={{ padding: "0 1rem", fontSize: "0.8125rem", color: "#64748b" }}>
+        ภาษีซื้อต้องห้ามตาม ม.82/5 และใบกำกับภาษีอย่างย่อ — บันทึกเป็นค่าใช้จ่ายของกิจการแทน
+      </p>
+      <table className="app-table" style={{ width: "100%" }}>
+        <thead>
+          <tr>
+            <th>วันที่</th>
+            <th>ผู้ขาย</th>
+            <th>เหตุ</th>
+            <th className="text-right">VAT</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.paymentId}>
+              <td>{formatDate(r.date)}</td>
+              <td>{r.payeeName}</td>
+              <td style={{ fontSize: "0.8125rem" }}>{r.reason}</td>
+              <td className="text-right num">{formatTHB(r.vatAmount)}</td>
+            </tr>
+          ))}
+        </tbody>
+        <tfoot>
+          <tr style={{ fontWeight: 700, background: "#f8fafc" }}>
+            <td colSpan={3}>รวม {rows.length} ใบ</td>
+            <td className="text-right num">{formatTHB(totalVAT)}</td>
+          </tr>
+        </tfoot>
+      </table>
     </div>
   );
 }

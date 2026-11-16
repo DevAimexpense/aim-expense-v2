@@ -263,7 +263,7 @@ export default function PaymentsPage() {
                       {/* R6: category + docType badge */}
                       {(("categoryMain" in p && p.categoryMain) || ("documentType" in p && p.documentType)) && (
                         <div style={{ fontSize: "0.65rem", color: "#78716c", marginTop: "0.125rem" }}>
-                          {p.documentType === "tax_invoice" ? "📋" : p.documentType === "receipt" ? "🧾" : ""}
+                          {p.documentType === "tax_invoice" ? "📋" : p.documentType === "tax_invoice_abbr" ? "📄" : p.documentType === "receipt" ? "🧾" : ""}
                           {p.categoryMain ? ` ${p.categoryMain}` : ""}
                           {p.categorySub ? ` > ${p.categorySub}` : ""}
                         </div>

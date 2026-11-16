@@ -14,6 +14,9 @@ import { scopedEventIds } from "@/lib/permissions";
 import { todayBangkok } from "@/lib/utils/date";
 import { autoSaveWhtCert } from "../lib/wht-cert-pdf";
 import { safeAuditLog } from "@/server/lib/audit";
+import { materialChanges, statusAfterReapproval } from "@/lib/payment-reapproval";
+import { NON_DEDUCTIBLE_VALUES, resolveNonDeductibleVat } from "@/lib/input-vat-rules";
+import { findDuplicateBills, duplicateWarningText } from "@/lib/duplicate-bill";
 
 const PaymentInputSchema = z.object({
   eventId: z.string().min(1),
@@ -34,7 +37,10 @@ const PaymentInputSchema = z.object({
   dueDate: z.string().min(1),
   notes: z.string().max(1000).optional(),
   // ===== R5: Tax compliance fields =====
-  documentType: z.enum(["receipt", "tax_invoice", "id_card", "substitute_receipt"]).optional(),
+  // PUR-04: tax_invoice_abbr = ใบกำกับภาษีอย่างย่อ (ขอคืน VAT ไม่ได้ ม.82/5(6))
+  documentType: z.enum(["receipt", "tax_invoice", "tax_invoice_abbr", "id_card", "substitute_receipt"]).optional(),
+  // PUR-03: ภาษีซื้อต้องห้าม (ม.82/5) — "" = ขอคืนได้ · หมวดค่ารับรองถูกบังคับเป็นต้องห้ามเสมอ
+  nonDeductibleVat: z.enum(["", ...NON_DEDUCTIBLE_VALUES]).optional(),
   expenseNature: z.enum(["goods", "service"]).optional(),
   categoryMain: z.string().max(100).optional(),
   categorySub: z.string().max(100).optional(),
@@ -95,6 +101,10 @@ function toPaymentRow(payment: Record<string, string>) {
     vendorBranchInfo: payment.VendorBranchInfo || "",
     actualExpense: parseFloat(payment.ActualExpense) || 0,
     generatedDocUrl: payment.GeneratedDocUrl || "",
+    // CTRL-04: รออนุมัติใหม่หลังแก้ (สถานะเดิม) · PUR-03: ภาษีซื้อต้องห้าม · PUR-06: อาจซ้ำกับ
+    reapprovalOf: payment.ReapprovalOf || "",
+    nonDeductibleVat: payment.NonDeductibleVat || "",
+    duplicateOf: payment.DuplicateOf || "",
     generatedDocType: payment.GeneratedDocType || "",
     notes: payment.Notes || "",
     createdAt: payment.CreatedAt || "",
@@ -271,6 +281,17 @@ export const paymentRouter = router({
         // best-effort — skip if payee lookup fails
       }
 
+      // PUR-06: บิลซ้ำ (เลขผู้ขาย + เลขที่เอกสาร) → เตือน ไม่บล็อก · อ่านไม่ได้ = ข้าม (ไม่ล้มการบันทึก)
+      let duplicates: ReturnType<typeof findDuplicateBills> = [];
+      try {
+        duplicates = findDuplicateBills(await sheets.getPayments(), {
+          vendorTaxId: vendorTaxIdSnapshot,
+          docNumbers: [input.invoiceNumber],
+        });
+      } catch (err) {
+        console.warn("[payment.create] duplicate check skipped", err);
+      }
+
       const paymentId = GoogleSheetsService.generateId("PMT");
       const now = new Date().toISOString();
       const status = input.initialStatus || "pending";
@@ -312,6 +333,7 @@ export const paymentRouter = router({
         ReceiptDate: isPaidDirect ? input.paymentDate || "" : "",
         // R5: tax compliance fields
         DocumentType: input.documentType || "",
+        NonDeductibleVat: resolveNonDeductibleVat(input.categoryMain, input.nonDeductibleVat), // PUR-03
         ExpenseNature: input.expenseNature || "",
         CategoryMain: input.categoryMain || "",
         CategorySub: input.categorySub || "",
@@ -319,6 +341,7 @@ export const paymentRouter = router({
         VendorTaxIdSnapshot: vendorTaxIdSnapshot,
         VendorBranchInfo: vendorBranchInfo,
         Notes: input.notes || "",
+        DuplicateOf: duplicates.map((d) => d.paymentId).join(","), // PUR-06
         CreatedAt: now,
         CreatedBy: ctx.session.displayName,
         CreatedByUserId: ctx.session.userId, // R6: stable userId for ownership check
@@ -338,13 +361,14 @@ export const paymentRouter = router({
 
       // spec: 50 ทวิ บันทึกลง Drive อัตโนมัติ (ข้ามเองถ้าไม่มี WHT/ยังไม่มีวันที่/มีไฟล์แล้ว — ไม่ throw)
       await autoSaveWhtCert({ orgId: ctx.org.orgId, paymentId: paymentId, userId: ctx.session.userId, spreadsheetId: ctx.org.googleSpreadsheetId });
-      return { success: true, paymentId, calc };
+      return { success: true, paymentId, calc, duplicateWarning: duplicateWarningText(duplicates) };
     }),
 
   update: permissionProcedure("updatePayments")
     .input(z.object({ paymentId: z.string() }).merge(PaymentInputSchema.partial()))
     .mutation(async ({ ctx, input }) => {
       const sheets = await getSheetsService(ctx.org.orgId);
+      await ensureTabsCached(sheets, ctx.org.orgId); // คอลัมน์ ReapprovalOf/WthTypeId ในชีตเดิม (updateById ข้ามคอลัมน์ที่ไม่มีเงียบ ๆ)
       const existing = await sheets.getById(SHEET_TABS.PAYMENTS, "PaymentID", input.paymentId);
       if (!existing) throw new Error("ไม่พบรายการจ่าย");
 
@@ -453,6 +477,13 @@ export const paymentRouter = router({
       if (input.categoryMain !== undefined) updates.CategoryMain = input.categoryMain;
       if (input.categorySub !== undefined) updates.CategorySub = input.categorySub;
       if (input.requesterName !== undefined) updates.RequesterName = input.requesterName;
+      // PUR-03: หมวด/เหตุต้องห้ามเปลี่ยน → คิดใหม่ (ค่ารับรองบังคับเสมอ)
+      if (input.categoryMain !== undefined || input.nonDeductibleVat !== undefined) {
+        updates.NonDeductibleVat = resolveNonDeductibleVat(
+          input.categoryMain ?? existing.CategoryMain,
+          input.nonDeductibleVat ?? existing.NonDeductibleVat,
+        );
+      }
       // If payeeId changed, refresh vendor snapshot
       if (input.payeeId !== undefined && input.payeeId !== existing.PayeeID) {
         try {
@@ -472,6 +503,16 @@ export const paymentRouter = router({
       }
       updates.UpdatedAt = new Date().toISOString();
 
+      // CTRL-04: แก้สาระสำคัญหลังอนุมัติ → กลับไปรออนุมัติ (เก็บสถานะเดิมไว้คืนตอนอนุมัติใหม่)
+      const changed = isPostApproval ? materialChanges(existing, updates) : [];
+      const requiresReapproval = changed.length > 0;
+      if (requiresReapproval) {
+        updates.Status = "pending";
+        updates.ReapprovalOf = existing.ReapprovalOf || existing.Status;
+        updates.ApprovedBy = "";
+        updates.ApprovedAt = "";
+      }
+
       const ok = await sheets.updateById(SHEET_TABS.PAYMENTS, "PaymentID", input.paymentId, updates);
       if (!ok) throw new Error("แก้ไขไม่สำเร็จ");
 
@@ -482,13 +523,15 @@ export const paymentRouter = router({
           action: "update",
           entityType: "payment",
           entityRef: input.paymentId,
-          summary: `แก้ไขรายการจ่าย`,
+          summary: requiresReapproval
+            ? `แก้ไขรายการจ่ายหลังอนุมัติ (${changed.join(", ")}) → กลับไปรออนุมัติ (เดิม ${existing.Status} · ยอดจ่ายเดิม ${existing.GTTLAmount})`
+            : `แก้ไขรายการจ่าย`,
         },
       });
 
       // spec: 50 ทวิ บันทึกลง Drive อัตโนมัติ (ข้ามเองถ้าไม่มี WHT/ยังไม่มีวันที่/มีไฟล์แล้ว — ไม่ throw)
       await autoSaveWhtCert({ orgId: ctx.org.orgId, paymentId: input.paymentId, userId: ctx.session.userId, spreadsheetId: ctx.org.googleSpreadsheetId });
-      return { success: true };
+      return { success: true, requiresReapproval };
     }),
 
   /**
@@ -504,11 +547,14 @@ export const paymentRouter = router({
         receiptNumber: z.string().max(50).optional(),
         receiptDate: z.string().optional(), // ISO YYYY-MM-DD
         // PUR-01/07: แนบใบกำกับภาษีจริงทีหลัง → เปลี่ยนประเภทเอกสารให้เข้าภาษีซื้อได้
-        documentType: z.enum(["receipt", "tax_invoice"]).optional(),
+        documentType: z.enum(["receipt", "tax_invoice", "tax_invoice_abbr"]).optional(),
+        // PUR-03: ภาษีซื้อต้องห้าม (เลือกตอนแนบใบกำกับ)
+        nonDeductibleVat: z.enum(["", ...NON_DEDUCTIBLE_VALUES]).optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
       const sheets = await getSheetsService(ctx.org.orgId);
+      await ensureTabsCached(sheets, ctx.org.orgId); // คอลัมน์ NonDeductibleVat / DuplicateOf ในชีตเดิม
       const existing = await sheets.getById(SHEET_TABS.PAYMENTS, "PaymentID", input.paymentId);
       if (!existing) throw new Error("ไม่พบรายการ");
       if (existing.Status !== "approved" && existing.Status !== "paid" && existing.Status !== "cleared") {
@@ -547,6 +593,21 @@ export const paymentRouter = router({
       if (input.receiptNumber !== undefined) updates.ReceiptNumber = input.receiptNumber;
       if (input.receiptDate !== undefined) updates.ReceiptDate = input.receiptDate;
       if (input.documentType !== undefined) updates.DocumentType = input.documentType;
+      if (input.nonDeductibleVat !== undefined) {
+        updates.NonDeductibleVat = resolveNonDeductibleVat(existing.CategoryMain, input.nonDeductibleVat); // PUR-03
+      }
+      // PUR-06: เลขที่ใบเสร็จ/ใบกำกับที่แนบ ซ้ำกับรายการอื่นของผู้ขายเดียวกัน → เตือน ไม่บล็อก
+      let duplicates: ReturnType<typeof findDuplicateBills> = [];
+      try {
+        duplicates = findDuplicateBills(await sheets.getPayments(), {
+          vendorTaxId: existing.VendorTaxIdSnapshot,
+          docNumbers: [input.receiptNumber ?? existing.ReceiptNumber, existing.InvoiceNumber],
+          excludePaymentId: input.paymentId,
+        });
+      } catch (err) {
+        console.warn("[payment.recordReceipt] duplicate check skipped", err);
+      }
+      updates.DuplicateOf = duplicates.map((d) => d.paymentId).join(",");
 
       const ok = await sheets.updateById(SHEET_TABS.PAYMENTS, "PaymentID", input.paymentId, updates);
       if (!ok) throw new Error("บันทึกไม่สำเร็จ");
@@ -564,7 +625,7 @@ export const paymentRouter = router({
 
       // spec: 50 ทวิ บันทึกลง Drive อัตโนมัติ (ข้ามเองถ้าไม่มี WHT/ยังไม่มีวันที่/มีไฟล์แล้ว — ไม่ throw)
       await autoSaveWhtCert({ orgId: ctx.org.orgId, paymentId: input.paymentId, userId: ctx.session.userId, spreadsheetId: ctx.org.googleSpreadsheetId });
-      return { success: true };
+      return { success: true, duplicateWarning: duplicateWarningText(duplicates) };
     }),
 
   approve: permissionProcedure("approvePayments")
@@ -580,21 +641,33 @@ export const paymentRouter = router({
       const sheets = await getSheetsService(ctx.org.orgId);
       const now = new Date().toISOString();
       let success = 0;
+      const restoredPaid: string[] = [];
       for (const id of input.paymentIds) {
         const existing = await sheets.getById(SHEET_TABS.PAYMENTS, "PaymentID", id);
         if (!existing) continue;
         if (existing.Status !== "pending") continue;
+        // CTRL-04: รายการที่กลับมารออนุมัติเพราะแก้หลังอนุมัติ → คืนสถานะเดิม (จ่ายแล้ว = วันที่จ่ายเดิม)
+        const nextStatus = statusAfterReapproval(existing.ReapprovalOf);
         const updates: Record<string, string | number> = {
-          Status: "approved",
+          Status: nextStatus,
           ApprovedBy: ctx.session.displayName,
           ApprovedAt: now,
+          ReapprovalOf: "",
           UpdatedAt: now,
         };
-        if (input.paymentDate) {
+        // วันที่จ่ายใหม่ใช้กับรายการที่ยังไม่จ่ายเท่านั้น (รายการที่จ่ายแล้ว วันจ่ายจริงคงเดิม)
+        if (input.paymentDate && nextStatus === "approved") {
           updates.PaymentDate = input.paymentDate;
         }
         const ok = await sheets.updateById(SHEET_TABS.PAYMENTS, "PaymentID", id, updates);
-        if (ok) success++;
+        if (ok) {
+          success++;
+          if (nextStatus !== "approved" && (parseFloat(existing.WTHAmount) || 0) > 0) restoredPaid.push(id);
+        }
+      }
+      // CTRL-04: จ่ายแล้วที่ยอดเปลี่ยน → 50 ทวิ ฉบับใหม่ (เวอร์ชันใหม่ ไม่ทับ)
+      for (const id of restoredPaid) {
+        await autoSaveWhtCert({ orgId: ctx.org.orgId, paymentId: id, userId: ctx.session.userId, spreadsheetId: ctx.org.googleSpreadsheetId });
       }
 
       if (success > 0) {

@@ -362,11 +362,16 @@ export function PaymentModal({
 
       let paymentId: string;
       if (isEdit) {
-        await updateMut.mutateAsync({ paymentId: payment.paymentId, ...data });
+        const res = await updateMut.mutateAsync({ paymentId: payment.paymentId, ...data });
         paymentId = payment.paymentId;
+        // CTRL-04: แก้ยอด/ผู้รับเงิน/บัญชี/ประเภทเอกสาร หลังอนุมัติ → กลับไปรออนุมัติ
+        if (res.requiresReapproval) {
+          alert("แก้ไขสาระสำคัญของรายการที่อนุมัติแล้ว — รายการกลับไป \"รออนุมัติ\" ให้ผู้อนุมัติตรวจอีกครั้ง\n(อนุมัติแล้วจะคืนสถานะเดิม เช่น จ่ายแล้ว)");
+        }
       } else {
         const result = await createMut.mutateAsync(data);
         paymentId = result.paymentId;
+        if (result.duplicateWarning) alert(result.duplicateWarning); // PUR-06
       }
 
       onSuccess();

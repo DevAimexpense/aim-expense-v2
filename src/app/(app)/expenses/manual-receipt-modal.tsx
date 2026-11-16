@@ -343,6 +343,7 @@ export function ManualReceiptModal({ events, payees, onClose, onSuccess, attachT
         });
         paymentId = result.paymentId;
         console.log("[manual-save] created paymentId=", paymentId);
+        if (result.duplicateWarning) alert(result.duplicateWarning); // PUR-06
       }
       // Upload ID card file ไป Google Drive (create mode)
       if (!isAttachMode && idCardFile && paymentId) {

@@ -141,6 +141,9 @@ export const SHEET_HEADERS: Record<string, string[]> = {
     "WhtCertNo", // DOC-04: เลขหนังสือรับรอง 50 ทวิ ที่ออกครั้งแรก "เล่มที่|เลขที่" — คงที่ ไม่คำนวณใหม่
     "WhtCertFor", // WHT-03: ลายนิ้วมือข้อมูล (ยอด/อัตรา/ผู้รับเงิน/วันที่/รายละเอียด) ที่ใช้สร้าง 50 ทวิ ใน Drive — ไม่ตรง = เขียนทับไฟล์เดิม
     "WthTypeId", // WHT-19: ประเภทหัก ณ ที่จ่ายที่เลือกตอนบันทึก (lib/wth-types) — ใช้พิมพ์ประเภทเงินได้บน 50 ทวิ
+    "ReapprovalOf", // CTRL-04: แก้สาระสำคัญหลังอนุมัติ → กลับไป pending · เก็บสถานะเดิม (approved/paid/cleared) ไว้คืนตอนอนุมัติใหม่
+    "NonDeductibleVat", // PUR-03: ภาษีซื้อต้องห้าม ม.82/5 — รหัสเหตุ ("" = ขอคืนได้) ดู lib/input-vat-rules.ts
+    "DuplicateOf", // PUR-06: บิลนี้อาจซ้ำกับรายการ (PaymentID) — เตือน ไม่บล็อก
   ],
   [SHEET_TABS.EVENT_ASSIGNMENTS]: [
     "AssignmentID",

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { todayBangkok } from "@/lib/utils/date";
 import { trpc } from "@/lib/trpc/client";
 import { WTH_TYPES } from "@/lib/wth-types";
+import { NON_DEDUCTIBLE_REASONS, type NonDeductibleReason } from "@/lib/input-vat-rules";
 import {
   EXPENSE_CATEGORIES_MAIN,
   DOCUMENT_TYPE_OPTIONS,
@@ -85,7 +86,12 @@ export function UploadReceiptModal({ events, payees, onClose, onSuccess, attachT
     const p = attachToPayment;
     return {
       eventId: p?.eventId || "", receiptNumber: p?.receiptNumber || "", documentDate: "",
-      documentType: (p?.documentType === "receipt" || p?.documentType === "tax_invoice" ? p.documentType : "tax_invoice") as "" | "receipt" | "tax_invoice",
+      // PUR-04: ไม่ตั้งต้นเป็น "ใบกำกับเต็มรูป" — ผู้ใช้ต้องเลือกตามใบจริง (อย่างย่อขอคืน VAT ไม่ได้)
+      documentType: (p?.documentType === "receipt" || p?.documentType === "tax_invoice" || p?.documentType === "tax_invoice_abbr"
+        ? p.documentType
+        : "") as "" | "receipt" | "tax_invoice" | "tax_invoice_abbr",
+      // PUR-03: ภาษีซื้อต้องห้าม (ม.82/5) — "" = ขอคืนได้
+      nonDeductibleVat: (p?.nonDeductibleVat || "") as "" | NonDeductibleReason,
       vendorName: "", vendorTaxId: "", vendorAddress: "", vendorBranch: "", vendorPhone: "",
       buyerName: "", buyerTaxId: "", buyerAddress: "", buyerBranch: "",
       description: p?.description || "", subtotal: 0, vatAmount: p?.vatAmount || 0,
@@ -168,6 +174,8 @@ export function UploadReceiptModal({ events, payees, onClose, onSuccess, attachT
     if (!form.vendorTaxId && form.documentType === "tax_invoice") warnings.push({ field: "vendorTaxId", message: "ใบกำกับภาษีต้องมีเลขผู้เสียภาษีผู้ขาย", severity: "error" });
     if (form.vendorTaxId && form.vendorTaxId.length !== 13) warnings.push({ field: "vendorTaxId", message: `เลขผู้เสียภาษีผู้ขายไม่ครบ 13 หลัก (${form.vendorTaxId.length})`, severity: "error" });
     if (form.documentType === "tax_invoice" && !form.buyerTaxId) warnings.push({ field: "buyerTaxId", message: "ใบกำกับภาษีต้องมีเลขผู้เสียภาษีผู้ซื้อ", severity: "error" });
+    // PUR-04: มี VAT ต้องระบุว่าเป็นใบกำกับเต็มรูป / อย่างย่อ / ใบเสร็จ (มีผลต่อการขอคืนภาษีซื้อ)
+    if (form.hasVat && !form.documentType) warnings.push({ field: "documentType", message: "เลือกประเภทเอกสาร — ใบกำกับเต็มรูป / อย่างย่อ (ขอคืน VAT ไม่ได้) / ใบเสร็จ", severity: "error" });
     if (!form.receiptNumber) warnings.push({ field: "receiptNumber", message: "ไม่พบเลขที่ใบเสร็จ/ใบกำกับภาษี", severity: "warning" });
     if (!form.documentDate) warnings.push({ field: "documentDate", message: "ไม่พบวันที่ออกเอกสาร", severity: "warning" });
     if (form.hasVat && form.subtotal > 0 && form.vatAmount > 0) {
@@ -307,6 +315,7 @@ export function UploadReceiptModal({ events, payees, onClose, onSuccess, attachT
           : form.totalAmount / 1.07;
       const taxFields = {
         documentType: form.documentType || undefined,
+        nonDeductibleVat: form.documentType === "tax_invoice" ? form.nonDeductibleVat : undefined, // PUR-03
         expenseNature: form.expenseNature || undefined,
         categoryMain: form.categoryMain.trim() || undefined,
         categorySub: form.categorySub.trim() || undefined,
@@ -337,15 +346,16 @@ export function UploadReceiptModal({ events, payees, onClose, onSuccess, attachT
           uploadedReceiptUrl = upData.fileUrl || upData.url || "";
         }
         // Record receipt metadata + URL via recordReceipt (no ownership gate)
-        await recordReceiptMut.mutateAsync({
+        const recorded = await recordReceiptMut.mutateAsync({
           paymentId,
           receiptUrl: uploadedReceiptUrl || undefined,
           receiptNumber: form.receiptNumber.trim() || undefined,
           receiptDate: form.documentDate || undefined,
           // PUR-01/07: ใบที่แนบคือใบกำกับเต็มรูป/ใบเสร็จ → อัปเดตประเภทให้รายงานภาษีซื้อถูก
-          documentType:
-            form.documentType === "tax_invoice" || form.documentType === "receipt" ? form.documentType : undefined,
+          documentType: form.documentType || undefined,
+          nonDeductibleVat: form.documentType === "tax_invoice" ? form.nonDeductibleVat : undefined, // PUR-03
         });
+        if (recorded.duplicateWarning) alert(recorded.duplicateWarning); // PUR-06
       } else {
         // Create mode: new payment — บันทึกค่าใช้จ่าย (จ่ายแล้ว มีใบเสร็จ) → ข้ามอนุมัติ
         const result = await createPaymentMut.mutateAsync({
@@ -362,6 +372,7 @@ export function UploadReceiptModal({ events, payees, onClose, onSuccess, attachT
           ...taxFields,
         });
         paymentId = result.paymentId;
+        if (result.duplicateWarning) alert(result.duplicateWarning); // PUR-06
       }
 
       // Upload receipt file (create mode only — attach mode already handled above)
@@ -540,6 +551,29 @@ export function UploadReceiptModal({ events, payees, onClose, onSuccess, attachT
                         emptyLabel="— ไม่ระบุ —"
                       />
                     </FG>
+                    {/* PUR-03: ภาษีซื้อต้องห้าม — เฉพาะใบกำกับเต็มรูป · ค่ารับรองบังคับโดยระบบ */}
+                    {form.documentType === "tax_invoice" && (
+                      <FG label="ขอคืนภาษีซื้อ">
+                        {form.categoryMain === "ค่ารับรอง" ? (
+                          <p style={{ fontSize: "0.75rem", color: "#b45309", margin: 0 }}>
+                            หมวดค่ารับรอง — ภาษีซื้อต้องห้าม (ม.82/5(4)) ไม่เข้า ภ.พ.30
+                          </p>
+                        ) : (
+                          <select
+                            value={form.nonDeductibleVat}
+                            onChange={(e) => setForm({ ...form, nonDeductibleVat: e.target.value as typeof form.nonDeductibleVat })}
+                            className="app-select"
+                          >
+                            <option value="">ขอคืนได้ (ใบกำกับถูกต้อง ใช้ในกิจการ)</option>
+                            {NON_DEDUCTIBLE_REASONS.filter((r) => r.value !== "entertainment").map((r) => (
+                              <option key={r.value} value={r.value}>
+                                ต้องห้าม — {r.label}
+                              </option>
+                            ))}
+                          </select>
+                        )}
+                      </FG>
+                    )}
                     <FG label="ค่าใช้จ่ายเป็น">
                       <SearchableSelect
                         value={form.expenseNature}

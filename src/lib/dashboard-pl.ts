@@ -9,6 +9,8 @@
 //       (หัก ณ ที่จ่าย ไม่ใช่ส่วนลด — เป็นภาษีที่นำส่งแทนผู้รับเงิน ค่าใช้จ่ายยังเต็มจำนวน)
 // ===========================================
 
+import { isInputVatClaimable } from "./input-vat-rules";
+
 export type PlPayment = {
   eventId: string;
   status: string;
@@ -19,6 +21,8 @@ export type PlPayment = {
   paymentDate: string;
   dueDate: string;
   createdAt: string;
+  nonDeductibleVat?: string;
+  categoryMain?: string;
 };
 
 export type PlBilling = {
@@ -56,7 +60,10 @@ export function expenseDateOf(p: PlPayment): string {
 
 /** ต้นทุนของรายการ (ไม่รวม VAT ที่ขอคืนได้) */
 export function expenseCostOf(p: PlPayment, vatRegistered: boolean): number {
-  const vatClaimable = vatRegistered && p.documentType === "tax_invoice";
+  // PUR-03/04: ภาษีซื้อต้องห้าม / ใบกำกับอย่างย่อ ขอคืนไม่ได้ → เป็นต้นทุน
+  const vatClaimable =
+    vatRegistered &&
+    isInputVatClaimable({ DocumentType: p.documentType, NonDeductibleVat: p.nonDeductibleVat, CategoryMain: p.categoryMain });
   return (p.ttlAmount || 0) + (vatClaimable ? 0 : p.vatAmount || 0);
 }
 

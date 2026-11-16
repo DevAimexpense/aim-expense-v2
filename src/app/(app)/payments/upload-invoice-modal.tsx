@@ -454,6 +454,7 @@ export function UploadInvoiceModal({
           vatAmount: form.hasVat && vatFromInvoice != null ? vatFromInvoice : undefined,
         });
         firstPaymentId = result.paymentId;
+        if (result.duplicateWarning) alert(result.duplicateWarning); // PUR-06
       } else {
         // Multi-line: create 1 payment per line item
         // PUR-02c: กรอก "VAT รวมตามใบ" → กระจายตามสัดส่วนไปยังรายการที่มี VAT (ไม่ใช้ ÷1.07 ซึ่งผิดเมื่อมีของยกเว้น VAT ปน)
@@ -477,6 +478,7 @@ export function UploadInvoiceModal({
             vatAmount: itemVat, // PUR-02c
           });
           if (i === 0) firstPaymentId = result.paymentId;
+          if (i === 0 && result.duplicateWarning) alert(result.duplicateWarning); // PUR-06 (เลขใบเดียวกันทุกบรรทัด — เตือนครั้งเดียว)
         }
       }
 

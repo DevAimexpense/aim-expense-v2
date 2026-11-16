@@ -315,7 +315,7 @@ export default function ExpensesPage() {
                       </div>
                       {p.categoryMain && (
                         <div style={{ fontSize: "0.65rem", color: "#78716c" }}>
-                          {p.documentType === "tax_invoice" ? "📋" : p.documentType === "receipt" ? "🧾" : ""}
+                          {p.documentType === "tax_invoice" ? "📋" : p.documentType === "tax_invoice_abbr" ? "📄" : p.documentType === "receipt" ? "🧾" : ""}
                           {` ${p.categoryMain}`}
                           {p.categorySub ? ` > ${p.categorySub}` : ""}
                         </div>
