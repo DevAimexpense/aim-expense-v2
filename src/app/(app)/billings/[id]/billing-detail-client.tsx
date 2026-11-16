@@ -236,11 +236,12 @@ export function BillingDetailClient({ billingId }: { billingId: string }) {
             </button>
           </>
         )}
-        {/* แก้ไขได้หลังส่ง/รับเงินแล้วด้วย (ใบเสร็จที่ออกจากใบนี้จะเปลี่ยนตาม) */}
+        {/* แก้ไขได้หลังส่ง/รับเงินแล้วด้วย — SALE-19: แต่ไม่ได้เมื่อออกใบเสร็จแล้ว (ต้องยกเลิกใบเสร็จก่อน) */}
         {(header.status === "sent" ||
           header.status === "partial" ||
           header.status === "paid") &&
           !!header.customerId &&
+          !header.receiptNumber &&
           header.docKind !== "receipt" && (
             <Link
               href={`/billings/${billingId}/edit`}

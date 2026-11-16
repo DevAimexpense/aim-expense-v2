@@ -19,6 +19,7 @@ export function ReceiptsClient() {
   const issueMut = trpc.billing.issueReceipt.useMutation();
   const voidMut = trpc.billing.voidReceipt.useMutation();
   const issueTiMut = trpc.billing.issueReceiptTaxInvoice.useMutation();
+  const voidBillingReceiptMut = trpc.billing.voidBillingReceipt.useMutation();
   // SALE-14: ใบเสร็จโหมดแยกที่ยังไม่มีใบกำกับคู่ที่ออกเลขแล้ว → แสดงปุ่มออกใบกำกับภาษีคู่
   const tiList = trpc.taxInvoice.list.useQuery(undefined, { staleTime: 30_000 });
   const issuedTiBySource = new Map(
@@ -108,11 +109,37 @@ export function ReceiptsClient() {
       if (res.taxInvoiceId) {
         ensureSalesDocSaved({ kind: "tax-invoice", id: String(res.taxInvoiceId), version: `saved-${Date.now()}`, savedFor: "", savedUrl: "" });
       }
-      setNotice(`ออกใบกำกับภาษี ${res.taxInvoiceNumber} คู่กับใบเสร็จแล้ว`);
+      setNotice(
+        `ออกใบกำกับภาษี ${res.taxInvoiceNumber} คู่กับใบเสร็จแล้ว${"warning" in res && res.warning ? ` — ⚠️ ${res.warning}` : ""}`,
+      );
     } catch (e) {
       setError(e instanceof Error ? e.message : "เกิดข้อผิดพลาด");
     } finally {
       setIssuingTiId(null);
+    }
+  };
+
+  // SALE-19: ใบเสร็จที่ออกจากใบวางบิล — ยกเลิกเพื่อแก้ใบวางบิลแล้วออกใบเสร็จใหม่ (การรับเงินยังอยู่)
+  const handleVoidBillingReceipt = async (billingId: string, receiptNumber: string, billingNo: string) => {
+    const reason = window.prompt(
+      `ยกเลิกใบเสร็จรับเงิน ${receiptNumber} (ของใบวางบิล ${billingNo})\n` +
+        `เลขที่นี้จะถูกเก็บเป็น "ยกเลิก" ไม่นำกลับมาใช้ · การรับเงินยังอยู่ — แก้ใบวางบิลแล้วออกใบเสร็จใหม่ได้\n\nเหตุผลการยกเลิก (จำเป็น):`,
+      "",
+    );
+    if (reason === null) return;
+    if (reason.trim().length < 3) {
+      setError("กรุณาระบุเหตุผลการยกเลิก (อย่างน้อย 3 ตัวอักษร)");
+      return;
+    }
+    setError(null);
+    setNotice(null);
+    try {
+      await voidBillingReceiptMut.mutateAsync({ billingId, reason: reason.trim() });
+      utils.billing.list.invalidate();
+      utils.billing.getById.invalidate({ billingId });
+      setNotice(`ยกเลิกใบเสร็จ ${receiptNumber} แล้ว — ใบวางบิล ${billingNo} กลับไปอยู่ในรายการรอออกใบเสร็จ (แก้ไขได้)`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "เกิดข้อผิดพลาด");
     }
   };
 
@@ -312,17 +339,37 @@ export function ReceiptsClient() {
                       🔒 ใบกำกับภาษี
                     </span>
                   )}
-                  {b.status !== "void" && b.taxDocMode !== "combined" && (
+                  {b.docKind === "receipt" && b.status !== "void" && b.taxDocMode !== "combined" && (
                     <Link
-                      href={
-                        b.docKind === "receipt"
-                          ? `/receipts/${b.billingId}/edit`
-                          : `/billings/${b.billingId}/edit`
-                      }
+                      href={`/receipts/${b.billingId}/edit`}
                       className="app-btn app-btn-secondary app-btn-sm"
                       style={{ marginRight: "0.375rem" }}
                     >
                       ✏️ แก้ไข
+                    </Link>
+                  )}
+                  {/* SALE-19: ใบเสร็จจากใบวางบิลแก้ไม่ได้ (ใบที่ลูกค้าถือต้องไม่เปลี่ยน) → ยกเลิก แล้วแก้ใบวางบิล + ออกใหม่ */}
+                  {b.docKind !== "receipt" && b.status !== "void" && (
+                    <button
+                      type="button"
+                      className="app-btn app-btn-ghost app-btn-sm"
+                      style={{ color: "#dc2626", marginRight: "0.375rem" }}
+                      disabled={voidBillingReceiptMut.isPending}
+                      onClick={() => handleVoidBillingReceipt(b.billingId, b.receiptNumber, b.docNumber)}
+                      title="ยกเลิกใบเสร็จนี้เพื่อแก้ใบวางบิล แล้วออกใบเสร็จใหม่ (เลขเดิมเก็บเป็นยกเลิก)"
+                    >
+                      ยกเลิกใบเสร็จ
+                    </button>
+                  )}
+                  {/* SALE-17b: ใบเสร็จออกตรงที่ยกเลิก (ไม่ใช่แถวกันเลข) → ออกใบใหม่แทน อ้างเลขเดิม */}
+                  {b.docKind === "receipt" && b.status === "void" && b.grandTotal > 0 && (
+                    <Link
+                      href={`/receipts/new?replaces=${encodeURIComponent(b.billingId)}`}
+                      className="app-btn app-btn-secondary app-btn-sm"
+                      style={{ marginRight: "0.375rem" }}
+                      title={b.voidReason ? `ยกเลิกเพราะ: ${b.voidReason}` : undefined}
+                    >
+                      ออกใบใหม่แทน
                     </Link>
                   )}
                   {b.docKind === "receipt" && b.status !== "void" && (

@@ -63,7 +63,8 @@ export function TaxInvoiceDetailClient({
     try {
       const r = await issueMut.mutateAsync({ taxInvoiceId });
       refresh();
-      alert(`ออกใบกำกับภาษี ${r.docNumber} สำเร็จ`);
+      // CTRL-13: ลงวันที่ในงวด ภ.พ.30 ที่เลยกำหนดยื่นแล้ว → แจ้งให้ยื่นเพิ่มเติม
+      alert(`ออกใบกำกับภาษี ${r.docNumber} สำเร็จ${r.warning ? `\n\n⚠️ ${r.warning}` : ""}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "เกิดข้อผิดพลาด");
     }

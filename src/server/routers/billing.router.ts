@@ -8,7 +8,14 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { router, featureProcedure, createCallerFactory, type TRPCContext } from "../trpc";
 import { taxInvoiceRouter } from "./taxInvoice.router";
-import { receiptVoidPlan, receiptEditBlockReason, nextReceiptTaxDocMode } from "../lib/receipt-output-vat";
+import {
+  receiptVoidPlan,
+  receiptEditBlockReason,
+  nextReceiptTaxDocMode,
+  billingEditBlockReason,
+  settledAmountAfterEdit,
+} from "../lib/receipt-output-vat";
+import { withReplacementNote, receiptReplacementNote } from "../lib/ti-replacement";
 import { getSheetsService, ensureTabsCached } from "../lib/sheets-context";
 import {
   GoogleSheetsService,
@@ -283,7 +290,8 @@ async function issuePairedTaxInvoice(
     const created = await caller.convertFromBilling({ billingId, docDate });
     taxInvoiceId = created.taxInvoiceId;
     const issued = await caller.issue({ taxInvoiceId });
-    return { taxInvoiceId, docNumber: issued.docNumber };
+    // CTRL-13: เตือนงวด ภ.พ.30 ที่เลยกำหนดยื่น (ออกแทน/ย้อนหลัง)
+    return { taxInvoiceId, docNumber: issued.docNumber, warning: issued.warning };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error("[billing.createReceipt] paired tax invoice", billingId, msg);
@@ -643,19 +651,13 @@ export const billingRouter = router({
       if (!existing) {
         throw new TRPCError({ code: "NOT_FOUND", message: "ไม่พบใบวางบิล" });
       }
-      // แก้ไขได้ทุกสถานะยกเว้นยกเลิก (เดิมแก้ได้เฉพาะ draft) — ใบเสร็จรับเงินที่ออกจาก
-      // ใบวางบิลนี้อ่านข้อมูลจากแถวเดียวกัน จึงเปลี่ยนตามทันที
-      if (existing.Status === "void") {
-        throw new TRPCError({
-          code: "PRECONDITION_FAILED",
-          message: "ใบวางบิลนี้ถูกยกเลิกแล้ว แก้ไขไม่ได้",
-        });
-      }
-      if (existing.DocKind === "receipt") {
-        throw new TRPCError({
-          code: "PRECONDITION_FAILED",
-          message: "เอกสารนี้เป็นใบเสร็จรับเงิน — แก้ไขจากเมนูใบเสร็จรับเงิน",
-        });
+      // แก้ไขได้ทุกสถานะยกเว้นยกเลิก (เดิมแก้ได้เฉพาะ draft)
+      // SALE-19: แต่ห้ามเมื่อออกใบเสร็จ (ใบเสร็จอ่านจากแถวนี้ — แก้แล้วใบที่ลูกค้าถือเปลี่ยน เลขเดิม)
+      // หรือมีใบกำกับภาษีที่ออกเลขแล้ว (ยอดใบวางบิล ≠ ใบกำกับ) — ต้องยกเลิกเอกสารนั้นก่อน
+      if (ctx.org.googleSpreadsheetId) await invalidateTab(ctx.org.googleSpreadsheetId, SHEET_TABS.TAX_INVOICES);
+      const editBlocked = billingEditBlockReason(existing, await sheets.getAll(SHEET_TABS.TAX_INVOICES));
+      if (editBlocked) {
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message: editBlocked });
       }
 
       const customer = await sheets.getCustomerById(input.customerId);
@@ -677,7 +679,18 @@ export const billingRouter = router({
       const paidBefore = parseFloat(existing.PaidAmount) || 0;
       const paymentPatch: Record<string, string | number> = {};
       if (existing.Status === "paid") {
-        paymentPatch.PaidAmount = totals.grandTotal;
+        // SALE-19: ยอดรับใหม่คิดฐานเดียวกับที่บันทึกไว้ (รายรับบุคคลหักภาษี = ยอดรับจริงหลังหัก)
+        // + จดประวัติในบันทึกการรับเงิน (ยอดที่รับไว้เดิมต้องตรวจย้อนได้)
+        const newPaid = settledAmountAfterEdit(existing, totals);
+        paymentPatch.PaidAmount = newPaid;
+        if (Math.abs(newPaid - paidBefore) >= 0.005) {
+          paymentPatch.PaymentNote = [
+            existing.PaymentNote,
+            `แก้ยอดใบวางบิลหลังรับเงินครบ: ยอดรับ ${paidBefore.toLocaleString("th-TH", { minimumFractionDigits: 2 })} → ${newPaid.toLocaleString("th-TH", { minimumFractionDigits: 2 })} (${todayBangkok()} โดย ${ctx.session.displayName || "-"})`,
+          ]
+            .filter(Boolean)
+            .join("\n");
+        }
       } else if (existing.Status === "partial") {
         if (paidBefore > totals.grandTotal) {
           throw new TRPCError({
@@ -845,6 +858,8 @@ export const billingRouter = router({
     .input(
       BillingCreateInput.omit({ dueDate: true, sourceQuotationId: true, terms: true }).extend({
         paymentMethod: PaymentMethod.default("transfer"),
+        // SALE-17b: ออกแทนใบเสร็จออกตรงที่ยกเลิกแล้ว → อ้างเลขเดิม + เหตุผลในหมายเหตุ
+        replacesBillingId: z.string().optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -855,6 +870,21 @@ export const billingRouter = router({
       const customer = await sheets.getCustomerById(input.customerId);
       if (!customer) {
         throw new TRPCError({ code: "NOT_FOUND", message: "ไม่พบลูกค้า" });
+      }
+
+      let replaceNote = "";
+      if (input.replacesBillingId) {
+        const old = await sheets.getBillingById(input.replacesBillingId);
+        if (!old || old.DocKind !== "receipt" || old.Status !== "void") {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: "ใบเสร็จที่จะออกแทนต้องเป็นใบเสร็จออกตรงที่ยกเลิกแล้ว",
+          });
+        }
+        const oldPairedTi = (await sheets.getAll(SHEET_TABS.TAX_INVOICES)).find(
+          (t) => t.SourceBillingID === old.BillingID && t.Status === "void" && t.DocNumber,
+        );
+        replaceNote = receiptReplacementNote(old, oldPairedTi?.DocNumber);
       }
 
       const billingId = GoogleSheetsService.generateId("RC");
@@ -920,7 +950,7 @@ export const billingRouter = router({
             PaidDate: input.docDate,
             PaymentMethod: input.paymentMethod,
             BankAccountID: "",
-            Notes: input.notes || "",
+            Notes: withReplacementNote(input.notes || "", replaceNote), // SALE-17b
             Terms: "",
             PreparedBy: ctx.session.displayName || "",
             PreparedByUserId: ctx.session.userId,
@@ -1265,7 +1295,13 @@ export const billingRouter = router({
             message: (paired.warning || "ออกใบกำกับภาษีคู่ไม่สำเร็จ").split("\n")[0],
           });
         }
-        return { success: true, taxInvoiceId: paired.taxInvoiceId, taxInvoiceNumber: paired.docNumber, existing: false };
+        return {
+          success: true,
+          taxInvoiceId: paired.taxInvoiceId,
+          taxInvoiceNumber: paired.docNumber,
+          existing: false,
+          warning: paired.warning, // CTRL-13
+        };
       }, { ttlMs: 60_000 });
     }),
 
@@ -1337,6 +1373,79 @@ export const billingRouter = router({
       });
 
       return { success: true, receiptNumber };
+    }),
+
+  /**
+   * SALE-19: ยกเลิกใบเสร็จรับเงินที่ออกจากใบวางบิล — เพื่อแก้ใบวางบิลแล้วออกใบเสร็จใหม่
+   * เลขเดิมเก็บเป็นแถว "ยกเลิก" (ไม่นำกลับมาใช้ · แสดงในรายการใบเสร็จว่าถูกยกเลิก + เหตุผล)
+   * ใบวางบิลยังเป็น "รับเงินครบ" (การรับเงินไม่ได้ถูกยกเลิก) → กลับไปอยู่ในรายการรอออกใบเสร็จ
+   */
+  voidBillingReceipt: featureProcedure("revenueModule", "manageBillings")
+    .input(z.object({ billingId: z.string(), reason: z.string().trim().min(3, "กรุณาระบุเหตุผลการยกเลิก").max(500) }))
+    .mutation(async ({ ctx, input }) => {
+      const sheets = await getSheetsService(ctx.org.orgId);
+      await ensureTabsCached(sheets, ctx.org.orgId);
+      const row = await withLock(`billing:${ctx.org.orgId}:${input.billingId}`, async () => {
+        if (ctx.org.googleSpreadsheetId) await invalidateTab(ctx.org.googleSpreadsheetId, SHEET_TABS.BILLINGS);
+        const existing = await sheets.getBillingById(input.billingId);
+        if (!existing) throw new TRPCError({ code: "NOT_FOUND", message: "ไม่พบใบวางบิล" });
+        if (existing.DocKind === "receipt") {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "ใบเสร็จที่ออกโดยตรง ยกเลิกที่ปุ่มยกเลิกของใบนั้น" });
+        }
+        if (!existing.ReceiptNumber) {
+          throw new TRPCError({ code: "PRECONDITION_FAILED", message: "ยังไม่ได้ออกใบเสร็จรับเงิน" });
+        }
+        const receiptNo = existing.ReceiptNumber;
+        const receiptDate = existing.ReceiptDate || existing.PaidDate || existing.DocDate || todayBangkok();
+        const now = new Date().toISOString();
+        // เลขเดิมคง "ถูกใช้แล้ว" (computeNextDocNumber หา max จากคอลัมน์ ReceiptNumber) — แบบเดียวกับ SALE-11
+        await withDocNumberLock(ctx.org.orgId, "RC", receiptDate, async () => {
+          await sheets.appendRowByHeaders(SHEET_TABS.BILLINGS, {
+            BillingID: GoogleSheetsService.generateId("RCV"),
+            DocNumber: receiptNo,
+            ReceiptNumber: receiptNo,
+            DocDate: receiptDate,
+            ReceiptDate: receiptDate,
+            DueDate: receiptDate,
+            DocKind: "receipt",
+            Status: "void",
+            CustomerID: existing.CustomerID || "",
+            CustomerNameSnapshot: existing.CustomerNameSnapshot || "",
+            Subtotal: 0,
+            VATAmount: 0,
+            GrandTotal: 0,
+            PaidAmount: 0,
+            IsVAT: existing.IsVAT || "",
+            VoidReason: input.reason,
+            Notes: `ใบเสร็จของใบวางบิล ${existing.DocNumber} ถูกยกเลิก: ${input.reason} — เก็บเลขไว้ไม่ให้ออกซ้ำ`,
+            PreparedBy: "ระบบ",
+            PreparedByUserId: ctx.session.userId,
+            CreatedAt: now,
+            UpdatedAt: now,
+          });
+          await sheets.updateById(SHEET_TABS.BILLINGS, "BillingID", input.billingId, {
+            ReceiptNumber: "",
+            ReceiptDate: "",
+            ReceiptPdfUrl: "",
+            ReceiptPdfFor: "",
+            ReceiptPdfContentFor: "",
+            PaymentNote: [existing.PaymentNote, `ยกเลิกใบเสร็จ ${receiptNo}: ${input.reason}`].filter(Boolean).join("\n"),
+            UpdatedAt: now,
+          });
+        });
+        return existing;
+      });
+      await safeAuditLog({
+        data: {
+          orgId: ctx.org.orgId,
+          userId: ctx.session.userId,
+          action: "update",
+          entityType: "receipt",
+          entityRef: input.billingId,
+          summary: `ยกเลิกใบเสร็จรับเงิน ${row.ReceiptNumber} (จากใบวางบิล ${row.DocNumber}): ${input.reason}`,
+        },
+      });
+      return { success: true, voidedReceiptNumber: row.ReceiptNumber };
     }),
 
   /**

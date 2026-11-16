@@ -43,13 +43,11 @@ export function EditReceiptClient({ billingId }: { billingId: string }) {
             <div className="app-empty-icon">🧾</div>
             <p className="app-empty-title">ใบเสร็จนี้ออกจากใบวางบิล {header.docNumber}</p>
             <p className="app-empty-desc">
-              แก้ไขที่ใบวางบิล แล้วใบเสร็จจะเปลี่ยนตาม (เลขที่ใบเสร็จคงเดิม)
+              {/* SALE-19: ใบเสร็จที่ส่งลูกค้าแล้วต้องไม่เปลี่ยน */}
+              ใบเสร็จที่ออกแล้วแก้ไม่ได้ — กด &ldquo;ยกเลิกใบเสร็จ&rdquo; ที่หน้ารายการใบเสร็จ (ระบุเหตุผล) แล้วแก้ใบวางบิลและออกใบเสร็จใหม่
             </p>
-            <Link
-              href={`/billings/${billingId}/edit`}
-              className="app-btn app-btn-primary"
-            >
-              ✏️ แก้ไขใบวางบิล
+            <Link href="/receipts" className="app-btn app-btn-primary">
+              ← ไปที่รายการใบเสร็จ
             </Link>
           </div>
         </div>

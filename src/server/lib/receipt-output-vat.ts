@@ -92,6 +92,38 @@ export function receiptEditBlockReason(receipt: Row, taxInvoices: Row[]): string
   return null;
 }
 
+/**
+ * SALE-19: ใบวางบิลที่แก้ไม่ได้แล้ว — ออกใบเสร็จ หรือมีใบกำกับภาษีที่ออกเลขแล้ว (เอกสารที่ส่งลูกค้าไปแล้ว
+ * อ่านข้อมูลจากแถวนี้ / ต้องตรงกับแถวนี้) · คืนข้อความเหตุผล หรือ null = แก้ได้
+ */
+export function billingEditBlockReason(billing: Row, taxInvoices: Row[]): string | null {
+  if (billing.Status === "void") return "ใบวางบิลนี้ถูกยกเลิกแล้ว แก้ไขไม่ได้";
+  if (billing.DocKind === "receipt") return "เอกสารนี้เป็นใบเสร็จรับเงิน — แก้ไขจากเมนูใบเสร็จรับเงิน";
+  if (billing.ReceiptNumber) {
+    return `ใบวางบิลนี้ออกใบเสร็จรับเงิน ${billing.ReceiptNumber} แล้ว — แก้ไขไม่ได้ (ใบเสร็จที่ส่งลูกค้าแล้วต้องไม่เปลี่ยน) · ยกเลิกใบเสร็จที่เมนูใบเสร็จรับเงินก่อน แล้วแก้ใบวางบิลและออกใบเสร็จใหม่`;
+  }
+  const issued = taxInvoices.find((t) => t.SourceBillingID === billing.BillingID && t.Status === "issued");
+  if (issued) {
+    return `ใบวางบิลนี้มีใบกำกับภาษี ${issued.DocNumber} แล้ว — แก้ไขไม่ได้ ให้ยกเลิกใบกำกับภาษีก่อน (หรือออกใบลดหนี้/เพิ่มหนี้)`;
+  }
+  return null;
+}
+
+/**
+ * SALE-19: ใบวางบิลรับเงินครบ (ยังไม่มีเอกสารตาม) แล้วแก้ยอด — ยอดรับเงินเดิมเป็นฐานไหน
+ * (บุคคล/รายรับที่หักภาษี = ยอดรับจริงหลังหัก · ปกติ = ยอดรวม) → ยอดใหม่คิดฐานเดียวกัน
+ */
+export function settledAmountAfterEdit(
+  existing: Row,
+  totals: { grandTotal: number; amountReceivable: number },
+): number {
+  const paid = parseFloat(existing.PaidAmount || "") || 0;
+  const oldGrand = parseFloat(existing.GrandTotal || "") || 0;
+  const oldReceivable = parseFloat(existing.AmountReceivable || "") || 0;
+  const onReceivable = Math.abs(paid - oldReceivable) < 0.005 && Math.abs(oldReceivable - oldGrand) >= 0.005;
+  return onReceivable ? totals.amountReceivable : totals.grandTotal;
+}
+
 /** SALE-14: โหมดเอกสารภาษีของใบเสร็จออกตรงหลังแก้ */
 export function nextReceiptTaxDocMode(
   current: string,

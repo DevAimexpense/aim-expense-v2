@@ -27,6 +27,7 @@ import { resolveIssuerBranch } from "../lib/issuer-branch";
 import { prisma } from "@/lib/prisma";
 import { safeAuditLog } from "@/server/lib/audit";
 import { replacementNote, withReplacementNote } from "../lib/ti-replacement";
+import { filedVatPeriodWarning } from "../lib/vat-period";
 
 // ===== Schemas =====
 
@@ -562,7 +563,8 @@ export const taxInvoiceRouter = router({
         },
       });
 
-      return { success: true, docNumber };
+      // CTRL-13: ลงวันที่ในงวด ภ.พ.30 ที่เลยกำหนดยื่นแล้ว → เตือน (ไม่บล็อก)
+      return { success: true, docNumber, warning: filedVatPeriodWarning(docDate, todayBangkok()) };
     }),
 
   /**

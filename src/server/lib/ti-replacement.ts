@@ -18,6 +18,19 @@ export function replacementNote(sameSourceTis: Row[]): string {
   return `ออกแทนใบกำกับภาษีเลขที่ ${last.DocNumber} ซึ่งยกเลิกแล้ว${reason ? ` (เหตุผล: ${reason})` : ""}`;
 }
 
+/**
+ * SALE-17b: ใบเสร็จออกตรงที่ออกแทนใบที่ยกเลิก — โหมดรวม = อ้าง "ใบเสร็จรับเงิน/ใบกำกับภาษี" ฉบับเดิม
+ * · โหมดแยก = อ้างใบเสร็จเดิม + ใบกำกับคู่เดิม (ข้อความนี้ถูกคัดลอกไปที่ใบกำกับคู่ใบใหม่ด้วย)
+ */
+export function receiptReplacementNote(old: Row, oldPairedTiNo?: string): string {
+  const no = old.ReceiptNumber || old.DocNumber || "";
+  if (!no) return "";
+  const title = old.TaxDocMode === "combined" ? "ใบเสร็จรับเงิน/ใบกำกับภาษี" : "ใบเสร็จรับเงิน";
+  const ti = oldPairedTiNo ? ` และใบกำกับภาษีเลขที่ ${oldPairedTiNo}` : "";
+  const reason = (old.VoidReason || "").trim();
+  return `ออกแทน${title}เลขที่ ${no}${ti} ซึ่งยกเลิกแล้ว${reason ? ` (เหตุผล: ${reason})` : ""}`;
+}
+
 /** ต่อข้อความอ้างฉบับเดิมไว้หน้าหมายเหตุเดิม */
 export function withReplacementNote(notes: string, note: string): string {
   if (!note) return notes;

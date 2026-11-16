@@ -113,6 +113,8 @@ interface Props {
   kind?: "billing" | "receipt";
   /** ข้อความเตือนใต้หัวหน้า (เช่น แก้ไขเอกสารที่รับเงินแล้ว) */
   notice?: string;
+  /** SALE-17b: สร้างใบเสร็จออกแทนใบเสร็จออกตรงที่ยกเลิก (BillingID ใบเดิม) */
+  replacesBillingId?: string;
 }
 
 const PAYMENT_METHODS = [
@@ -128,6 +130,7 @@ export function NewBillingClient({
   initial,
   kind = "billing",
   notice,
+  replacesBillingId,
 }: Props) {
   const isReceipt = kind === "receipt";
   const backHref = isReceipt ? "/receipts" : "/billings";
@@ -317,7 +320,7 @@ export function NewBillingClient({
                 ...receiptPayload,
                 paymentMethod,
               })
-            : await receiptMut.mutateAsync({ ...receiptPayload, paymentMethod });
+            : await receiptMut.mutateAsync({ ...receiptPayload, paymentMethod, replacesBillingId });
         utils.billing.list.invalidate();
         utils.billing.getById.invalidate({ billingId: result.billingId });
         utils.taxInvoice.list.invalidate(); // SALE-14: ร่างเก่าถูกลบ / ใบกำกับคู่ใหม่
