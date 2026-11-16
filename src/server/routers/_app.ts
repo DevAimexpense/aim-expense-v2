@@ -24,6 +24,7 @@ import { affiliateRouter } from "./affiliate.router";
 import { affiliateAdminRouter } from "./affiliate-admin.router";
 import { backofficeRouter } from "./backoffice.router";
 import { googleAccessRouter } from "./google-access.router";
+import { statementRouter } from "./statement.router";
 
 export const appRouter = router({
   event: eventRouter,
@@ -47,6 +48,7 @@ export const appRouter = router({
   affiliateAdmin: affiliateAdminRouter,
   backoffice: backofficeRouter,
   googleAccess: googleAccessRouter,
+  statement: statementRouter,
 });
 
 export type AppRouter = typeof appRouter;

@@ -345,6 +345,11 @@ export class GoogleDriveService {
     }
   }
 
+  /** ย้ายไฟล์ลงถังขยะ Drive (กู้คืนได้ 30 วัน) — ใช้แทนการลบถาวร */
+  async trashFile(fileId: string): Promise<void> {
+    await this.drive.files.update({ fileId, requestBody: { trashed: true } });
+  }
+
   /**
    * Delete file
    */

@@ -185,6 +185,12 @@ const NAV_GROUPS: NavGroup[] = [
         icon: "📊",
         permission: "viewReports",
       },
+      {
+        label: "Statement ธนาคาร",
+        href: "/statements",
+        icon: "🏦",
+        permission: "viewReports",
+      },
     ],
   },
   {

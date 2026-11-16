@@ -39,6 +39,7 @@ export const SHEET_TABS = {
   // ===== S25B: Tax Invoices =====
   TAX_INVOICES: "TaxInvoices",
   TAX_INVOICE_LINES: "TaxInvoiceLines",
+  BANK_STATEMENTS: "BankStatements", // statement ธนาคารรายเดือน (ไฟล์อยู่ใน Drive Reports/ปี/เดือน) — ส่งสำนักงานบัญชี
 } as const;
 
 // ===== Column Headers per Tab =====
@@ -320,6 +321,20 @@ export const SHEET_HEADERS: Record<string, string[]> = {
     "DiscountPercent",
     "LineTotal",
     "Notes",
+  ],
+  [SHEET_TABS.BANK_STATEMENTS]: [
+    "StatementID",
+    "Month", // YYYY-MM (เดือนของ statement)
+    "CompanyBankID", // ref → CompanyBanks (ว่าง = บัญชีอื่น/ไม่ระบุ)
+    "BankLabel", // snapshot "ธนาคาร · เลขบัญชี" ตอนอัปโหลด
+    "FileName",
+    "FileUrl", // ลิงก์ Drive
+    "FileId",
+    "MonthFolderId", // โฟลเดอร์ Reports/{YYYY}/{MM} — ใช้เปิด/แชร์ให้สำนักงานบัญชี
+    "Notes",
+    "UploadedBy",
+    "UploadedByUserId",
+    "UploadedAt",
   ],
 };
 

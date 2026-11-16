@@ -300,7 +300,7 @@ const SCHEMA_VERSION = (() => {
   return (h >>> 0).toString(36);
 })();
 
-const DRIVE_RAW_FILE_ERRORS: ReadonlySet<PropertyKey> = new Set(["deleteFile", "getFileAccess"]);
+const DRIVE_RAW_FILE_ERRORS: ReadonlySet<PropertyKey> = new Set(["deleteFile", "getFileAccess", "trashFile"]);
 
 /**
  * Get GoogleDriveService instance for an org
