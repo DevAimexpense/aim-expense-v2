@@ -24,7 +24,12 @@
 //   - All amounts use GTTLAmount (gross total = TTL - WTH + VAT). This is
 //     the "actual money out the door" number used everywhere else in the app.
 
-import { receiptOutputVatRows } from "@/server/lib/receipt-output-vat";
+import {
+  receiptOutputVatRows,
+  linkableTaxInvoices,
+  uncoveredBillingReceipts,
+  type LinkCandidate,
+} from "@/server/lib/receipt-output-vat";
 import { z } from "zod";
 import { router, orgProcedure } from "../trpc";
 import { scopedEventIds } from "@/lib/permissions";
@@ -1564,6 +1569,8 @@ export const reportRouter = router({
         customerTaxId: string;
         baseAmount: number;
         vatAmount: number;
+        /** SALE-01c: ใบกำกับที่ออกแยกไว้ ลูกค้า/VAT ตรงกัน — น่าจะนับซ้ำกับใบเสร็จนี้ */
+        linkCandidates?: LinkCandidate[];
       };
       const outputRows: OutputRow[] = [];
       for (const h of tiHeaders) {
@@ -1595,8 +1602,15 @@ export const reportRouter = router({
           customerTaxId: r.customerTaxId,
           baseAmount: r.baseAmount,
           vatAmount: r.vatAmount,
+          // โหมดรวม = ตัวใบเสร็จเป็นใบกำกับ → ไม่เสนอผูก (ถ้าซ้ำต้องยกเลิกใบใดใบหนึ่ง)
+          linkCandidates: r.mode === "combined" ? [] : linkableTaxInvoices(r.customerId, r.vatAmount, tiHeaders),
         });
       }
+      // SALE-01d: ใบเสร็จจากใบวางบิลที่มี VAT แต่ยังไม่มีใบกำกับ — ไม่รวมในยอด แสดงเป็นรายการยกเว้น
+      const uncovered = uncoveredBillingReceipts(batch[SHEET_TABS.BILLINGS] || [], tiHeaders)
+        .filter((r) => (scope === null || scope.includes(r.eventId)) && r.date >= input.from && r.date <= input.to)
+        .map((r) => ({ ...r, linkCandidates: linkableTaxInvoices(r.customerId, r.vatAmount, tiHeaders) }))
+        .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
       outputRows.sort((a, b) =>
         a.date !== b.date ? (a.date < b.date ? -1 : 1) : 0,
       );
@@ -1620,6 +1634,13 @@ export const reportRouter = router({
           totalCount: outputRows.length,
           totalBase: outputTotalBase,
           totalVAT: outputTotalVAT,
+          /** SALE-01c: จำนวนแถวที่น่าจะนับซ้ำกับใบกำกับที่ออกแยก */
+          possibleDuplicates: outputRows.filter((r) => (r.linkCandidates?.length || 0) > 0).length,
+        },
+        /** SALE-01d: ใบเสร็จจากใบวางบิลที่มี VAT แต่ยังไม่มีใบกำกับ (ไม่รวมในยอดด้านบน) */
+        uncoveredReceipts: {
+          rows: uncovered,
+          totalVAT: uncovered.reduce((s, r) => s + r.vatAmount, 0),
         },
         net: {
           // Positive = ต้องเสียเพิ่มภาษีขาย, Negative = ภาษีคงเหลือยกไป

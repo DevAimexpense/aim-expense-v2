@@ -28,6 +28,7 @@ import { prisma } from "@/lib/prisma";
 import { safeAuditLog } from "@/server/lib/audit";
 import { replacementNote, withReplacementNote } from "../lib/ti-replacement";
 import { filedVatPeriodWarning } from "../lib/vat-period";
+import { linkSourceBlockReason } from "../lib/receipt-output-vat";
 
 // ===== Schemas =====
 
@@ -667,6 +668,48 @@ export const taxInvoiceRouter = router({
       });
 
       return { success: true };
+    }),
+
+  /**
+   * SALE-01c/01d: ผูกใบกำกับภาษีที่ออกไว้แยก (ไม่มีเอกสารต้นทาง) กับใบเสร็จออกตรง/ใบวางบิลของรายการเดียวกัน
+   * → ภาษีขายนับที่ใบกำกับครั้งเดียว (ใบเสร็จไม่ถูกนับซ้ำ / ใบวางบิลหลุดจากรายการยกเว้น)
+   * ไม่แก้เนื้อหาใบกำกับ (ออกเลขแล้วแก้ไม่ได้) — ตั้งแค่ SourceBillingID
+   */
+  linkSource: featureProcedure("revenueModule", "manageTaxInvoices")
+    .input(z.object({ taxInvoiceId: z.string(), billingId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const sheets = await getSheetsService(ctx.org.orgId);
+      await ensureTabsCached(sheets, ctx.org.orgId);
+      return withLock(`receipt-ti:${ctx.org.orgId}:${input.billingId}`, async () => {
+        if (ctx.org.googleSpreadsheetId) {
+          await invalidateTab(ctx.org.googleSpreadsheetId, SHEET_TABS.TAX_INVOICES);
+          await invalidateTab(ctx.org.googleSpreadsheetId, SHEET_TABS.BILLINGS);
+        }
+        const tis = await sheets.getAll(SHEET_TABS.TAX_INVOICES);
+        const ti = tis.find((t) => t.TaxInvoiceID === input.taxInvoiceId);
+        const doc = await sheets.getBillingById(input.billingId);
+        const block = linkSourceBlockReason(ti, doc, tis);
+        if (block) throw new TRPCError({ code: "PRECONDITION_FAILED", message: block });
+        await sheets.updateById(SHEET_TABS.TAX_INVOICES, "TaxInvoiceID", input.taxInvoiceId, {
+          SourceBillingID: input.billingId,
+        });
+        // ใบเสร็จออกตรงเก่าที่ยังไม่มีโหมด → ถือเป็นโหมดแยก (มีใบกำกับคู่แล้ว)
+        if (doc!.DocKind === "receipt" && !doc!.TaxDocMode) {
+          await sheets.updateById(SHEET_TABS.BILLINGS, "BillingID", input.billingId, { TaxDocMode: "separate" });
+        }
+        const docNo = doc!.DocKind === "receipt" ? doc!.ReceiptNumber || doc!.DocNumber : doc!.DocNumber;
+        await safeAuditLog({
+          data: {
+            orgId: ctx.org.orgId,
+            userId: ctx.session.userId,
+            action: "update",
+            entityType: "tax_invoice",
+            entityRef: input.taxInvoiceId,
+            summary: `ผูกใบกำกับภาษี ${ti!.DocNumber} กับ${doc!.DocKind === "receipt" ? "ใบเสร็จ" : "ใบวางบิล"} ${docNo} (ภาษีขายนับที่ใบกำกับครั้งเดียว)`,
+          },
+        });
+        return { success: true };
+      }, { ttlMs: 30_000 });
     }),
 
   /**

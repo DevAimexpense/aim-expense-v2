@@ -26,6 +26,17 @@ export type PlBilling = {
   status: string;
   docDate: string;
   subtotal: number;
+  sourceQuotationId?: string;
+};
+
+/** RPT-02: ใบกำกับภาษี — นับเป็นรายได้เฉพาะใบที่ไม่มีใบวางบิล/ใบเสร็จต้นทาง (ไม่งั้นนับซ้ำ) */
+export type PlTaxInvoice = {
+  eventId: string;
+  status: string;
+  docDate: string;
+  subtotal: number;
+  sourceBillingId: string;
+  sourceQuotationId: string;
 };
 
 /** สถานะค่าใช้จ่ายที่ถือว่าเกิดขึ้นแล้ว (ไม่นับ รออนุมัติ / ไม่อนุมัติ / ยกเลิก) */
@@ -49,6 +60,8 @@ const inEvent = (id: string, eventId: string) => eventId === "all" || (id || "")
 export function computeDashboardPL(params: {
   payments: PlPayment[];
   billings: PlBilling[];
+  /** RPT-02: ใบกำกับภาษีที่ออกโดยไม่มีใบวางบิล (จากใบเสนอราคาโดยตรง / สร้างเอง) */
+  taxInvoices?: PlTaxInvoice[];
   /** YYYY-MM · "" = ทั้งหมด */
   month: string;
   /** "all" หรือ EventID */
@@ -59,11 +72,23 @@ export function computeDashboardPL(params: {
   const round2 = (n: number) => Math.round(n * 100) / 100;
 
   let revenue = 0;
+  // ใบเสนอราคาที่แปลงเป็นใบวางบิลแล้ว — ใบกำกับจากใบเสนอราคาเดียวกันเป็นรายการขายเดียวกัน (ไม่นับซ้ำ)
+  const billedQuotations = new Set<string>();
   for (const b of billings) {
     if (NOT_REVENUE.has(b.status)) continue;
+    if (b.sourceQuotationId) billedQuotations.add(b.sourceQuotationId);
     if (!inEvent(b.eventId, eventId) || !inPeriod(b.docDate, month)) continue;
     revenue += b.subtotal || 0;
   }
+  let revenueFromTaxInvoices = 0;
+  for (const t of params.taxInvoices || []) {
+    if (t.status !== "issued") continue;
+    if (t.sourceBillingId) continue; // ใบวางบิล/ใบเสร็จต้นทางนับไปแล้ว
+    if (t.sourceQuotationId && billedQuotations.has(t.sourceQuotationId)) continue;
+    if (!inEvent(t.eventId, eventId) || !inPeriod(t.docDate, month)) continue;
+    revenueFromTaxInvoices += t.subtotal || 0;
+  }
+  revenue += revenueFromTaxInvoices;
 
   let expense = 0;
   let pendingCount = 0;
@@ -86,6 +111,8 @@ export function computeDashboardPL(params: {
   const profit = round2(revenue - expense);
   return {
     revenue,
+    /** RPT-02: ส่วนของรายได้ที่มาจากใบกำกับภาษีที่ไม่มีใบวางบิล (แสดงใต้การ์ด) */
+    revenueFromTaxInvoices: round2(revenueFromTaxInvoices),
     expense,
     profit,
     margin: revenue > 0 ? (profit / revenue) * 100 : null,

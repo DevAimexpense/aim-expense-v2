@@ -61,6 +61,95 @@ export function receiptOutputVatRows(billings: Row[], taxInvoices: Row[]): Recei
   return out;
 }
 
+export type LinkCandidate = { taxInvoiceId: string; docNumber: string; date: string };
+
+/**
+ * SALE-01c: ใบกำกับภาษีที่ออกไว้แยก (ไม่ผูกเอกสารต้นทาง) ของลูกค้าเดียวกัน VAT เท่ากัน
+ * = น่าจะเป็นใบเดียวกับใบเสร็จ/ใบวางบิลนี้ → ภ.พ.30 นับซ้ำ จนกว่าจะผูก (detective)
+ */
+export function linkableTaxInvoices(customerId: string, vatAmount: number, taxInvoices: Row[]): LinkCandidate[] {
+  if (!customerId || !(vatAmount > 0)) return [];
+  return taxInvoices
+    .filter(
+      (t) =>
+        t.Status === "issued" &&
+        !t.SourceBillingID &&
+        t.CustomerID === customerId &&
+        Math.abs(num(t.VATAmount) - vatAmount) < 0.01,
+    )
+    .map((t) => ({ taxInvoiceId: t.TaxInvoiceID, docNumber: t.DocNumber || "", date: (t.DocDate || "").slice(0, 10) }));
+}
+
+/** SALE-01c/01d: เงื่อนไขผูกใบกำกับที่ออกแยกกับใบเสร็จ/ใบวางบิล — null = ผูกได้ */
+export function linkSourceBlockReason(
+  ti: Row | undefined,
+  doc: Row | null | undefined,
+  taxInvoices: Row[],
+): string | null {
+  if (!ti) return "ไม่พบใบกำกับภาษี";
+  if (!doc) return "ไม่พบใบเสร็จ/ใบวางบิล";
+  if (ti.Status !== "issued") return "ผูกได้เฉพาะใบกำกับภาษีที่ออกเลขแล้ว";
+  if (ti.SourceBillingID) return `ใบกำกับ ${ti.DocNumber} ผูกกับเอกสารอื่นอยู่แล้ว`;
+  if (doc.Status === "void") return "เอกสารนี้ถูกยกเลิกแล้ว";
+  if (doc.DocKind === "receipt" && doc.TaxDocMode === "combined") {
+    return "ใบนี้เป็นใบเสร็จรับเงิน/ใบกำกับภาษีอยู่แล้ว — มีใบกำกับ 2 ใบสำหรับรายการเดียว ให้ยกเลิกใบใดใบหนึ่ง";
+  }
+  if (doc.IsVAT === "FALSE" || !(num(doc.VATAmount) > 0)) return "เอกสารนี้ไม่มี VAT";
+  if (ti.CustomerID !== doc.CustomerID) return "ลูกค้าของใบกำกับไม่ตรงกับเอกสาร";
+  const already = taxInvoices.find((t) => t.SourceBillingID === doc.BillingID && t.Status === "issued");
+  if (already) return `เอกสารนี้มีใบกำกับภาษี ${already.DocNumber} ผูกอยู่แล้ว`;
+  return null;
+}
+
+export type UncoveredBillingReceipt = {
+  billingId: string;
+  billingNumber: string;
+  receiptNumber: string;
+  date: string;
+  customerId: string;
+  customerName: string;
+  customerTaxId: string;
+  eventId: string;
+  baseAmount: number;
+  vatAmount: number;
+};
+
+/**
+ * SALE-01d: ใบเสร็จที่ออกจากใบวางบิล (มี VAT) แต่ยังไม่มีใบกำกับภาษีที่ออกเลขแล้ว
+ * — ไม่ผูกกับใบวางบิลนี้ และไม่ได้ออกจากใบเสนอราคาต้นทางเดียวกัน (กันนับซ้ำ)
+ * ไม่รวมในยอดภาษีขาย (ต้องออกใบกำกับก่อน) แต่ต้องแสดงเป็นรายการยกเว้นให้ตามออก
+ */
+export function uncoveredBillingReceipts(billings: Row[], taxInvoices: Row[]): UncoveredBillingReceipt[] {
+  const issued = taxInvoices.filter((t) => t.Status === "issued");
+  const bySource = new Set(issued.map((t) => t.SourceBillingID).filter(Boolean));
+  const byQuotation = new Set(issued.map((t) => t.SourceQuotationID).filter(Boolean));
+  const out: UncoveredBillingReceipt[] = [];
+  for (const b of billings) {
+    if (b.DocKind === "receipt") continue;
+    if (!b.ReceiptNumber || b.Status === "void") continue;
+    if (b.IsVAT === "FALSE") continue;
+    const vat = num(b.VATAmount);
+    if (vat <= 0) continue;
+    if (bySource.has(b.BillingID)) continue;
+    if (b.SourceQuotationID && byQuotation.has(b.SourceQuotationID)) continue;
+    const date = (b.ReceiptDate || b.PaidDate || "").slice(0, 10);
+    if (!date) continue;
+    out.push({
+      billingId: b.BillingID,
+      billingNumber: b.DocNumber || "",
+      receiptNumber: b.ReceiptNumber,
+      date,
+      customerId: b.CustomerID || "",
+      customerName: b.CustomerNameSnapshot || b.CustomerID || "—",
+      customerTaxId: b.CustomerTaxIdSnapshot || "",
+      eventId: (b.EventID || "").trim(),
+      baseAmount: num(b.Subtotal),
+      vatAmount: vat,
+    });
+  }
+  return out;
+}
+
 /**
  * SALE-01b: เงื่อนไขการยกเลิกใบเสร็จออกตรง — ใบกำกับคู่ (issued/draft) ต้องจัดการก่อน
  * และต้องมีเหตุผลเมื่อใบเสร็จเป็นใบกำกับภาษีด้วย (โหมดรวม) หรือมีใบกำกับคู่ที่ออกเลขแล้ว

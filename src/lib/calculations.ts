@@ -55,6 +55,26 @@ export function assertVatOverride(ttlAmount: number, vat: number): void {
   }
 }
 
+/**
+ * PUR-02c: ใบเดียวแยกหลายรายการ — กระจาย "VAT รวมตามใบ" ไปยังรายการที่มี VAT ตามสัดส่วนยอด (รวม VAT)
+ * เศษสตางค์ไปที่รายการ VAT สุดท้าย ให้ผลรวมเท่ายอดบนใบพอดี · รายการไม่มี VAT = 0
+ */
+export function allocateInvoiceVat(items: { amount: number; hasVat: boolean }[], totalVat: number): number[] {
+  const vatIdx = items.map((it, i) => (it.hasVat && it.amount > 0 ? i : -1)).filter((i) => i >= 0);
+  const out = items.map(() => 0);
+  const base = vatIdx.reduce((s, i) => s + items[i].amount, 0);
+  if (vatIdx.length === 0 || base <= 0 || !(totalVat > 0)) return out;
+  let allocated = 0;
+  vatIdx.forEach((i, k) => {
+    if (k === vatIdx.length - 1) out[i] = roundTwo(totalVat - allocated);
+    else {
+      out[i] = roundTwo((totalVat * items[i].amount) / base);
+      allocated = roundTwo(allocated + out[i]);
+    }
+  });
+  return out;
+}
+
 export function calculatePayment(input: PaymentInput): PaymentResult {
   const { costPerUnit, days, numberOfPeople, pctWTH, isVatPayee } = input;
 

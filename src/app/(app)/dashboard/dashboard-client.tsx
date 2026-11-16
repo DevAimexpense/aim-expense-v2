@@ -61,6 +61,8 @@ export function DashboardClient({
     enabled: features.pl,
   });
   const paymentsQuery = trpc.payment.list.useQuery(undefined, { enabled: features.pl });
+  // RPT-02: ใบกำกับที่ออกโดยไม่มีใบวางบิล (จากใบเสนอราคา/สร้างเอง) ก็เป็นรายได้
+  const taxInvoicesQuery = trpc.taxInvoice.list.useQuery(undefined, { enabled: features.pl });
   const billings = billingsQuery.data || [];
   const quotations = quotationsQuery.data || [];
 
@@ -76,11 +78,12 @@ export function DashboardClient({
       computeDashboardPL({
         payments: paymentsQuery.data || [],
         billings: billingsQuery.data || [],
+        taxInvoices: taxInvoicesQuery.data || [],
         month: filterMonth,
         eventId: filterEvent,
         vatRegistered,
       }),
-    [paymentsQuery.data, billingsQuery.data, filterMonth, filterEvent, vatRegistered],
+    [paymentsQuery.data, billingsQuery.data, taxInvoicesQuery.data, filterMonth, filterEvent, vatRegistered],
   );
   const totalInvoiced = pl.revenue;
   const totalProfit = pl.profit;
@@ -220,7 +223,11 @@ export function DashboardClient({
               icon="🧾"
               label="รายได้ (ออกเอกสารแล้ว)"
               value={`฿${formatNumber(totalInvoiced)}`}
-              sub="ใบวางบิล/ใบเสร็จ ก่อน VAT"
+              sub={
+                pl.revenueFromTaxInvoices > 0
+                  ? `ใบวางบิล/ใบเสร็จ + ใบกำกับที่ไม่มีใบวางบิล ฿${formatNumber(pl.revenueFromTaxInvoices)} · ก่อน VAT`
+                  : "ใบวางบิล/ใบเสร็จ/ใบกำกับ ก่อน VAT"
+              }
               compact
             />
             <StatCard

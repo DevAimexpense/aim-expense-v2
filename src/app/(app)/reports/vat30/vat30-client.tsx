@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { yearMonthBangkok } from "@/lib/utils/date";
+import Link from "next/link";
+import { yearMonthBangkok, formatDate } from "@/lib/utils/date";
 import { trpc } from "@/lib/trpc/client";
 import DateInput from "@/components/shared/date-input";
 
@@ -30,6 +31,21 @@ export function Vat30Client({ orgName }: { orgName: string }) {
   const [tab, setTab] = useState<Tab>("summary");
 
   const q = trpc.report.vat30.useQuery({ from, to });
+  const utils = trpc.useUtils();
+  const linkMut = trpc.taxInvoice.linkSource.useMutation();
+  const [linkError, setLinkError] = useState<string | null>(null);
+
+  // SALE-01c/01d: ผูกใบกำกับที่ออกแยกไว้กับใบเสร็จ/ใบวางบิล → ภาษีขายนับครั้งเดียว
+  const handleLink = async (taxInvoiceId: string, tiNo: string, billingId: string, docNo: string) => {
+    if (!window.confirm(`ผูกใบกำกับภาษี ${tiNo} กับ ${docNo}?\nยืนยันเมื่อเป็นการขายรายการเดียวกันเท่านั้น — ภาษีขายจะนับที่ใบกำกับครั้งเดียว`)) return;
+    setLinkError(null);
+    try {
+      await linkMut.mutateAsync({ taxInvoiceId, billingId });
+      await utils.report.vat30.invalidate();
+    } catch (e) {
+      setLinkError(e instanceof Error ? e.message : "ผูกไม่สำเร็จ");
+    }
+  };
 
   return (
     <div className="app-page">
@@ -90,6 +106,30 @@ export function Vat30Client({ orgName }: { orgName: string }) {
         </TabButton>
       </div>
 
+      {linkError && <div className="app-error-msg">{linkError}</div>}
+
+      {/* SALE-01c/01d: แจ้งเตือนที่ต้องจัดการก่อนยื่น */}
+      {q.data && (q.data.output.possibleDuplicates > 0 || q.data.uncoveredReceipts.rows.length > 0) && (
+        <div
+          className="app-card"
+          style={{ marginBottom: "1rem", background: "#fffbeb", border: "1px solid #fcd34d", fontSize: "0.875rem", color: "#92400e" }}
+        >
+          <strong>⚠️ ตรวจก่อนยื่น ภ.พ.30</strong>
+          {q.data.output.possibleDuplicates > 0 && (
+            <div>
+              · มีใบเสร็จ {q.data.output.possibleDuplicates} ใบที่น่าจะนับซ้ำกับใบกำกับภาษีที่ออกแยกไว้ (ลูกค้าและ VAT ตรงกัน) —
+              ดูแท็บภาษีขาย แล้วกด &ldquo;ผูก&rdquo; ถ้าเป็นการขายรายการเดียวกัน
+            </div>
+          )}
+          {q.data.uncoveredReceipts.rows.length > 0 && (
+            <div>
+              · มีใบเสร็จจากใบวางบิลที่มี VAT แต่ยังไม่มีใบกำกับภาษี {q.data.uncoveredReceipts.rows.length} ใบ
+              (VAT {formatTHB(q.data.uncoveredReceipts.totalVAT)} บาท) — <strong>ยังไม่รวมในยอดภาษีขาย</strong> ต้องออกใบกำกับภาษีก่อน
+            </div>
+          )}
+        </div>
+      )}
+
       {q.isLoading ? (
         <div className="app-card">
           <div className="app-skeleton" style={{ height: "200px" }} />
@@ -99,7 +139,20 @@ export function Vat30Client({ orgName }: { orgName: string }) {
       ) : tab === "summary" ? (
         <SummaryTab data={q.data} />
       ) : tab === "output" ? (
-        <OutputTab rows={q.data.output.rows} totals={q.data.output} />
+        <>
+          <OutputTab
+            rows={q.data.output.rows}
+            totals={q.data.output}
+            onLink={handleLink}
+            linking={linkMut.isPending}
+          />
+          <UncoveredReceipts
+            rows={q.data.uncoveredReceipts.rows}
+            totalVAT={q.data.uncoveredReceipts.totalVAT}
+            onLink={handleLink}
+            linking={linkMut.isPending}
+          />
+        </>
       ) : (
         <InputTab rows={q.data.input.rows} totals={q.data.input} />
       )}
@@ -267,9 +320,124 @@ function SummaryTab({
   );
 }
 
+type LinkCandidate = { taxInvoiceId: string; docNumber: string; date: string };
+type OnLink = (taxInvoiceId: string, tiNo: string, billingId: string, docNo: string) => void;
+
+function LinkButtons({
+  candidates,
+  billingId,
+  docNo,
+  onLink,
+  linking,
+}: {
+  candidates: LinkCandidate[];
+  billingId: string;
+  docNo: string;
+  onLink: OnLink;
+  linking: boolean;
+}) {
+  if (candidates.length === 0) return null;
+  return (
+    <div style={{ fontSize: "0.75rem", color: "#b45309", marginTop: "0.25rem" }}>
+      อาจซ้ำกับใบกำกับที่ออกแยกไว้:{" "}
+      {candidates.map((c) => (
+        <button
+          key={c.taxInvoiceId}
+          type="button"
+          className="app-btn app-btn-ghost app-btn-sm"
+          style={{ padding: "0 0.375rem", fontSize: "0.75rem" }}
+          disabled={linking}
+          onClick={() => onLink(c.taxInvoiceId, c.docNumber, billingId, docNo)}
+          title={`ใบกำกับลงวันที่ ${c.date ? formatDate(c.date) : "-"}`}
+        >
+          🔗 ผูก {c.docNumber}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** SALE-01d: ใบเสร็จจากใบวางบิลที่มี VAT แต่ยังไม่มีใบกำกับ — รายการยกเว้น (ไม่รวมในยอด) */
+function UncoveredReceipts({
+  rows,
+  totalVAT,
+  onLink,
+  linking,
+}: {
+  rows: {
+    billingId: string;
+    billingNumber: string;
+    receiptNumber: string;
+    date: string;
+    customerName: string;
+    baseAmount: number;
+    vatAmount: number;
+    linkCandidates: LinkCandidate[];
+  }[];
+  totalVAT: number;
+  onLink: OnLink;
+  linking: boolean;
+}) {
+  if (rows.length === 0) return null;
+  return (
+    <div className="app-card" style={{ marginTop: "1rem", padding: 0, overflowX: "auto" }}>
+      <div className="app-card-header" style={{ padding: "1rem 1rem 0" }}>
+        <h2 className="app-card-title">⚠️ ใบเสร็จที่มี VAT แต่ยังไม่มีใบกำกับภาษี (ยังไม่รวมในยอดด้านบน)</h2>
+      </div>
+      <p style={{ padding: "0 1rem", fontSize: "0.8125rem", color: "#64748b" }}>
+        ค่าบริการถึงจุดต้องเสีย VAT เมื่อรับเงิน — ออกใบกำกับภาษีลงวันที่รับเงินจากหน้าใบวางบิล หรือผูกกับใบกำกับที่ออกไว้แล้ว
+      </p>
+      <table className="app-table" style={{ width: "100%" }}>
+        <thead>
+          <tr>
+            <th>วันที่รับเงิน</th>
+            <th>ใบเสร็จ / ใบวางบิล</th>
+            <th>ลูกค้า</th>
+            <th className="text-right">ฐานภาษี</th>
+            <th className="text-right">VAT</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.billingId}>
+              <td>{formatDate(r.date)}</td>
+              <td className="mono">
+                {r.receiptNumber}
+                <div style={{ fontSize: "0.75rem" }}>
+                  <Link href={`/billings/${r.billingId}`} style={{ color: "#2563eb" }}>
+                    {r.billingNumber} → ออกใบกำกับภาษี
+                  </Link>
+                </div>
+                <LinkButtons
+                  candidates={r.linkCandidates}
+                  billingId={r.billingId}
+                  docNo={r.billingNumber}
+                  onLink={onLink}
+                  linking={linking}
+                />
+              </td>
+              <td>{r.customerName}</td>
+              <td className="text-right num">{formatTHB(r.baseAmount)}</td>
+              <td className="text-right num">{formatTHB(r.vatAmount)}</td>
+            </tr>
+          ))}
+        </tbody>
+        <tfoot>
+          <tr style={{ fontWeight: 700, background: "#fffbeb" }}>
+            <td colSpan={4}>VAT ที่ยังไม่มีใบกำกับ {rows.length} ใบ</td>
+            <td className="text-right num">{formatTHB(totalVAT)}</td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+  );
+}
+
 function OutputTab({
   rows,
   totals,
+  onLink,
+  linking,
 }: {
   rows: {
     taxInvoiceId: string;
@@ -281,8 +449,11 @@ function OutputTab({
     customerTaxId: string;
     baseAmount: number;
     vatAmount: number;
+    linkCandidates?: LinkCandidate[];
   }[];
   totals: { totalBase: number; totalVAT: number; totalCount: number };
+  onLink: OnLink;
+  linking: boolean;
 }) {
   if (rows.length === 0) {
     return (
@@ -311,7 +482,7 @@ function OutputTab({
         <tbody>
           {rows.map((r) => (
             <tr key={r.taxInvoiceId}>
-              <td>{r.date}</td>
+              <td>{formatDate(r.date)}</td>
               <td className="mono">
                 {r.docNumber}
                 {r.kind === "receipt" && (
@@ -320,6 +491,15 @@ function OutputTab({
                       ? "ใบเสร็จรับเงิน/ใบกำกับภาษี"
                       : "ใบเสร็จ — ยังไม่มีใบกำกับภาษีคู่"}
                   </div>
+                )}
+                {r.kind === "receipt" && (
+                  <LinkButtons
+                    candidates={r.linkCandidates || []}
+                    billingId={r.taxInvoiceId}
+                    docNo={r.docNumber}
+                    onLink={onLink}
+                    linking={linking}
+                  />
                 )}
               </td>
               <td>{r.customerName}</td>

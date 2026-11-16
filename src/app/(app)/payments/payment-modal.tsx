@@ -263,6 +263,14 @@ export function PaymentModal({
     [events]
   );
 
+  // PUR-02c: VAT ตามใบกำกับ (null = คิด 7% อัตโนมัติ) — รายการเดิมที่ VAT ไม่เท่า 7% ของฐาน
+  // (ใบมีของยกเว้น VAT ปน / VAT จาก LINE) เริ่มด้วยค่าตามใบ ไม่ถูกคิด 7% ใหม่เมื่อแก้ยอด
+  const [vatOverride, setVatOverride] = useState<number | null>(() =>
+    payment && payment.vatAmount > 0 && Math.abs(payment.vatAmount - Math.round(payment.ttlAmount * 7) / 100) >= 0.01
+      ? payment.vatAmount
+      : null,
+  );
+
   // Live calculation
   const calc = useMemo(
     () =>
@@ -272,6 +280,7 @@ export function PaymentModal({
         numberOfPeople: form.numberOfPeople,
         pctWTH: effectiveWthRate,
         isVatPayee: form.isVatPayee,
+        vatOverride: form.isVatPayee && vatOverride !== null ? vatOverride : undefined,
       }),
     [
       form.costPerUnit,
@@ -279,8 +288,10 @@ export function PaymentModal({
       form.numberOfPeople,
       effectiveWthRate,
       form.isVatPayee,
+      vatOverride,
     ]
   );
+  const vatCap = Math.round(calc.ttlAmount * 7) / 100;
 
   const isLoading = createMut.isPending || updateMut.isPending || deleteMut.isPending;
 
@@ -291,6 +302,8 @@ export function PaymentModal({
     if (form.costPerUnit < 0) return "ค่าใช้จ่ายต้องไม่ติดลบ";
     if (form.days < 1) return "จำนวนวันต้องอย่างน้อย 1";
     if (form.numberOfPeople < 1) return "จำนวนคนต้องอย่างน้อย 1";
+    if (form.isVatPayee && vatOverride !== null && (vatOverride < 0 || vatOverride > vatCap + 1))
+      return `VAT ตามใบต้องไม่ติดลบ และไม่เกิน 7% ของยอดก่อน VAT (${vatCap.toLocaleString("th-TH")} บาท)`;
     if (form.wthTypeId === "custom" && (form.customWthRate < 0 || form.customWthRate > 100))
       return "อัตราหัก ณ ที่จ่ายต้องอยู่ระหว่าง 0-100%";
     if (!form.dueDate) return "กรุณาเลือกวันครบกำหนด";
@@ -335,6 +348,8 @@ export function PaymentModal({
           rate: effectiveWthRate,
         }),
         isVatPayee: form.isVatPayee,
+        // PUR-02c: ส่ง VAT ตามใบเมื่อผู้ใช้กรอก/รายการเดิมเป็นค่าตามใบ — ไม่ส่ง = server คิด 7% (หรือคงเดิมถ้าฐานไม่เปลี่ยน)
+        vatAmount: form.isVatPayee && vatOverride !== null ? Math.round(vatOverride * 100) / 100 : undefined,
         dueDate: form.dueDate,
         notes: form.notes.trim() || undefined,
         // R5/R6: tax compliance fields
@@ -852,6 +867,39 @@ export function PaymentModal({
                 </div>
               )}
 
+              {/* PUR-02c: VAT ตามใบกำกับ — ใบที่มีของยกเว้น VAT ปน VAT จริงน้อยกว่า 7% ของยอดรวม */}
+              {form.isVatPayee && (
+                <div className="app-form-group" style={{ marginTop: "0.75rem", marginBottom: 0 }}>
+                  <label className="app-label">VAT ตามใบกำกับ (บาท)</label>
+                  <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                    <input
+                      type="number"
+                      min={0}
+                      step={0.01}
+                      className="app-input num"
+                      style={{ maxWidth: "180px" }}
+                      value={vatOverride ?? calc.vatAmount}
+                      onChange={(e) => setVatOverride(e.target.value === "" ? null : Number(e.target.value))}
+                      disabled={isReadOnly}
+                    />
+                    {vatOverride !== null && !isReadOnly && (
+                      <button
+                        type="button"
+                        className="app-btn app-btn-ghost app-btn-sm"
+                        onClick={() => setVatOverride(null)}
+                      >
+                        คิด 7% อัตโนมัติ
+                      </button>
+                    )}
+                  </div>
+                  <p style={{ fontSize: "0.75rem", color: "#64748b", margin: "0.25rem 0 0" }}>
+                    {vatOverride === null
+                      ? "คิด 7% ของยอดก่อน VAT อัตโนมัติ — ใส่ยอดตามใบถ้าใบมีสินค้ายกเว้น VAT ปน"
+                      : "ใช้ VAT ตามใบ — แก้ยอดแล้วตรวจให้ตรงกับใบกำกับอีกครั้ง"}
+                  </p>
+                </div>
+              )}
+
               {/* Live Calc Display */}
               <div
                 style={{
@@ -875,7 +923,7 @@ export function PaymentModal({
                 )}
                 {calc.vatAmount > 0 && (
                   <CalcRow
-                    label="VAT 7%"
+                    label={vatOverride !== null ? "VAT ตามใบ" : "VAT 7%"}
                     value={calc.vatAmount}
                     color="#2563eb"
                   />

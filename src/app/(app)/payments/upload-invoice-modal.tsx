@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { trpc } from "@/lib/trpc/client";
 import { WTH_TYPES } from "@/lib/wth-types";
+import { allocateInvoiceVat } from "@/lib/calculations";
 import SearchableSelect, { type SearchableSelectOption } from "@/components/searchable-select";
 import {
   EXPENSE_CATEGORIES_MAIN,
@@ -346,6 +347,18 @@ export function UploadInvoiceModal({
   };
 
   const lineItemsTotal = lineItems.reduce((s, it) => s + (it.amount || 0), 0);
+  // PUR-02c: VAT รวมตามใบ (โหมดแยกรายการ) — "" = คิด 7% แต่ละรายการ (÷1.07)
+  const [multiVatInput, setMultiVatInput] = useState("");
+  const multiVatTotal =
+    multiVatInput.trim() !== "" && Number.isFinite(parseFloat(multiVatInput))
+      ? Math.round(parseFloat(multiVatInput) * 100) / 100
+      : null;
+  const multiVatBase = lineItems.filter((it) => it.hasVat).reduce((s, it) => s + (it.amount || 0), 0);
+  const multiVatCap = Math.round(((multiVatBase * 7) / 107) * 100) / 100;
+  const multiVatError =
+    multiVatTotal !== null && (multiVatTotal < 0 || multiVatTotal > multiVatCap + 1)
+      ? `VAT รวมตามใบต้องไม่เกิน ${multiVatCap.toFixed(2)} บาท (7/107 ของยอดรายการที่มี VAT)`
+      : null;
 
   const canSave = (): boolean => {
     if (!form.eventId) return false;
@@ -362,6 +375,7 @@ export function UploadInvoiceModal({
     } else {
       if (lineItems.length === 0) return false;
       if (lineItems.some((it) => it.amount <= 0 || !it.description.trim())) return false;
+      if (multiVatError) return false;
     }
     return true;
   };
@@ -442,11 +456,14 @@ export function UploadInvoiceModal({
         firstPaymentId = result.paymentId;
       } else {
         // Multi-line: create 1 payment per line item
+        // PUR-02c: กรอก "VAT รวมตามใบ" → กระจายตามสัดส่วนไปยังรายการที่มี VAT (ไม่ใช้ ÷1.07 ซึ่งผิดเมื่อมีของยกเว้น VAT ปน)
+        const allocatedVat = multiVatTotal !== null ? allocateInvoiceVat(lineItems, multiVatTotal) : null;
         for (let i = 0; i < lineItems.length; i++) {
           const item = lineItems[i];
           const selWth = WTH_TYPES.find((t) => t.id === item.wthTypeId) || WTH_TYPES[0];
           const itemWthRate = item.wthTypeId === "custom" ? item.customWthRate : selWth.rate;
-          const costPerUnit = item.hasVat ? item.amount / 1.07 : item.amount;
+          const itemVat = item.hasVat && allocatedVat ? allocatedVat[i] : undefined;
+          const costPerUnit = item.hasVat ? (itemVat !== undefined ? item.amount - itemVat : item.amount / 1.07) : item.amount;
 
           const result = await createPaymentMut.mutateAsync({
             ...sharedBase,
@@ -457,6 +474,7 @@ export function UploadInvoiceModal({
             pctWTH: itemWthRate,
             wthTypeId: itemWthRate > 0 ? item.wthTypeId : undefined, // WHT-19
             isVatPayee: item.hasVat,
+            vatAmount: itemVat, // PUR-02c
           });
           if (i === 0) firstPaymentId = result.paymentId;
         }
@@ -1234,6 +1252,31 @@ export function UploadInvoiceModal({
                   <span>รวมทุกรายการ</span>
                   <span style={{ color: "#16a34a" }}>฿{formatNumber(lineItemsTotal)}</span>
                 </div>
+
+                {/* PUR-02c: VAT รวมตามใบ — กระจายไปยังรายการที่มี VAT ตามสัดส่วน */}
+                {multiVatBase > 0 && (
+                  <div className="app-form-group" style={{ marginTop: "0.75rem", marginBottom: 0 }}>
+                    <label className="app-label" style={{ fontSize: "0.75rem" }}>
+                      VAT รวมตามใบกำกับ (บาท)
+                    </label>
+                    <input
+                      type="number"
+                      inputMode="decimal"
+                      min={0}
+                      step={0.01}
+                      value={multiVatInput}
+                      placeholder={multiVatCap.toFixed(2)}
+                      onChange={(e) => setMultiVatInput(e.target.value)}
+                      className="app-input num"
+                      style={{ maxWidth: "200px" }}
+                    />
+                    <p className="app-hint">
+                      เว้นว่าง = คิด 7% ในแต่ละรายการ · ใบที่มีสินค้ายกเว้น VAT ปน ให้กรอกยอด VAT ตามที่พิมพ์บนใบ
+                      ระบบจะกระจายไปยังรายการที่ติ๊ก &ldquo;มี VAT&rdquo; ตามสัดส่วนยอด
+                    </p>
+                    {multiVatError && <p className="app-error-msg" style={{ margin: 0 }}>{multiVatError}</p>}
+                  </div>
+                )}
               </div>
             )}
 
