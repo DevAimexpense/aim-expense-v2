@@ -17,7 +17,6 @@ import { prisma } from "@/lib/prisma";
 import { getOrgContext } from "@/lib/auth/middleware";
 import { pushMessage } from "@/lib/line/messaging";
 import { readPeriodClose, snapshotMonthsToVerify } from "@/lib/period-close";
-import { readVatRegistered } from "@/lib/org-settings";
 import { yearMonthBangkok } from "@/lib/utils/date";
 import { verifyClosedPeriods } from "@/server/lib/period-fingerprint";
 import { safeAuditLog } from "@/server/lib/audit";
@@ -85,7 +84,7 @@ export async function GET(req: NextRequest) {
             features: org.features,
           },
         };
-        const result = await verifyClosedPeriods(ctx, o.period, months, readVatRegistered(o.settings));
+        const result = await verifyClosedPeriods(ctx, o.period, months);
         if (result.mismatches.length > 0) {
           const lines = result.mismatches.map((m) => `${m.label}\n${m.diffs.map((d) => `· ${d}`).join("\n")}`).join("\n\n");
           const text =

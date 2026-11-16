@@ -25,7 +25,7 @@ export type PeriodTotals = {
   outputVat: number;
   inputVat: number;
   wht: number;
-  /** CTRL-03r: ค่าใช้จ่ายรวม / รายได้รวม (ก่อน VAT ตาม Dashboard) — ไม่มีในลายนิ้วมือรุ่นแรก */
+  /** CTRL-03r: ค่าใช้จ่ายที่จ่ายแล้ว / รายได้ตามใบเสร็จ-ใบกำกับ (ก่อน VAT · lockedMonthTotals) — ไม่มีในลายนิ้วมือรุ่นแรก */
   expense?: number;
   revenue?: number;
   at?: string;
@@ -36,8 +36,8 @@ export const PERIOD_TOTAL_LABELS = {
   outputVat: "ภาษีขาย",
   inputVat: "ภาษีซื้อ",
   wht: "ภาษีหัก ณ ที่จ่าย",
-  revenue: "รายได้รวม",
-  expense: "ค่าใช้จ่ายรวม",
+  revenue: "รายได้ตามใบเสร็จ/ใบกำกับ",
+  expense: "ค่าใช้จ่ายที่จ่ายแล้ว",
 } as const;
 export type PeriodTotalKey = keyof typeof PERIOD_TOTAL_LABELS;
 
@@ -269,4 +269,53 @@ export function singleClosedMonth(from: string, to: string, settings: PeriodClos
   if (Number(to.slice(8, 10)) !== lastDay) return "";
   if (!isDateInClosedPeriod(from, settings.closedThrough)) return "";
   return settings.snapshots?.[ym] ? ym : "";
+}
+
+/**
+ * CTRL-03r-01: รายได้/ค่าใช้จ่ายสำหรับลายนิ้วมือ — นับเฉพาะ "สิ่งที่ปิดงวดล็อกไว้" (ไม่งั้นงานปกติหลังปิด
+ * เช่น อนุมัติขอเบิกที่ due เดือนปิด / ส่งใบวางบิลร่าง จะทำให้ตัวเลขเปลี่ยนและเตือนผิด)
+ *   ค่าใช้จ่าย = มูลค่าก่อน VAT ของรายการจ่ายแล้ว (paid/cleared) ตามวันที่จ่าย ± ใบลด/เพิ่มหนี้ผู้ขายตามวันที่ได้รับ
+ *   รายได้     = มูลค่าก่อน VAT ของใบเสร็จที่ออกแล้ว (ไม่ยกเลิก) ตามวันที่ใบเสร็จ
+ *              + ใบกำกับภาษีที่ออกเลขแล้วและไม่มีต้นทาง ตามวันที่ใบ ± ใบลด/เพิ่มหนี้ตามวันที่ออก
+ * ไม่ขึ้นกับตั้งค่าองค์กร (เช่นจด VAT) — เปลี่ยนตั้งค่าแล้วต้องไม่เตือนผิด
+ */
+export function lockedMonthTotals(
+  data: {
+    payments: PaymentRow[];
+    billings: PaymentRow[];
+    taxInvoices: PaymentRow[];
+    creditNotes: PaymentRow[];
+    purchaseNotes: PaymentRow[];
+  },
+  month: string,
+): { revenue: number; expense: number } {
+  const n = (v: string | undefined) => {
+    const x = parseFloat(v || "");
+    return Number.isFinite(x) ? x : 0;
+  };
+  const inMonth = (d: string | undefined) => (d || "").slice(0, 7) === month;
+  let expense = 0;
+  for (const p of data.payments) {
+    if (!SETTLED.has(p.Status || "")) continue;
+    if (!inMonth(p.PaymentDate || (p.PaidAt || "").slice(0, 10))) continue;
+    expense += n(p.TTLAmount);
+  }
+  for (const pn of data.purchaseNotes) {
+    if (pn.Status === "void" || !inMonth(pn.ReceivedDate)) continue;
+    expense += (pn.Kind === "debit" ? 1 : -1) * n(pn.BaseAmount);
+  }
+  let revenue = 0;
+  for (const b of data.billings) {
+    if (b.Status === "void" || !b.ReceiptDate || !inMonth(b.ReceiptDate)) continue;
+    revenue += n(b.Subtotal);
+  }
+  for (const t of data.taxInvoices) {
+    if (t.Status !== "issued" || t.SourceBillingID || !inMonth(t.DocDate)) continue;
+    revenue += n(t.Subtotal);
+  }
+  for (const c of data.creditNotes) {
+    if (c.Status !== "issued" || !inMonth(c.DocDate)) continue;
+    revenue += (c.Kind === "debit" ? 1 : -1) * n(c.DiffAmount);
+  }
+  return { revenue: round2(revenue), expense: round2(expense) };
 }

@@ -7,7 +7,6 @@ import { TRPCError } from "@trpc/server";
 import { Prisma } from "@prisma/client";
 import { router, orgProcedure } from "../trpc";
 import { computePeriodTotals, verifyClosedPeriods } from "../lib/period-fingerprint";
-import { readVatRegistered } from "@/lib/org-settings";
 import { prisma } from "@/lib/prisma";
 import { safeAuditLog } from "@/server/lib/audit";
 import {
@@ -95,11 +94,7 @@ export const periodCloseRouter = router({
       });
     }
     // CTRL-03/03r: ยอดภาษี + รายได้/ค่าใช้จ่าย ตอนปิด (อ่านไม่ได้ → ปิดได้ แค่ไม่มีลายนิ้วมือเดือนนั้น)
-    const snaps = await computePeriodTotals(
-      ctx,
-      monthsToSnapshot(org.period.closedThrough, input.month),
-      readVatRegistered(org.settings),
-    );
+    const snaps = await computePeriodTotals(ctx, monthsToSnapshot(org.period.closedThrough, input.month));
     await savePeriod(ctx.org.orgId, org.settings, {
       ...org.period,
       closedThrough: input.month,
@@ -160,7 +155,7 @@ export const periodCloseRouter = router({
     }
     const months = snapshotMonthsToVerify(org.period);
     if (months.length === 0) return { checked: [] as string[], mismatches: [] };
-    return verifyClosedPeriods(ctx, org.period, months, readVatRegistered(org.settings));
+    return verifyClosedPeriods(ctx, org.period, months);
   }),
 
   /** มอบ/ถอนสิทธิ์ปิด-เปิดงวด — เจ้าของมีสิทธิ์เสมอ (ถอดไม่ได้) */

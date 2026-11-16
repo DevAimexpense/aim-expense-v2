@@ -69,9 +69,21 @@ export function PurchaseNotesSection({ paymentId, description, ttlAmount, vatAmo
     if (!(base > 0)) return setError("มูลค่าต้องมากกว่า 0");
     if (form.reason.trim().length < 3) return setError("กรุณาระบุเหตุ");
     setSaving(true);
+    const payload = {
+      paymentId,
+      kind: form.kind,
+      vendorDocNumber: form.vendorDocNumber.trim(),
+      vendorDocDate: form.vendorDocDate,
+      receivedDate: form.receivedDate,
+      baseAmount: base,
+      vatAmount: Number.isFinite(vat) ? vat : 0,
+      reason: form.reason.trim(),
+    };
     try {
       let fileUrl = "";
       if (file) {
+        // PUR-11b: ตรวจยอด/สิทธิ์/งวดก่อน — ไม่ผ่านจะไม่อัปโหลดไฟล์ (ไม่มีไฟล์ค้างใน Drive)
+        await createMut.mutateAsync({ ...payload, dryRun: true });
         const fd = new FormData();
         fd.append("file", file);
         fd.append("paymentId", paymentId);
@@ -84,17 +96,7 @@ export function PurchaseNotesSection({ paymentId, description, ttlAmount, vatAmo
         if (!res.ok) throw new Error(d.error || "อัปโหลดไฟล์ไม่สำเร็จ");
         fileUrl = d.fileUrl || "";
       }
-      const r = await createMut.mutateAsync({
-        paymentId,
-        kind: form.kind,
-        vendorDocNumber: form.vendorDocNumber.trim(),
-        vendorDocDate: form.vendorDocDate,
-        receivedDate: form.receivedDate,
-        baseAmount: base,
-        vatAmount: Number.isFinite(vat) ? vat : 0,
-        reason: form.reason.trim(),
-        fileUrl: fileUrl || undefined,
-      });
+      const r = await createMut.mutateAsync({ ...payload, fileUrl: fileUrl || undefined });
       if (r.warning) alert(r.warning);
       setForm({ ...EMPTY, receivedDate: todayBangkok() });
       setFile(null);

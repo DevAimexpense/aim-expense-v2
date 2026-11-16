@@ -97,6 +97,8 @@ export const purchaseNoteRouter = router({
         vatAmount: z.number().min(0),
         reason: z.string().trim().min(3, "กรุณาระบุเหตุ").max(500),
         fileUrl: z.string().url().optional().or(z.literal("")),
+        /** PUR-11b: ตรวจอย่างเดียว ไม่บันทึก — หน้าจอเรียกก่อนอัปโหลดไฟล์ (ไม่มีไฟล์ค้างใน Drive ถ้ายอดไม่ผ่าน) */
+        dryRun: z.boolean().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -148,6 +150,7 @@ export const purchaseNoteRouter = router({
               (n.VendorDocNumber || "").trim().toLowerCase() === input.vendorDocNumber.trim().toLowerCase(),
           );
 
+          if (input.dryRun) return { noteId: "", description: "", dup, dry: true as const };
           const payee = payment.PayeeID ? await sheets.getById(SHEET_TABS.PAYEES, "PayeeID", payment.PayeeID) : null;
           const noteId = GoogleSheetsService.generateId(input.kind === "credit" ? "PCN" : "PDN");
           const now = new Date().toISOString();
@@ -175,11 +178,12 @@ export const purchaseNoteRouter = router({
             CreatedAt: now,
             UpdatedAt: now,
           });
-          return { noteId, description: payment.Description || input.paymentId, dup };
+          return { noteId, description: payment.Description || input.paymentId, dup, dry: false as const };
         },
         { ttlMs: 60_000 },
       );
 
+      if (result.dry) return { success: true, noteId: "", warning: undefined, dryRun: true };
       await safeAuditLog({
         data: {
           orgId: ctx.org.orgId,

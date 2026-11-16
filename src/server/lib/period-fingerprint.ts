@@ -1,66 +1,58 @@
 // ===========================================
 // CTRL-03 / CTRL-03r: ลายนิ้วมือยอดงวด (detective control)
 //   ข้อมูลธุรกิจอยู่ในชีตของลูกค้า แก้ในชีตตรง ๆ ได้โดยไม่ผ่านด่านปิดงวด
-//   → ตอนปิดเก็บยอดรวมต่อเดือน: ภาษีขาย/ซื้อ/หัก ณ ที่จ่าย (รายงานที่ยื่น) + รายได้/ค่าใช้จ่ายรวม (ตาม Dashboard)
+//   → ตอนปิดเก็บยอดรวมต่อเดือน: ภาษีขาย/ซื้อ/หัก ณ ที่จ่าย (รายงานที่ยื่น) + รายได้/ค่าใช้จ่ายที่ปิดงวดล็อกไว้
 //   → เทียบใหม่: หน้า ภ.พ.30/ภ.ง.ด. ของเดือนปิด, ปุ่มตรวจในตั้งค่า, cron รายเดือนแจ้งเจ้าของทาง LINE
 // ใช้รายงาน/รายการตัวเดียวกับที่ผู้ใช้เห็น ในมุมมองทั้งองค์กร (role admin → ไม่กรองโครงการ)
 // ===========================================
 
 import { createCallerFactory, type TRPCContext } from "../trpc";
 import { reportRouter } from "../routers/report.router";
-import { paymentRouter } from "../routers/payment.router";
-import { billingRouter } from "../routers/billing.router";
-import { taxInvoiceRouter } from "../routers/taxInvoice.router";
-import { creditNoteRouter } from "../routers/creditNote.router";
-import { purchaseNoteRouter } from "../routers/purchaseNote.router";
-import { computeDashboardPL } from "@/lib/dashboard-pl";
-import { periodTotalsDiffs, thaiPeriodLabel, type PeriodCloseSettings, type PeriodTotals } from "@/lib/period-close";
+import { getSheetsService, ensureTabsCached } from "./sheets-context";
+import { SHEET_TABS } from "../services/google-sheets.service";
+import {
+  lockedMonthTotals,
+  periodTotalsDiffs,
+  thaiPeriodLabel,
+  type PeriodCloseSettings,
+  type PeriodTotals,
+} from "@/lib/period-close";
 
 function monthBounds(ym: string): { from: string; to: string } {
   const [y, m] = ym.split("-").map(Number);
   return { from: `${ym}-01`, to: `${ym}-${String(new Date(Date.UTC(y, m, 0)).getUTCDate()).padStart(2, "0")}` };
 }
 
-/** ข้อมูลเอกสารขาย — แพ็กเกจที่ไม่มีโมดูลรายได้ → ว่าง (เหมือน Dashboard) */
-async function orEmpty<T>(p: Promise<T[]>): Promise<T[]> {
-  try {
-    return await p;
-  } catch {
-    return [];
-  }
-}
-
 /**
  * ยอดรวมต่อเดือน (ทั้งองค์กร) — เดือนที่คำนวณไม่ได้ (อ่านชีตล้ม) จะไม่มีในผลลัพธ์
- * vatRegistered: ตามตั้งค่าองค์กร (ต้นทุนรวม/ไม่รวม VAT ที่ขอคืนได้ — เหมือน Dashboard)
+ * ภาษี: รายงานตัวเดียวกับที่ผู้ใช้เห็น · รายได้/ค่าใช้จ่าย: lockedMonthTotals (เฉพาะสิ่งที่ปิดงวดล็อกไว้)
  */
-export async function computePeriodTotals(
-  ctx: TRPCContext,
-  months: string[],
-  vatRegistered: boolean,
-): Promise<Record<string, PeriodTotals>> {
+export async function computePeriodTotals(ctx: TRPCContext, months: string[]): Promise<Record<string, PeriodTotals>> {
   if (!ctx.org || months.length === 0) return {};
   const adminCtx: TRPCContext = { ...ctx, org: { ...ctx.org, role: "admin" } };
   const report = createCallerFactory(reportRouter)(adminCtx);
   const out: Record<string, PeriodTotals> = {};
   const at = new Date().toISOString();
 
-  // รายได้/ค่าใช้จ่าย: อ่านครั้งเดียว แล้วคิดทีละเดือนด้วยฟังก์ชันเดียวกับ Dashboard
-  let pl: ((month: string) => { revenue: number; expense: number }) | null = null;
+  // ข้อมูลดิบอ่านครั้งเดียว (cache แท็บเดียวกับรายงาน) แล้วคิดทีละเดือน
+  let locked: ((month: string) => { revenue: number; expense: number }) | null = null;
   try {
-    const [payments, billings, taxInvoices, notes, purchaseNotes] = await Promise.all([
-      createCallerFactory(paymentRouter)(adminCtx).list(),
-      orEmpty(createCallerFactory(billingRouter)(adminCtx).list()),
-      orEmpty(createCallerFactory(taxInvoiceRouter)(adminCtx).list()),
-      orEmpty(createCallerFactory(creditNoteRouter)(adminCtx).list()),
-      createCallerFactory(purchaseNoteRouter)(adminCtx).list(),
+    const sheets = await getSheetsService(ctx.org.orgId);
+    await ensureTabsCached(sheets, ctx.org.orgId);
+    const [payments, batch] = await Promise.all([
+      sheets.getPayments(),
+      sheets.getAllBatch([SHEET_TABS.BILLINGS, SHEET_TABS.TAX_INVOICES, SHEET_TABS.CREDIT_NOTES, SHEET_TABS.PURCHASE_NOTES]),
     ]);
-    pl = (month) => {
-      const r = computeDashboardPL({ payments, billings, taxInvoices, notes, purchaseNotes, month, eventId: "all", vatRegistered });
-      return { revenue: r.revenue, expense: r.expense };
+    const data = {
+      payments,
+      billings: batch[SHEET_TABS.BILLINGS] || [],
+      taxInvoices: batch[SHEET_TABS.TAX_INVOICES] || [],
+      creditNotes: batch[SHEET_TABS.CREDIT_NOTES] || [],
+      purchaseNotes: batch[SHEET_TABS.PURCHASE_NOTES] || [],
     };
+    locked = (month) => lockedMonthTotals(data, month);
   } catch (err) {
-    console.error("[period-fingerprint] P&L data failed — tax totals only", err);
+    console.error("[period-fingerprint] revenue/expense data failed — tax totals only", err);
   }
 
   for (const ym of months) {
@@ -71,7 +63,7 @@ export async function computePeriodTotals(
         outputVat: vat.output.totalVAT,
         inputVat: vat.input.totalVAT,
         wht: wht.stats.totalWHT,
-        ...(pl ? pl(ym) : {}),
+        ...(locked ? locked(ym) : {}),
         at,
       };
     } catch (err) {
@@ -88,9 +80,8 @@ export async function verifyClosedPeriods(
   ctx: TRPCContext,
   settings: PeriodCloseSettings,
   months: string[],
-  vatRegistered: boolean,
 ): Promise<{ checked: string[]; mismatches: PeriodMismatch[] }> {
-  const current = await computePeriodTotals(ctx, months, vatRegistered);
+  const current = await computePeriodTotals(ctx, months);
   const mismatches: PeriodMismatch[] = [];
   const checked: string[] = [];
   for (const ym of months) {
