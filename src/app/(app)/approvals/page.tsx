@@ -108,6 +108,7 @@ export default function ApprovalsPage() {
     }
   };
 
+  // APV-01: ทุกตัวนับ/ปุ่มอนุมัติ/ปุ่มปฏิเสธใช้ชุดเดียวกัน = เลือกแล้ว + มองเห็น (ผ่านตัวกรอง) + ไม่ใช่รายการของตัวเอง
   const selectedList = filtered.filter((p) => selected.has(p.paymentId) && !selfIds.has(p.paymentId));
   const selectedTotal = selectedList.reduce((s, p) => s + p.gttlAmount, 0);
 
@@ -127,10 +128,10 @@ export default function ApprovalsPage() {
   };
 
   const handleReject = async () => {
-    if (selected.size === 0) return;
+    if (selectedList.length === 0) return;
     try {
       await rejectMut.mutateAsync({
-        paymentIds: Array.from(selected),
+        paymentIds: selectedList.map((p) => p.paymentId),
         reason: rejectReason.trim() || undefined,
       });
       setSelected(new Set());
@@ -163,7 +164,7 @@ export default function ApprovalsPage() {
         <div className="app-stat-card gradient-blue">
           <div className="app-stat-icon blue">✔</div>
           <p className="app-stat-label">เลือกแล้ว</p>
-          <p className="app-stat-value-sm">{selected.size}</p>
+          <p className="app-stat-value-sm">{selectedList.length}</p>
         </div>
         <div className="app-stat-card gradient-green">
           <div className="app-stat-icon green">💰</div>
@@ -250,7 +251,7 @@ export default function ApprovalsPage() {
       </div>
 
       {/* Batch actions */}
-      {selected.size > 0 && (
+      {selectedList.length > 0 && (
         <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", marginBottom: "1rem" }}>
           <button
             onClick={() => setShowApprove(true)}
@@ -258,7 +259,7 @@ export default function ApprovalsPage() {
             className="app-btn app-btn-primary"
             style={{ marginLeft: "auto" }}
           >
-            ✅ อนุมัติ + เลือกวันจ่าย ({selected.size})
+            ✅ อนุมัติ + เลือกวันจ่าย ({selectedList.length})
           </button>
           <button
             onClick={() => setShowReject(true)}
@@ -433,7 +434,7 @@ export default function ApprovalsPage() {
                 }}
               >
                 <p style={{ margin: 0, fontWeight: 500, color: "#1e3a8a" }}>
-                  อนุมัติ {selected.size} รายการ • ยอดรวม ฿{formatNumber(selectedTotal)}
+                  อนุมัติ {selectedList.length} รายการ • ยอดรวม ฿{formatNumber(selectedTotal)}
                 </p>
                 <p style={{ margin: "0.25rem 0 0 0", fontSize: "0.75rem", color: "#475569" }}>
                   หลังอนุมัติ รายการจะไปปรากฏในหน้า <b>เตรียมจ่าย</b> ตามวันที่กำหนด
@@ -502,7 +503,7 @@ export default function ApprovalsPage() {
           <div className="app-modal">
             <div className="app-modal-header">
               <h3 className="app-modal-title">
-                ปฏิเสธ {selected.size} รายการ
+                ปฏิเสธ {selectedList.length} รายการ
               </h3>
               <button
                 type="button"
