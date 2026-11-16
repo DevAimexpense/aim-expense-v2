@@ -11,6 +11,7 @@ import {
 import { encryptToken } from "@/lib/google/token-encryption";
 import { getSession, setSessionCookie } from "@/lib/auth/session";
 import { prisma } from "@/lib/prisma";
+import { canWriteGoogleTokens } from "@/lib/google/token-write-guard";
 import { invalidateOrgInfoCache } from "@/server/lib/sheets-context";
 import { REGRANT_STATE_PREFIX } from "@/server/lib/google-file-access";
 import { handleRegrantCallback } from "@/server/lib/google-regrant-callback";
@@ -75,6 +76,12 @@ export async function GET(request: NextRequest) {
           request.url,
         ),
       );
+    }
+
+    // DEV-01: เครื่อง dev ที่ต่อ DB จริง ห้ามเขียน token จาก OAuth client ของเครื่องทับของเว็บจริง
+    // (เว็บจริงจะต่ออายุ token นี้ไม่ได้ → การเชื่อมต่อหลุดอีก) — เชื่อมต่อที่เว็บจริงเท่านั้น
+    if (!canWriteGoogleTokens()) {
+      return NextResponse.redirect(new URL("/settings/google?error=local_dev_blocked", request.url));
     }
 
     // 2. Get user info from Google

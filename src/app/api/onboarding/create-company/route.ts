@@ -7,6 +7,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
+import { canWriteGoogleTokens } from "@/lib/google/token-write-guard";
 import { getSession, setSessionCookie } from "@/lib/auth/session";
 import { decryptToken, encryptToken } from "@/lib/google/token-encryption";
 import { refreshAccessToken } from "@/lib/google/oauth";
@@ -54,13 +55,16 @@ async function getValidAccessToken(userId: string): Promise<string> {
   if (isExpired && conn.refreshToken) {
     const refreshToken = decryptToken(conn.refreshToken);
     const { accessToken, expiryDate } = await refreshAccessToken(refreshToken);
-    await prisma.googleConnection.update({
-      where: { userId },
-      data: {
-        accessToken: encryptToken(accessToken),
-        tokenExpiry: expiryDate ? new Date(expiryDate) : null,
-      },
-    });
+    if (canWriteGoogleTokens()) {
+      // DEV-01: เครื่อง dev ไม่เขียนทับ token ของเว็บจริง
+      await prisma.googleConnection.update({
+        where: { userId },
+        data: {
+          accessToken: encryptToken(accessToken),
+          tokenExpiry: expiryDate ? new Date(expiryDate) : null,
+        },
+      });
+    }
     return accessToken;
   }
 

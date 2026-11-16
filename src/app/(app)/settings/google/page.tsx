@@ -173,6 +173,25 @@ export default async function GoogleSettingsPage({
         </div>
       )}
 
+      {/* DEV-01: เชื่อมต่อจากเครื่อง dev ที่ต่อ DB จริงถูกกัน */}
+      {errorCode === "local_dev_blocked" && (
+        <div
+          style={{
+            padding: "0.75rem 1rem",
+            background: "#fffbeb",
+            border: "1px solid #fcd34d",
+            borderRadius: "0.5rem",
+            marginBottom: "1rem",
+            color: "#92400e",
+            fontSize: "0.875rem",
+            lineHeight: 1.6,
+          }}
+        >
+          ⚠️ <strong>เครื่อง dev เชื่อมต่อ Google ไม่ได้</strong> — เครื่องนี้ใช้ฐานข้อมูลจริง ถ้าบันทึก token จากเครื่องนี้
+          เว็บจริงจะต่ออายุไม่ได้และการเชื่อมต่อจะหลุด · ให้เชื่อมต่อที่เว็บจริง (aimexpense.com) — การเชื่อมต่อเดิมยังไม่ถูกแก้ไข
+        </div>
+      )}
+
       {/* ===== Card 1: Account ===== */}
       <section
         style={{

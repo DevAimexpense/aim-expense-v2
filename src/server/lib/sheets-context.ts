@@ -7,6 +7,7 @@ import { getCache, setCache } from "@/server/lib/cache";
 import { SHEET_HEADERS } from "../services/google-sheets.service";
 import { prisma } from "@/lib/prisma";
 import { decryptToken, encryptToken } from "@/lib/google/token-encryption";
+import { canWriteGoogleTokens, LOCAL_GOOGLE_WRITE_BLOCKED } from "@/lib/google/token-write-guard";
 import { refreshAccessToken } from "@/lib/google/oauth";
 import { GoogleSheetsService } from "@/server/services/google-sheets.service";
 import { GoogleDriveService } from "@/server/services/google-drive.service";
@@ -27,6 +28,11 @@ import {
  * export ให้ org.router (สร้าง workspace ด้วย token ของผู้ใช้เอง) ใช้กฎเดียวกัน
  */
 export async function markGoogleConnectionRevoked(ownerId: string, cause: unknown): Promise<void> {
+  // DEV-01: เครื่อง dev ที่ต่อ DB จริง ห้ามปิดการเชื่อมต่อของเจ้าของบนเว็บจริง
+  if (!canWriteGoogleTokens()) {
+    console.warn("[sheets-context] (local dev) Google refresh failed — NOT marking revoked", ownerId, cause);
+    throw new TRPCError({ code: "PRECONDITION_FAILED", message: LOCAL_GOOGLE_WRITE_BLOCKED, cause });
+  }
   console.warn("[sheets-context] Google token revoked for owner", ownerId, cause);
   await prisma.googleConnection
     .updateMany({
@@ -52,13 +58,16 @@ async function refreshOwnerToken(
   try {
     const refreshToken = decryptToken(encryptedRefreshToken);
     const { accessToken, expiryDate } = await refreshAccessToken(refreshToken);
-    await prisma.googleConnection.update({
-      where: { userId: ownerId },
-      data: {
-        accessToken: encryptToken(accessToken),
-        tokenExpiry: expiryDate ? new Date(expiryDate) : null,
-      },
-    });
+    // DEV-01: เครื่อง dev ใช้ token ใหม่ในหน่วยความจำ ไม่เขียนทับของเว็บจริง (คีย์เข้ารหัสอาจไม่ตรง)
+    if (canWriteGoogleTokens()) {
+      await prisma.googleConnection.update({
+        where: { userId: ownerId },
+        data: {
+          accessToken: encryptToken(accessToken),
+          tokenExpiry: expiryDate ? new Date(expiryDate) : null,
+        },
+      });
+    }
     return accessToken;
   } catch (err) {
     if (isGoogleAuthError(err)) {

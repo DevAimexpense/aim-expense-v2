@@ -6,6 +6,7 @@
 import { z } from "zod";
 import { router, protectedProcedure, orgProcedure } from "../trpc";
 import { prisma } from "@/lib/prisma";
+import { canWriteGoogleTokens } from "@/lib/google/token-write-guard";
 import { GoogleSheetsService } from "../services/google-sheets.service";
 import { GoogleDriveService } from "../services/google-drive.service";
 import { decryptToken } from "@/lib/google/token-encryption";
@@ -56,14 +57,16 @@ async function getValidAccessToken(userId: string): Promise<string> {
       const { accessToken, expiryDate } =
         await refreshAccessToken(refreshToken);
 
-      // Update DB with new token
-      await prisma.googleConnection.update({
-        where: { userId },
-        data: {
-          accessToken: encryptToken(accessToken),
-          tokenExpiry: expiryDate ? new Date(expiryDate) : null,
-        },
-      });
+      // Update DB with new token (DEV-01: เครื่อง dev ไม่เขียนทับของเว็บจริง)
+      if (canWriteGoogleTokens()) {
+        await prisma.googleConnection.update({
+          where: { userId },
+          data: {
+            accessToken: encryptToken(accessToken),
+            tokenExpiry: expiryDate ? new Date(expiryDate) : null,
+          },
+        });
+      }
 
       return accessToken;
     } catch (err) {
