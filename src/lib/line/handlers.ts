@@ -1356,6 +1356,7 @@ async function writeDraftToSheets(
     VendorBranchInfo: vendorBranchInfo,
     Notes: notes,
     DuplicateOf: duplicates.map((d) => d.paymentId).join(","), // PUR-06
+    LineSenderId: draft.lineUserId, // CTRL-04b: ผู้ส่งจริง (กลุ่ม = คนในกลุ่ม ไม่ใช่แอดมินที่ผูก)
     CreatedAt: now,
     CreatedBy: "LINE OA",
     CreatedByUserId: draft.userId,

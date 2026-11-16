@@ -34,13 +34,13 @@ import { z } from "zod";
 import { router, permissionProcedure } from "../trpc";
 import { scopedEventIds } from "@/lib/permissions";
 import { isSettled } from "@/lib/payment-status";
-import { getPndForm, whtPeriodDate } from "@/lib/wht-doc-utils";
+import { getPndForm, whtPeriodDate, resolveWhtIncome } from "@/lib/wht-doc-utils";
 import { todayBangkok } from "@/lib/utils/date";
 import { taxableBaseFromVat } from "@/lib/calculations";
 import { isInputVatClaimable, resolveNonDeductibleVat, nonDeductibleLabel } from "@/lib/input-vat-rules";
 import { noteOutputVatRows } from "@/lib/credit-note";
-import { vendorTaxIdFor } from "@/lib/period-close";
-import { getClosedThrough } from "../lib/period-lock";
+import { vendorTaxIdFor, inputVatPeriodDate, singleClosedMonth, periodTotalsDiffs, thaiPeriodLabel } from "@/lib/period-close";
+import { getClosedThrough, getPeriodClose } from "../lib/period-lock";
 import { getSheetsService } from "../lib/sheets-context";
 import { SHEET_TABS } from "../services/google-sheets.service";
 
@@ -938,7 +938,8 @@ export const reportRouter = router({
     .input(WHTInput)
     .query(async ({ ctx, input }) => {
       const sheets = await getSheetsService(ctx.org.orgId);
-      const closedThrough = await getClosedThrough(ctx.org.orgId); // PUR-09b
+      const periodSettings = await getPeriodClose(ctx.org.orgId); // PUR-09b + CTRL-03
+      const closedThrough = periodSettings.closedThrough;
       // NOTE: skip ensureAllTabsExist (read-only — same as other reports).
 
       const [payments, events, payees] = await Promise.all([
@@ -1046,10 +1047,8 @@ export const reportRouter = router({
 
         const incomeAmount = num(p.TTLAmount);
         const rate = num(p.PctWTH);
-        const incomeType =
-          p.CategoryMain ||
-          p.Description ||
-          "ค่าบริการ"; // safe default for Revenue Dept categorization
+        // WHT-13b: ประเภทเงินได้ต้องตรงกับหนังสือรับรอง 50 ทวิ ของรายการเดียวกัน (ประเภทที่เลือก + อัตรา)
+        const incomeType = resolveWhtIncome(p.WthTypeId, num(p.PctWTH)).label;
 
         rowsAll.push({
           paymentId: p.PaymentID,
@@ -1131,9 +1130,20 @@ export const reportRouter = router({
             : { stats: pnd53Stats, rows: pnd53Rows },
       };
 
+      // CTRL-03: รายงานเดือนที่ปิดแล้ว (ทั้งองค์กร ไม่กรองโครงการ) → เทียบยอดกับตอนปิดงวด
+      const closeMonth = scope === null && !input.eventId ? singleClosedMonth(input.from, input.to, periodSettings) : "";
+      const closeCheck = closeMonth
+        ? {
+            month: closeMonth,
+            label: thaiPeriodLabel(closeMonth),
+            diffs: periodTotalsDiffs(periodSettings.snapshots![closeMonth], { wht: overallStats.totalWHT }),
+          }
+        : null;
+
       return {
         stats: overallStats,
         ...filtered,
+        closeCheck,
       };
     }),
 
@@ -1275,7 +1285,9 @@ export const reportRouter = router({
         // Date filter
         const date = pickDate(p);
         if (!date) continue;
-        if (date < input.from || date > input.to) continue;
+        // PUR-08: ใบที่เดือนเดิมปิดงวดไปแล้ว → ใช้สิทธิ์ในเดือน VatClaimMonth (แสดงวันที่ใบตามเดิม)
+        const periodDate = input.dateField === "paymentDate" ? date : inputVatPeriodDate(p, date);
+        if (periodDate < input.from || periodDate > input.to) continue;
 
         const info = payeeMap.get(p.PayeeID);
         const taxId = vendorTaxIdFor(p.VendorTaxIdSnapshot, info?.taxId, date, closedThrough) /* PUR-09b: งวดปิด = ตามที่บันทึกตอนจ่าย · งวดเปิด = ทะเบียนปัจจุบัน */;
@@ -1533,7 +1545,8 @@ export const reportRouter = router({
     )
     .query(async ({ ctx, input }) => {
       const sheets = await getSheetsService(ctx.org.orgId);
-      const closedThrough = await getClosedThrough(ctx.org.orgId); // PUR-09b
+      const periodSettings = await getPeriodClose(ctx.org.orgId); // PUR-09b + CTRL-03
+      const closedThrough = periodSettings.closedThrough;
 
       const [payments, payees, batch] = await Promise.all([
         sheets.getPayments(),
@@ -1589,7 +1602,9 @@ export const reportRouter = router({
         if (vat <= 0) continue;
         const date = inputDateOf(p);
         if (!date) continue;
-        if (date < input.from || date > input.to) continue;
+        // PUR-08: เดือนที่ใช้สิทธิ์ภาษีซื้อ (ใบของเดือนที่ปิดแล้ว → เดือนถัดไปที่ยังเปิด) — วันที่ที่แสดงยังเป็นวันที่ใบ
+        const periodDate = inputVatPeriodDate(p, date);
+        if (periodDate < input.from || periodDate > input.to) continue;
         if (!isInputVatClaimable(p)) {
           const reasonCode = resolveNonDeductibleVat(p.CategoryMain, p.NonDeductibleVat);
           if (p.DocumentType === "tax_invoice" || p.DocumentType === "tax_invoice_abbr") {
@@ -1704,6 +1719,7 @@ export const reportRouter = router({
       const inputTotalVAT = inputRows.reduce((s, r) => s + r.vatAmount, 0);
       const outputTotalBase = outputRows.reduce((s, r) => s + r.baseAmount, 0);
       const outputTotalVAT = outputRows.reduce((s, r) => s + r.vatAmount, 0);
+      const closeMonth = scope === null ? singleClosedMonth(input.from, input.to, periodSettings) : ""; // CTRL-03
       const netVAT = outputTotalVAT - inputTotalVAT;
 
       return {
@@ -1731,6 +1747,17 @@ export const reportRouter = router({
           rows: uncovered,
           totalVAT: uncovered.reduce((s, r) => s + r.vatAmount, 0),
         },
+        /** CTRL-03: เดือนที่ปิดแล้ว — ยอดไม่ตรงกับตอนปิดงวด = มีการแก้ข้อมูลหลังปิด (เช่นแก้ในชีตตรง) */
+        closeCheck: closeMonth
+          ? {
+              month: closeMonth,
+              label: thaiPeriodLabel(closeMonth),
+              diffs: periodTotalsDiffs(periodSettings.snapshots![closeMonth], {
+                outputVat: outputTotalVAT,
+                inputVat: inputTotalVAT,
+              }),
+            }
+          : null,
         net: {
           // Positive = ต้องเสียเพิ่มภาษีขาย, Negative = ภาษีคงเหลือยกไป
           netVAT,

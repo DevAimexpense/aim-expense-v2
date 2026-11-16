@@ -17,7 +17,9 @@ import { safeAuditLog } from "@/server/lib/audit";
 import { materialChanges, statusAfterReapproval, reapprovalSnapshot, revertReapproval } from "@/lib/payment-reapproval";
 import { NON_DEDUCTIBLE_VALUES, resolveNonDeductibleVat } from "@/lib/input-vat-rules";
 import { findDuplicateBills, duplicateWarningText } from "@/lib/duplicate-bill";
-import { assertPeriodOpen, assertPaymentPeriodOpen } from "../lib/period-lock";
+import { assertPeriodOpen, assertPaymentPeriodOpen, getClosedThrough } from "../lib/period-lock";
+import { canApprovePayments, initialPaymentStatus, selfApprovalViolations } from "@/lib/approval-policy";
+import { vatClaimMonthFor, lateClaimPatch } from "@/lib/period-close";
 
 const PaymentInputSchema = z.object({
   eventId: z.string().min(1),
@@ -58,6 +60,21 @@ const PaymentInputSchema = z.object({
   // PUR-06b: รายการที่เพิ่งสร้างจากใบเดียวกัน (แยกหลายบรรทัด) — ไม่นับเป็นบิลซ้ำ
   excludeDuplicateOf: z.array(z.string()).max(50).optional(),
 });
+
+/** CTRL-04b: สมาชิกคนอื่น (active) ที่อนุมัติรายการจ่ายได้ — 0 = องค์กรมีผู้อนุมัติคนเดียว (อนุมัติเองได้) */
+async function otherApproverCount(orgId: string, selfUserId: string): Promise<number> {
+  const members = await prisma.orgMember.findMany({
+    where: { orgId, status: "active", userId: { not: selfUserId } },
+    select: { userId: true, role: true },
+  });
+  if (members.length === 0) return 0;
+  const perms = await prisma.userPermission.findMany({
+    where: { orgId, userId: { in: members.map((m) => m.userId) }, approvePayments: true },
+    select: { userId: true },
+  });
+  const withPerm = new Set(perms.map((p) => p.userId));
+  return members.filter((m) => m.role === "admin" || withPerm.has(m.userId)).length;
+}
 
 function toPaymentRow(payment: Record<string, string>) {
   const ttl = parseFloat(payment.TTLAmount) || 0;
@@ -106,6 +123,8 @@ function toPaymentRow(payment: Record<string, string>) {
     generatedDocUrl: payment.GeneratedDocUrl || "",
     // CTRL-04: รออนุมัติใหม่หลังแก้ (สถานะเดิม) · PUR-03: ภาษีซื้อต้องห้าม · PUR-06: อาจซ้ำกับ
     reapprovalOf: payment.ReapprovalOf || "",
+    approveTo: payment.ApproveTo || "", // CTRL-04b
+    vatClaimMonth: payment.VatClaimMonth || "", // PUR-08
     // CTRL-15: ยอดจ่ายก่อนแก้ (ปฏิเสธ = คืนยอดนี้)
     reapprovalPrevAmount: (() => {
       try {
@@ -310,9 +329,15 @@ export const paymentRouter = router({
 
       const paymentId = GoogleSheetsService.generateId("PMT");
       const now = new Date().toISOString();
-      const status = input.initialStatus || "pending";
-      // ถ้า status = "paid" (บันทึกค่าใช้จ่าย) → ถือว่าจ่ายแล้ว ข้ามอนุมัติ
+      // CTRL-04b: "บันทึกค่าใช้จ่าย (จ่ายแล้ว)" ข้ามอนุมัติได้เฉพาะผู้มีสิทธิ์อนุมัติ
+      // ไม่มีสิทธิ์ → รออนุมัติ (ApproveTo=paid) อนุมัติแล้วเป็นจ่ายแล้วตามวันที่จ่ายเดิม
+      const { status, approveTo } = initialPaymentStatus(
+        input.initialStatus || "pending",
+        canApprovePayments(ctx.org.role, ctx.org.permissions),
+      );
       const isPaidDirect = status === "paid";
+      // วันที่จ่าย/วันที่ใบเสร็จที่ผู้ใช้กรอก — เก็บไว้ทั้งกรณีจ่ายแล้วทันทีและรออนุมัติแบบจ่ายแล้ว
+      const paidRequested = input.initialStatus === "paid";
 
       // ใช้ appendRowByHeaders เพื่อ map ตาม column name ใน Sheet จริง
       // (ป้องกัน column misalignment ถ้า Sheet order ไม่ตรงกับ SHEET_HEADERS)
@@ -336,7 +361,7 @@ export const paymentRouter = router({
         GTTLAmount: calc.gttlAmount,
         Status: status,
         // วันที่จ่ายเงิน = วันที่ตามเอกสาร/ใบเสร็จที่ผู้ใช้กรอก (ไม่ใช่วันที่คีย์รายการ)
-        PaymentDate: isPaidDirect ? input.paymentDate || todayBangkok() : "",
+        PaymentDate: paidRequested ? input.paymentDate || todayBangkok() : "",
         DueDate: input.dueDate,
         ApprovedBy: isPaidDirect ? ctx.session.displayName : "",
         ApprovedAt: isPaidDirect ? now : "",
@@ -346,7 +371,8 @@ export const paymentRouter = router({
         ClearedAt: "",
         ReceiptURL: "",
         ReceiptNumber: "",
-        ReceiptDate: isPaidDirect ? input.paymentDate || "" : "",
+        ReceiptDate: paidRequested ? input.paymentDate || "" : "",
+        ApproveTo: approveTo, // CTRL-04b
         // R5: tax compliance fields
         DocumentType: input.documentType || "",
         NonDeductibleVat: resolveNonDeductibleVat(input.categoryMain, input.nonDeductibleVat), // PUR-03
@@ -371,13 +397,20 @@ export const paymentRouter = router({
           action: "create",
           entityType: "payment",
           entityRef: paymentId,
-          summary: `${isPaidDirect ? "บันทึกค่าใช้จ่าย" : "ตั้งเบิก"} ${calc.gttlAmount.toLocaleString()} บาท (${input.expenseType === "team" ? "เบิกสด" : "โอนบัญชี"})`,
+          summary: `${isPaidDirect ? "บันทึกค่าใช้จ่าย" : approveTo ? "บันทึกค่าใช้จ่าย (รออนุมัติ — ไม่มีสิทธิ์อนุมัติ)" : "ตั้งเบิก"} ${calc.gttlAmount.toLocaleString()} บาท (${input.expenseType === "team" ? "เบิกสด" : "โอนบัญชี"})`,
         },
       });
 
       // spec: 50 ทวิ บันทึกลง Drive อัตโนมัติ (ข้ามเองถ้าไม่มี WHT/ยังไม่มีวันที่/มีไฟล์แล้ว — ไม่ throw)
       await autoSaveWhtCert({ orgId: ctx.org.orgId, paymentId: paymentId, userId: ctx.session.userId, spreadsheetId: ctx.org.googleSpreadsheetId });
-      return { success: true, paymentId, calc, duplicateWarning: duplicateWarningText(duplicates) };
+      return {
+        success: true,
+        paymentId,
+        calc,
+        duplicateWarning: duplicateWarningText(duplicates),
+        // CTRL-04b: ขอบันทึกจ่ายแล้วแต่ไม่มีสิทธิ์อนุมัติ → แจ้งผู้ใช้ว่ารออนุมัติ
+        pendingApproval: approveTo === "paid",
+      };
     }),
 
   update: permissionProcedure("updatePayments")
@@ -529,6 +562,7 @@ export const paymentRouter = router({
         updates.ReapprovalOf = existing.ReapprovalOf || existing.Status;
         // CTRL-15: เก็บค่าที่เคยอนุมัติไว้ — ผู้อนุมัติ "ปฏิเสธ" = คืนค่าเดิม (ไม่ใช่ทิ้งรายการที่จ่ายแล้ว)
         updates.ReapprovalSnapshot = reapprovalSnapshot(existing);
+        updates.ReapprovalBy = ctx.session.userId; // CTRL-04b: ผู้แก้อนุมัติการแก้ของตัวเองไม่ได้
         updates.ApprovedBy = "";
         updates.ApprovedAt = "";
       }
@@ -577,10 +611,29 @@ export const paymentRouter = router({
       await ensureTabsCached(sheets, ctx.org.orgId); // คอลัมน์ NonDeductibleVat / DuplicateOf ในชีตเดิม
       const existing = await sheets.getById(SHEET_TABS.PAYMENTS, "PaymentID", input.paymentId);
       if (!existing) throw new Error("ไม่พบรายการ");
+      // PUR-08: ใบกำกับมาถึงช้า (ลงวันที่ในเดือนที่ปิดงวดแล้ว) ของรายการที่จ่ายแล้ว → ใช้สิทธิ์เดือนแรกที่ยังเปิด
+      const settledNow = existing.Status === "paid" || existing.Status === "cleared";
+      const receiptDateChanged =
+        input.receiptDate !== undefined && input.receiptDate.slice(0, 10) !== (existing.ReceiptDate || "").slice(0, 10);
+      const claim =
+        settledNow && receiptDateChanged
+          ? vatClaimMonthFor(
+              input.receiptDate,
+              existing.PaymentDate || (existing.PaidAt || "").slice(0, 10) || todayBangkok(),
+              await getClosedThrough(ctx.org.orgId),
+            )
+          : null;
       // CTRL-01: แนบ/แก้ใบเสร็จของรายการที่จ่ายแล้ว — ทั้งงวดเดิมและงวดใหม่ต้องยังเปิด
       await assertPaymentPeriodOpen(
         ctx.org.orgId,
-        [existing, { ...existing, ReceiptDate: input.receiptDate ?? existing.ReceiptDate }],
+        [
+          existing,
+          {
+            ...existing,
+            ReceiptDate: input.receiptDate ?? existing.ReceiptDate,
+            ...(claim ? { VatClaimMonth: claim.claimMonth } : {}),
+          },
+        ],
         "แก้ข้อมูลใบเสร็จ",
       );
       if (existing.Status !== "approved" && existing.Status !== "paid" && existing.Status !== "cleared") {
@@ -621,6 +674,23 @@ export const paymentRouter = router({
       if (input.documentType !== undefined) updates.DocumentType = input.documentType;
       if (input.nonDeductibleVat !== undefined) {
         updates.NonDeductibleVat = resolveNonDeductibleVat(existing.CategoryMain, input.nonDeductibleVat); // PUR-03
+      }
+      // PUR-08: "เกิน 6 เดือน" ระบบตั้ง (เช่น route แนบไฟล์ตั้งไว้ก่อน) — ฟอร์มส่ง "" มาไม่ล้างค่า
+      if (!claim && existing.NonDeductibleVat === "late_claim" && updates.NonDeductibleVat === "") {
+        updates.NonDeductibleVat = "late_claim";
+      }
+      if (claim) {
+        updates.VatClaimMonth = claim.claimMonth; // PUR-08
+        Object.assign(
+          updates,
+          lateClaimPatch(
+            {
+              DocumentType: String(updates.DocumentType ?? existing.DocumentType ?? ""),
+              NonDeductibleVat: String(updates.NonDeductibleVat ?? existing.NonDeductibleVat ?? ""),
+            },
+            claim.lateClaim,
+          ),
+        );
       }
       // PUR-06: เลขที่ใบเสร็จ/ใบกำกับที่แนบ ซ้ำกับรายการอื่นของผู้ขายเดียวกัน → เตือน ไม่บล็อก
       let duplicates: ReturnType<typeof findDuplicateBills> = [];
@@ -674,23 +744,46 @@ export const paymentRouter = router({
       const rows = (
         await Promise.all(input.paymentIds.map((id) => sheets.getById(SHEET_TABS.PAYMENTS, "PaymentID", id)))
       ).filter((r): r is Record<string, string> => !!r && r.Status === "pending");
+      // CTRL-04b: ห้ามอนุมัติรายการที่ตัวเองสร้าง/แก้ — ยกเว้นองค์กรไม่มีผู้อนุมัติคนอื่น
+      const approverLineId =
+        (await prisma.user.findUnique({ where: { id: ctx.session.userId }, select: { lineUserId: true } }))?.lineUserId ?? null;
+      const selfRows = selfApprovalViolations(
+        rows,
+        ctx.session.userId,
+        await otherApproverCount(ctx.org.orgId, ctx.session.userId),
+        approverLineId,
+      );
+      if (selfRows.length > 0) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: `อนุมัติรายการที่ตัวเองสร้างหรือแก้ไม่ได้ (แบ่งแยกหน้าที่) — ให้ผู้อนุมัติคนอื่นอนุมัติ: ${selfRows
+            .slice(0, 3)
+            .map((r) => r.Description || r.PaymentID)
+            .join(", ")}${selfRows.length > 3 ? ` และอีก ${selfRows.length - 3} รายการ` : ""}`,
+        });
+      }
+      const nextOf = (r: Record<string, string>) => statusAfterReapproval(r.ReapprovalOf || r.ApproveTo);
       await assertPaymentPeriodOpen(
         ctx.org.orgId,
-        rows.map((r) => ({ ...r, Status: statusAfterReapproval(r.ReapprovalOf) })),
-        "อนุมัติ (คืนสถานะจ่ายแล้ว)",
+        rows.map((r) => ({ ...r, Status: nextOf(r) })),
+        "อนุมัติ (เป็นจ่ายแล้ว)",
       );
       for (const existing of rows) {
         const id = existing.PaymentID;
         // CTRL-04: รายการที่กลับมารออนุมัติเพราะแก้หลังอนุมัติ → คืนสถานะเดิม (จ่ายแล้ว = วันที่จ่ายเดิม)
-        const nextStatus = statusAfterReapproval(existing.ReapprovalOf);
+        const nextStatus = nextOf(existing);
         const updates: Record<string, string | number> = {
           Status: nextStatus,
           ApprovedBy: ctx.session.displayName,
           ApprovedAt: now,
           ReapprovalOf: "",
           ReapprovalSnapshot: "",
+          ReapprovalBy: "",
+          ApproveTo: "",
           UpdatedAt: now,
         };
+        // CTRL-04b: บันทึกจ่ายแล้วที่รออนุมัติ → จ่ายแล้ว ณ ตอนอนุมัติ (วันที่จ่ายตามที่บันทึกไว้)
+        if (nextStatus === "paid" && !existing.PaidAt) updates.PaidAt = now;
         // วันที่จ่ายใหม่ใช้กับรายการที่ยังไม่จ่ายเท่านั้น (รายการที่จ่ายแล้ว วันจ่ายจริงคงเดิม)
         if (input.paymentDate && nextStatus === "approved") {
           updates.PaymentDate = input.paymentDate;
@@ -836,6 +929,8 @@ export const paymentRouter = router({
       // วันที่จ่าย default = "วันนี้" ตามเวลาไทย (ISO/UTC ให้วันก่อนหน้าช่วง 00:00–07:00) DOC-05
       const paymentDate = input.paymentDate || todayBangkok();
       await assertPeriodOpen(ctx.org.orgId, paymentDate, "บันทึกจ่ายเงิน"); // CTRL-01: วันที่จ่ายย้อนเข้างวดที่ปิดไม่ได้
+      await ensureTabsCached(sheets, ctx.org.orgId); // คอลัมน์ VatClaimMonth
+      const closedThrough = await getClosedThrough(ctx.org.orgId); // PUR-08
       let success = 0;
       const paidWithWht: string[] = [];
 
@@ -843,12 +938,16 @@ export const paymentRouter = router({
         const existing = await sheets.getById(SHEET_TABS.PAYMENTS, "PaymentID", id);
         if (!existing) continue;
         if (existing.Status !== "approved") continue;
+        // PUR-08: เดือนของใบกำกับปิดงวดไปแล้ว → ใช้สิทธิ์ภาษีซื้อเดือนแรกที่เปิด · เกิน 6 เดือน = ขอคืนไม่ได้
+        const claim = vatClaimMonthFor(existing.ReceiptDate, paymentDate, closedThrough);
         const ok = await sheets.updateById(SHEET_TABS.PAYMENTS, "PaymentID", id, {
           Status: "paid",
           PaidAt: now,
           PaymentDate: paymentDate,
           BatchID: batchId,
           UpdatedAt: now,
+          ...(claim.claimMonth ? { VatClaimMonth: claim.claimMonth } : {}),
+          ...lateClaimPatch(existing, claim.lateClaim),
         });
         if (ok) {
           success++;

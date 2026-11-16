@@ -16,6 +16,8 @@ export const NON_DEDUCTIBLE_REASONS = [
   { value: "passenger_car", label: "รถยนต์นั่ง/รถโดยสารไม่เกิน 10 ที่นั่ง — ซื้อ เช่า น้ำมัน ซ่อม (ประกาศฯ ฉบับที่ 42)" },
   { value: "not_business", label: "ไม่เกี่ยวกับการประกอบกิจการ (ม.82/5(3))" },
   { value: "invalid_tax_invoice", label: "ใบกำกับไม่ถูกต้อง/ไม่สมบูรณ์ หรือชื่อผู้ซื้อไม่ใช่กิจการ (ม.82/5(1)(2))" },
+  // PUR-08: ใช้สิทธิ์เกิน 6 เดือนนับจากเดือนที่ออกใบกำกับ (ม.82/3 + ประกาศอธิบดีฯ) — ระบบตั้งให้เอง
+  { value: "late_claim", label: "ใบกำกับเกิน 6 เดือนนับจากเดือนที่ออก (ม.82/3)" },
 ] as const;
 
 export type NonDeductibleReason = (typeof NON_DEDUCTIBLE_REASONS)[number]["value"];

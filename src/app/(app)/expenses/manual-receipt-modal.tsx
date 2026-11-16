@@ -344,6 +344,10 @@ export function ManualReceiptModal({ events, payees, onClose, onSuccess, attachT
         paymentId = result.paymentId;
         console.log("[manual-save] created paymentId=", paymentId);
         if (result.duplicateWarning) alert(result.duplicateWarning); // PUR-06
+        // CTRL-04b: ผู้บันทึกไม่มีสิทธิ์อนุมัติ → รายการรออนุมัติก่อน (อนุมัติแล้วเป็น "จ่ายแล้ว" ตามวันที่บันทึก)
+        if (result.pendingApproval) {
+          alert("บันทึกแล้ว — รายการนี้รออนุมัติ (คุณไม่มีสิทธิ์อนุมัติ) เมื่อผู้อนุมัติกดอนุมัติ จะเป็น \"จ่ายแล้ว\" ตามวันที่ที่บันทึกไว้");
+        }
       }
       // Upload ID card file ไป Google Drive (create mode)
       if (!isAttachMode && idCardFile && paymentId) {

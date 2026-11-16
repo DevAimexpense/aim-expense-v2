@@ -144,6 +144,10 @@ export const SHEET_HEADERS: Record<string, string[]> = {
     "WthTypeId", // WHT-19: ประเภทหัก ณ ที่จ่ายที่เลือกตอนบันทึก (lib/wth-types) — ใช้พิมพ์ประเภทเงินได้บน 50 ทวิ
     "ReapprovalOf", // CTRL-04: แก้สาระสำคัญหลังอนุมัติ → กลับไป pending · เก็บสถานะเดิม (approved/paid/cleared) ไว้คืนตอนอนุมัติใหม่
     "ReapprovalSnapshot", // CTRL-15: ค่าสาระสำคัญก่อนแก้ (JSON) — "ปฏิเสธ" = คืนค่าเดิม + สถานะเดิม
+    "ReapprovalBy", // CTRL-04b: ผู้แก้สาระสำคัญล่าสุด — อนุมัติการแก้ของตัวเองไม่ได้
+    "ApproveTo", // CTRL-04b: "paid" = บันทึกจ่ายแล้วโดยผู้ไม่มีสิทธิ์อนุมัติ → อนุมัติแล้วเป็นจ่ายแล้ว
+    "VatClaimMonth", // PUR-08: เดือนที่ใช้สิทธิ์ภาษีซื้อ (YYYY-MM) เมื่อเดือนของใบปิดงวดไปแล้ว — ว่าง = เดือนของใบ
+    "LineSenderId", // CTRL-04b: LINE userId ของผู้ส่งจริง (กลุ่ม LINE บันทึกในนามแอดมินที่ผูกกลุ่ม)
     "NonDeductibleVat", // PUR-03: ภาษีซื้อต้องห้าม ม.82/5 — รหัสเหตุ ("" = ขอคืนได้) ดู lib/input-vat-rules.ts
     "DuplicateOf", // PUR-06: บิลนี้อาจซ้ำกับรายการ (PaymentID) — เตือน ไม่บล็อก
   ],

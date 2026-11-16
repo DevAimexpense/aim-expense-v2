@@ -17,7 +17,7 @@ import {
   vendorTypeOf,
   branchLabelOf,
 } from "@/lib/wht-form-utils";
-import { whtPeriodDate } from "@/lib/wht-doc-utils";
+import { whtPeriodDate, resolveWhtIncome } from "@/lib/wht-doc-utils";
 import { vendorTaxIdFor } from "@/lib/period-close";
 import { getClosedThrough } from "@/server/lib/period-lock";
 import { isSettled } from "@/lib/payment-status";
@@ -91,8 +91,8 @@ export default async function PND53AttachPage({
     // Filter to ภ.ง.ด.53 (juristic — TaxID 13 digits starting with "0")
     if (vendorTypeOf(taxId, info?.branchType) !== "pnd53") continue;
 
-    const incomeType =
-      p.CategoryMain || p.Description || "ค่าบริการ";
+    // WHT-13b: ประเภทเงินได้ต้องตรงกับหนังสือรับรอง 50 ทวิ ของรายการเดียวกัน (ประเภทที่เลือก + อัตรา)
+    const incomeType = resolveWhtIncome(p.WthTypeId, num(p.PctWTH)).label;
 
     rows.push({
       paymentId: p.PaymentID,

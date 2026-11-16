@@ -108,6 +108,21 @@ export function Vat30Client({ orgName }: { orgName: string }) {
 
       {linkError && <div className="app-error-msg">{linkError}</div>}
 
+{/* CTRL-03: ยอดเดือนที่ปิดงวดแล้วไม่ตรงกับตอนปิด */}
+      {q.data?.closeCheck && q.data.closeCheck.diffs.length > 0 && (
+        <div
+          className="app-card"
+          role="alert"
+          style={{ marginBottom: "1rem", background: "#fef2f2", border: "1px solid #fca5a5", fontSize: "0.875rem", color: "#991b1b" }}
+        >
+          <strong>⚠️ ตัวเลขงวด {q.data.closeCheck.label} ไม่ตรงกับตอนปิดงวด</strong>
+          <div>มีการแก้ข้อมูลหลังปิดงวด (เช่นแก้ใน Google Sheet โดยตรง) — ตรวจกับแบบที่ยื่นไปแล้ว ถ้าจำเป็นให้ยื่นเพิ่มเติม</div>
+          {q.data.closeCheck.diffs.map((d) => (
+            <div key={d}>· {d}</div>
+          ))}
+        </div>
+      )}
+
       {/* SALE-01c/01d: แจ้งเตือนที่ต้องจัดการก่อนยื่น */}
       {q.data && (q.data.output.possibleDuplicates > 0 || q.data.uncoveredReceipts.rows.length > 0) && (
         <div

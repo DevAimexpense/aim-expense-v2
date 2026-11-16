@@ -373,6 +373,10 @@ export function UploadReceiptModal({ events, payees, onClose, onSuccess, attachT
         });
         paymentId = result.paymentId;
         if (result.duplicateWarning) alert(result.duplicateWarning); // PUR-06
+        // CTRL-04b: ผู้บันทึกไม่มีสิทธิ์อนุมัติ → รายการรออนุมัติก่อน (อนุมัติแล้วเป็น "จ่ายแล้ว" ตามวันที่บันทึก)
+        if (result.pendingApproval) {
+          alert("บันทึกแล้ว — รายการนี้รออนุมัติ (คุณไม่มีสิทธิ์อนุมัติ) เมื่อผู้อนุมัติกดอนุมัติ จะเป็น \"จ่ายแล้ว\" ตามวันที่ที่บันทึกไว้");
+        }
       }
 
       // Upload receipt file (create mode only — attach mode already handled above)
@@ -565,7 +569,12 @@ export function UploadReceiptModal({ events, payees, onClose, onSuccess, attachT
                             className="app-select"
                           >
                             <option value="">ขอคืนได้ (ใบกำกับถูกต้อง ใช้ในกิจการ)</option>
-                            {NON_DEDUCTIBLE_REASONS.filter((r) => r.value !== "entertainment").map((r) => (
+                            {NON_DEDUCTIBLE_REASONS.filter(
+                              (r) =>
+                                r.value !== "entertainment" &&
+                                // PUR-08: "เกิน 6 เดือน" ระบบตั้งให้เอง — แสดงเฉพาะเมื่อรายการนี้ถูกตั้งไว้แล้ว
+                                (r.value !== "late_claim" || form.nonDeductibleVat === "late_claim"),
+                            ).map((r) => (
                               <option key={r.value} value={r.value}>
                                 ต้องห้าม — {r.label}
                               </option>

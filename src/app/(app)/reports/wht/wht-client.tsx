@@ -467,6 +467,21 @@ export function WhtClient({ orgName }: { orgName: string }) {
         </div>
       </div>
 
+      {/* CTRL-03: ยอดเดือนที่ปิดงวดแล้วไม่ตรงกับตอนปิด */}
+      {reportQuery.data?.closeCheck && reportQuery.data.closeCheck.diffs.length > 0 && (
+        <div
+          className="app-card"
+          role="alert"
+          style={{ marginBottom: "1rem", background: "#fef2f2", border: "1px solid #fca5a5", fontSize: "0.875rem", color: "#991b1b" }}
+        >
+          <strong>⚠️ ตัวเลขงวด {reportQuery.data.closeCheck.label} ไม่ตรงกับตอนปิดงวด</strong>
+          <div>มีการแก้ข้อมูลหลังปิดงวด (เช่นแก้ใน Google Sheet โดยตรง) — ตรวจกับแบบที่ยื่นไปแล้ว ถ้าจำเป็นให้ยื่นเพิ่มเติม</div>
+          {reportQuery.data.closeCheck.diffs.map((d) => (
+            <div key={d}>· {d}</div>
+          ))}
+        </div>
+      )}
+
       {/* Table + export (CSV/XLSX/generic PDF) */}
       <div
         style={{

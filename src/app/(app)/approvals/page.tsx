@@ -332,6 +332,12 @@ export default function ApprovalsPage() {
                           {" "}— อนุมัติ = ใช้ยอดใหม่ · ปฏิเสธ = คืนยอดเดิม
                         </div>
                       )}
+                      {/* CTRL-04b: บันทึกว่าจ่ายแล้วโดยผู้ไม่มีสิทธิ์อนุมัติ → อนุมัติแล้วเป็นจ่ายแล้วทันที */}
+                      {p.approveTo === "paid" && !p.reapprovalOf && (
+                        <div style={{ fontSize: "0.7rem", color: "#1d4ed8", fontWeight: 600 }}>
+                          💳 บันทึกว่าจ่ายแล้ว{p.paymentDate ? ` (${formatDate(p.paymentDate)})` : ""} — อนุมัติ = เป็น &quot;จ่ายแล้ว&quot; ตามวันที่นั้น
+                        </div>
+                      )}
                       {/* PUR-06: อาจเป็นบิลซ้ำ */}
                       {p.duplicateOf && (
                         <div style={{ fontSize: "0.7rem", color: "#b91c1c", fontWeight: 600 }}>

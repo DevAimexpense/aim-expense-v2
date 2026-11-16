@@ -19,7 +19,8 @@ import { prisma } from "@/lib/prisma";
 import { validateUploadedFile } from "@/lib/security/file-validation";
 import { safeAuditLog } from "@/server/lib/audit";
 import { todayBangkok } from "@/lib/utils/date";
-import { assertPaymentPeriodOpen } from "@/server/lib/period-lock";
+import { assertPaymentPeriodOpen, getClosedThrough } from "@/server/lib/period-lock";
+import { vatClaimMonthFor, lateClaimPatch } from "@/lib/period-close";
 
 export async function POST(req: NextRequest) {
   const session = await getSession();
@@ -84,12 +85,19 @@ export async function POST(req: NextRequest) {
     // CTRL-14: route นี้เขียน ReceiptDate ตรง → ต้องผ่านด่านเดียวกับ payment.recordReceipt
     //   CTRL-05: เปลี่ยนวันที่ใบเสร็จที่บันทึกไว้แล้วของรายการที่จ่ายแล้ว = ต้องมีสิทธิ์แก้หลังอนุมัติ
     //   CTRL-01: งวดเดิมและงวดใหม่ต้องยังไม่ปิด
+    // PUR-08: ใบกำกับลงวันที่ในเดือนที่ปิดงวดแล้ว (มาถึงช้า) ของรายการที่จ่ายแล้ว → ใช้สิทธิ์เดือนแรกที่ยังเปิด
+    let claimPatch: Record<string, string> = {};
     if (
       fileType === "receipt" &&
       clientReceiptDate &&
       clientReceiptDate.slice(0, 10) !== (payment.ReceiptDate || "").slice(0, 10)
     ) {
       const settled = payment.Status === "paid" || payment.Status === "cleared";
+      if (settled) {
+        const settleDate = payment.PaymentDate || (payment.PaidAt || "").slice(0, 10) || todayBangkok();
+        const claim = vatClaimMonthFor(clientReceiptDate, settleDate, await getClosedThrough(org.orgId));
+        claimPatch = { VatClaimMonth: claim.claimMonth, ...lateClaimPatch(payment, claim.lateClaim) };
+      }
       if (settled && payment.ReceiptDate && org.role !== "admin" && !org.permissions.editPaymentAfterApproval) {
         return NextResponse.json(
           { error: "เปลี่ยนวันที่ใบเสร็จของรายการที่จ่ายแล้วได้เฉพาะผู้มีสิทธิ์แก้ไขหลังอนุมัติ (งวดภาษีจะเปลี่ยน)" },
@@ -97,7 +105,7 @@ export async function POST(req: NextRequest) {
         );
       }
       try {
-        await assertPaymentPeriodOpen(org.orgId, [payment, { ...payment, ReceiptDate: clientReceiptDate }], "แก้วันที่ใบเสร็จ");
+        await assertPaymentPeriodOpen(org.orgId, [payment, { ...payment, ReceiptDate: clientReceiptDate, ...claimPatch }], "แก้วันที่ใบเสร็จ");
       } catch (e) {
         return NextResponse.json({ error: e instanceof Error ? e.message : "งวดปิดแล้ว" }, { status: 403 });
       }
@@ -164,6 +172,7 @@ export async function POST(req: NextRequest) {
     } else {
       updates.ReceiptURL = result.webViewLink;
       if (clientReceiptDate) updates.ReceiptDate = clientReceiptDate;
+      Object.assign(updates, claimPatch); // PUR-08
       if (invoiceNumber) updates.ReceiptNumber = invoiceNumber;
     }
 

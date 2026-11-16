@@ -4,7 +4,7 @@
 
 import { TRPCError } from "@trpc/server";
 import { prisma } from "@/lib/prisma";
-import { readPeriodClose, isDateInClosedPeriod, thaiPeriodLabel, paymentReportDates } from "@/lib/period-close";
+import { readPeriodClose, isDateInClosedPeriod, thaiPeriodLabel, paymentReportDates, type PeriodCloseSettings } from "@/lib/period-close";
 
 /** เดือนล่าสุดที่ปิด (YYYY-MM) · "" = ไม่ปิด · อ่านไม่ได้ → "" (ไม่บล็อกงานปกติเพราะ DB สะดุด) */
 export async function getClosedThrough(orgId: string): Promise<string> {
@@ -14,6 +14,17 @@ export async function getClosedThrough(orgId: string): Promise<string> {
   } catch (err) {
     console.error("[period-lock] read settings failed — not enforcing", err);
     return "";
+  }
+}
+
+/** CTRL-03: ตั้งค่าปิดงวดทั้งก้อน (รวมลายนิ้วมือยอด) · อ่านไม่ได้ → ค่าว่าง */
+export async function getPeriodClose(orgId: string): Promise<PeriodCloseSettings> {
+  try {
+    const org = await prisma.organization.findUnique({ where: { id: orgId }, select: { settings: true } });
+    return readPeriodClose(org?.settings);
+  } catch (err) {
+    console.error("[period-lock] read settings failed", err);
+    return { closedThrough: "", managers: [], snapshots: {} };
   }
 }
 

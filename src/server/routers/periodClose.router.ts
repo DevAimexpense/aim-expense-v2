@@ -5,10 +5,21 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { Prisma } from "@prisma/client";
-import { router, orgProcedure } from "../trpc";
+import { router, orgProcedure, createCallerFactory, type TRPCContext } from "../trpc";
+import { reportRouter } from "./report.router";
 import { prisma } from "@/lib/prisma";
 import { safeAuditLog } from "@/server/lib/audit";
-import { readPeriodClose, canManagePeriod, prevMonth, thaiPeriodLabel, type PeriodCloseSettings } from "@/lib/period-close";
+import {
+  readPeriodClose,
+  canManagePeriod,
+  prevMonth,
+  thaiPeriodLabel,
+  monthsToSnapshot,
+  mergeSnapshots,
+  dropSnapshotsFrom,
+  type PeriodCloseSettings,
+  type PeriodTotals,
+} from "@/lib/period-close";
 import { yearMonthBangkok } from "@/lib/utils/date";
 
 const YM = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, "เดือนไม่ถูกต้อง");
@@ -28,6 +39,30 @@ async function savePeriod(orgId: string, _settings: unknown, period: PeriodClose
   await prisma.$executeRaw(
     Prisma.sql`UPDATE organizations SET settings = jsonb_set(COALESCE(settings, '{}'::jsonb), '{periodClose}', ${json}::jsonb, true) WHERE id = ${orgId}`,
   );
+}
+
+/**
+ * CTRL-03: ยอดรวมของแต่ละเดือนที่ปิด (ทั้งองค์กร) จากรายงานตัวเดียวกับที่ผู้ใช้เปิดดู
+ * อ่านชีตไม่สำเร็จ → ปิดงวดได้ตามเดิม แค่ไม่มีลายนิ้วมือของเดือนนั้น (ไม่บล็อกงานปิดงวด)
+ */
+async function computeSnapshots(ctx: TRPCContext, months: string[]): Promise<Record<string, PeriodTotals>> {
+  if (!ctx.org || months.length === 0) return {};
+  // มุมมองทั้งองค์กร (ผู้ได้รับมอบสิทธิ์ปิดงวดอาจเป็นหัวหน้าโครงการที่เห็นแค่บางโครงการ)
+  const caller = createCallerFactory(reportRouter)({ ...ctx, org: { ...ctx.org, role: "admin" } });
+  const out: Record<string, PeriodTotals> = {};
+  const at = new Date().toISOString();
+  for (const ym of months) {
+    try {
+      const [y, m] = ym.split("-").map(Number);
+      const from = `${ym}-01`;
+      const to = `${ym}-${String(new Date(Date.UTC(y, m, 0)).getUTCDate()).padStart(2, "0")}`;
+      const [vat, wht] = await Promise.all([caller.vat30({ from, to }), caller.wht({ from, to })]);
+      out[ym] = { outputVat: vat.output.totalVAT, inputVat: vat.input.totalVAT, wht: wht.stats.totalWHT, at };
+    } catch (err) {
+      console.error(`[periodClose] snapshot ${ym} failed — closing without fingerprint`, err);
+    }
+  }
+  return out;
 }
 
 export const periodCloseRouter = router({
@@ -68,7 +103,12 @@ export const periodCloseRouter = router({
     if (org.period.closedThrough && input.month <= org.period.closedThrough) {
       return { success: true, closedThrough: org.period.closedThrough };
     }
-    await savePeriod(ctx.org.orgId, org.settings, { ...org.period, closedThrough: input.month });
+    const snaps = await computeSnapshots(ctx, monthsToSnapshot(org.period.closedThrough, input.month)); // CTRL-03
+    await savePeriod(ctx.org.orgId, org.settings, {
+      ...org.period,
+      closedThrough: input.month,
+      snapshots: mergeSnapshots(org.period.snapshots, snaps),
+    });
     await safeAuditLog({
       data: {
         orgId: ctx.org.orgId,
@@ -95,7 +135,11 @@ export const periodCloseRouter = router({
       }
       const next = prevMonth(input.month);
       const closedThrough = next < "2000-01" ? "" : next;
-      await savePeriod(ctx.org.orgId, org.settings, { ...org.period, closedThrough });
+      await savePeriod(ctx.org.orgId, org.settings, {
+        ...org.period,
+        closedThrough,
+        snapshots: dropSnapshotsFrom(org.period.snapshots, input.month), // CTRL-03: ปิดใหม่ = เก็บยอดใหม่
+      });
       await safeAuditLog({
         data: {
           orgId: ctx.org.orgId,
