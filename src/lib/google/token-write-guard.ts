@@ -5,13 +5,14 @@
 //   → refresh token ในเครื่องล้ม → markGoogleConnectionRevoked ปิดการเชื่อมต่อของเจ้าของ "บนเว็บจริง"
 //   (องค์กรของเจ้าของคนนั้นใช้ Sheets/LINE ไม่ได้จนกว่าจะเชื่อมต่อใหม่)
 //
-// กติกา: เขียนได้เมื่อรันบน Vercel (VERCEL=1 — ตั้งให้อัตโนมัติทุก deployment)
-//   หรือเครื่องที่ใช้ DB แยกของตัวเองและตั้ง ALLOW_GOOGLE_TOKEN_WRITES=1 ไว้ชัดเจน
-//   นอกนั้น (เครื่อง dev ที่ต่อ DB จริง) = อ่านได้ แต่ห้ามเขียน token/สถานะการเชื่อมต่อ
+// กติกา (DEV-02): เขียนได้เมื่อ
+//   - build แบบ production (NODE_ENV=production — เว็บจริงทุก deployment ไม่ต้องพึ่งตั้งค่า Vercel)
+//   - หรือ VERCEL=1 · หรือเครื่องที่ใช้ DB แยกของตัวเองและตั้ง ALLOW_GOOGLE_TOKEN_WRITES=1 ไว้ชัดเจน
+//   กันเฉพาะ `next dev` (NODE_ENV=development) = ต้นเหตุ incident · `next start` ในเครื่องจะเขียนได้ (ไม่ค่อยใช้)
 // ===========================================
 
 export function canWriteGoogleTokens(env: Record<string, string | undefined> = process.env): boolean {
-  return env.VERCEL === "1" || env.ALLOW_GOOGLE_TOKEN_WRITES === "1";
+  return env.ALLOW_GOOGLE_TOKEN_WRITES === "1" || env.VERCEL === "1" || env.NODE_ENV === "production";
 }
 
 export const LOCAL_GOOGLE_WRITE_BLOCKED =

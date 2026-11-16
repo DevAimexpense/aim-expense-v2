@@ -1,8 +1,7 @@
 // ===========================================
 // GET /api/health — ตรวจหลัง deploy: commit ที่รันอยู่ + เขียน token Google ได้ไหม (DEV-01)
 // ไม่มีข้อมูลลับ/ข้อมูลลูกค้า · googleTokenWrites ต้องเป็น true บนเว็บจริง
-//   (false = Vercel ไม่ได้ส่ง VERCEL=1 → token ที่ต่ออายุจะไม่ถูกบันทึก ต้องเปิด
-//    "Automatically expose System Environment Variables" ในตั้งค่าโปรเจกต์ Vercel)
+//   (DEV-02: เว็บที่ build แบบ production เขียนได้เสมอ — false บนเว็บจริง = ผิดปกติ ต้องตรวจ env)
 // ===========================================
 
 import { NextResponse } from "next/server";

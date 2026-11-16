@@ -5,9 +5,11 @@
   const CASES: { name: string; got: unknown; want: unknown }[] = [
     { name: "DEV-01: บน Vercel (prod/preview) เขียนได้", got: canWriteGoogleTokens({ VERCEL: "1", NODE_ENV: "production" }), want: true },
     { name: "DEV-01: เครื่อง dev (next dev) เขียนไม่ได้", got: canWriteGoogleTokens({ NODE_ENV: "development" }), want: false },
-    { name: "DEV-01: next start ในเครื่อง (production build) ก็เขียนไม่ได้", got: canWriteGoogleTokens({ NODE_ENV: "production" }), want: false },
+    // DEV-02: เว็บจริงต้องเขียนได้แม้ Vercel ไม่ส่ง VERCEL=1 (ไม่งั้นทุกคนเชื่อมต่อ Google ไม่ได้)
+    { name: "DEV-02: build แบบ production (ไม่มี VERCEL) เขียนได้", got: canWriteGoogleTokens({ NODE_ENV: "production" }), want: true },
+    { name: "DEV-02: ไม่มีค่าอะไรเลย (เช่นสคริปต์) เขียนไม่ได้", got: canWriteGoogleTokens({}), want: false },
     { name: "DEV-01: เครื่องที่ใช้ DB แยกและตั้ง ALLOW_GOOGLE_TOKEN_WRITES=1 เขียนได้", got: canWriteGoogleTokens({ NODE_ENV: "development", ALLOW_GOOGLE_TOKEN_WRITES: "1" }), want: true },
-    { name: "DEV-01: ค่าอื่นที่ไม่ใช่ \"1\" ไม่นับ", got: [canWriteGoogleTokens({ VERCEL: "true" }), canWriteGoogleTokens({ ALLOW_GOOGLE_TOKEN_WRITES: "yes" })], want: [false, false] },
+    { name: "DEV-01: ค่าอื่นที่ไม่ใช่ \"1\" ไม่นับ (ในเครื่อง dev)", got: [canWriteGoogleTokens({ NODE_ENV: "development", VERCEL: "true" }), canWriteGoogleTokens({ NODE_ENV: "development", ALLOW_GOOGLE_TOKEN_WRITES: "yes" })], want: [false, false] },
   ];
   let fail = 0;
   for (const c of CASES) {
