@@ -6,6 +6,8 @@
 // เก็บใน organization.settings (ค่าตั้งค่า ไม่ใช่ข้อมูลธุรกิจ — Zero Data Retention)
 // ===========================================
 
+import { whtPeriodDate } from "./wht-doc-utils";
+
 export type PeriodCloseSettings = {
   /** เดือนล่าสุดที่ปิดแล้ว (YYYY-MM) · "" = ยังไม่เคยปิด */
   closedThrough: string;
@@ -68,6 +70,19 @@ type PaymentRow = Record<string, string | undefined>;
 const SETTLED = new Set(["paid", "cleared"]);
 
 /**
+ * CTRL-04c: รายการที่ "จะเป็นจ่ายแล้วเมื่ออนุมัติ/ปฏิเสธ" (บันทึกจ่ายแล้วโดยผู้ไม่มีสิทธิ์อนุมัติ หรือแก้หลังจ่าย)
+ * ที่ลงงวด ≤ month — ปิดงวดก่อนจัดการรายการเหล่านี้ = อนุมัติ/ปฏิเสธไม่ได้จนกว่าจะเปิดงวด
+ */
+export function pendingSettlementsInPeriod<T extends PaymentRow>(rows: T[], month: string): T[] {
+  return rows.filter((r) => {
+    if (r.Status !== "pending") return false;
+    const next = r.ReapprovalOf || r.ApproveTo || "";
+    if (!SETTLED.has(next)) return false;
+    return paymentReportDates({ ...r, Status: next }).some((d) => isDateInClosedPeriod(d, month));
+  });
+}
+
+/**
  * วันที่ที่รายการจ่ายถูกนับในรายงาน (ภาษีซื้อ / ภ.ง.ด.) — ใช้ตรวจปิดงวด
  * เฉพาะรายการที่จ่ายแล้ว (pending/approved ยังไม่อยู่ในรายงาน → แก้ได้)
  */
@@ -79,6 +94,8 @@ export function paymentReportDates(p: PaymentRow): string[] {
     p.PaymentDate,
     (p.PaidAt || "").slice(0, 10),
     p.VatClaimMonth ? `${p.VatClaimMonth}-01` : "", // PUR-08: งวดที่ใช้สิทธิ์ภาษีซื้อ
+    // TAX-01: งวด ภ.ง.ด. + วันที่บน 50 ทวิ (อาจเป็นวันที่ใบเสร็จ สำหรับ "บันทึกค่าใช้จ่าย" รุ่นเก่า) — ตรวจเสมอ
+    (parseFloat(p.WTHAmount || "") || 0) > 0 ? whtPeriodDate(p) : "",
   ].filter((d): d is string => !!d);
   return Array.from(new Set(dates.map((d) => d.slice(0, 10))));
 }

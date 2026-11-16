@@ -79,6 +79,7 @@ export function resolveWhtCertDate(p: {
   CreatedAt?: string;
   ApprovedAt?: string;
   PaidAt?: string;
+  VatClaimMonth?: string;
 }): string {
   const isDate = (v?: string) => !!v && /^\d{4}-\d{2}-\d{2}/.test(v);
   const pay = isDate(p.PaymentDate) ? p.PaymentDate!.slice(0, 10) : "";
@@ -86,7 +87,8 @@ export function resolveWhtCertDate(p: {
   const paidDirect = !!p.ApprovedAt && p.ApprovedAt === p.PaidAt;
   const stampedWithEntryDate =
     paidDirect && !!pay && pay === (p.CreatedAt || "").slice(0, 10);
-  if (stampedWithEntryDate && receipt) return receipt;
+  // TAX-01: ใบกำกับมาช้า (PUR-08 ย้ายภาษีซื้อไปเดือนที่เปิด) → วันที่ใบไม่ใช่วันจ่าย ภาษีหัก ณ ที่จ่ายอยู่ตามวันจ่ายจริง
+  if (stampedWithEntryDate && receipt && !p.VatClaimMonth) return receipt;
   return pay || receipt;
 }
 
@@ -101,6 +103,7 @@ export function whtPeriodDate(p: {
   CreatedAt?: string;
   ApprovedAt?: string;
   PaidAt?: string;
+  VatClaimMonth?: string;
 }): string {
   const d = resolveWhtCertDate(p);
   if (d) return d;

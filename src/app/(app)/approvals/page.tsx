@@ -6,12 +6,15 @@ import { PaymentModal } from "../payments/payment-modal";
 import SearchableSelect, { type SearchableSelectOption } from "@/components/searchable-select";
 import { formatDate, todayBangkok } from "@/lib/utils/date";
 import DateInput from "@/components/shared/date-input";
+import { selfApprovalViolations } from "@/lib/approval-policy";
 
 export default function ApprovalsPage() {
   const utils = trpc.useUtils();
   const paymentsQuery = trpc.payment.list.useQuery({ status: "pending" });
   const eventsQuery = trpc.event.list.useQuery();
   const payeesQuery = trpc.payee.list.useQuery();
+  // CTRL-04e: รายการที่ผู้ดูอนุมัติเองไม่ได้ (สร้าง/แก้เอง) — กติกาเดียวกับฝั่ง server
+  const approvalCtxQuery = trpc.payment.approvalContext.useQuery();
 
   const payments = paymentsQuery.data || [];
   const events = eventsQuery.data || [];
@@ -72,7 +75,20 @@ export default function ApprovalsPage() {
     return true;
   });
 
-  const allIds = filtered.map((p) => p.paymentId);
+  const selfIds = useMemo(() => {
+    const ctx = approvalCtxQuery.data;
+    if (!ctx) return new Set<string>();
+    const rows = payments.map((p) => ({
+      PaymentID: p.paymentId,
+      CreatedByUserId: p.createdByUserId,
+      CreatedBy: p.createdBy,
+      LineSenderId: p.lineSenderId,
+      ReapprovalBy: p.reapprovalBy,
+    }));
+    return new Set(selfApprovalViolations(rows, ctx.userId, ctx.otherApprovers, ctx.lineUserId).map((r) => r.PaymentID));
+  }, [payments, approvalCtxQuery.data]);
+
+  const allIds = filtered.map((p) => p.paymentId).filter((id) => !selfIds.has(id));
   const allSelected = allIds.length > 0 && allIds.every((id) => selected.has(id));
 
   const toggle = (id: string) => {
@@ -92,14 +108,14 @@ export default function ApprovalsPage() {
     }
   };
 
-  const selectedList = filtered.filter((p) => selected.has(p.paymentId));
+  const selectedList = filtered.filter((p) => selected.has(p.paymentId) && !selfIds.has(p.paymentId));
   const selectedTotal = selectedList.reduce((s, p) => s + p.gttlAmount, 0);
 
   const handleApproveWithDate = async () => {
-    if (selected.size === 0 || !paymentDate) return;
+    if (selectedList.length === 0 || !paymentDate) return;
     try {
       await approveMut.mutateAsync({
-        paymentIds: Array.from(selected),
+        paymentIds: selectedList.map((p) => p.paymentId),
         paymentDate,
       });
       setSelected(new Set());
@@ -292,6 +308,7 @@ export default function ApprovalsPage() {
             <tbody>
               {filtered.map((p) => {
                 const isSel = selected.has(p.paymentId);
+                const isSelf = selfIds.has(p.paymentId);
                 return (
                   <tr
                     key={p.paymentId}
@@ -302,9 +319,12 @@ export default function ApprovalsPage() {
                     <td>
                       <input
                         type="checkbox"
-                        checked={isSel}
+                        checked={isSel && !isSelf}
+                        disabled={isSelf}
                         onChange={() => toggle(p.paymentId)}
-                        style={{ cursor: "pointer" }}
+                        style={{ cursor: isSelf ? "not-allowed" : "pointer" }}
+                        aria-label={isSelf ? "รายการของคุณ — ให้ผู้อนุมัติคนอื่นอนุมัติ" : "เลือกรายการ"}
+                        title={isSelf ? "รายการที่คุณสร้างหรือแก้ — ให้ผู้อนุมัติคนอื่นอนุมัติ (แบ่งแยกหน้าที่)" : undefined}
                       />
                     </td>
                     <td
@@ -330,6 +350,11 @@ export default function ApprovalsPage() {
                           🔁 แก้ไขหลัง{p.reapprovalOf === "approved" ? "อนุมัติ" : p.reapprovalOf === "paid" ? "จ่ายแล้ว" : "เคลียร์แล้ว"}
                           {p.reapprovalPrevAmount > 0 ? ` · ยอดเดิม ฿${formatNumber(p.reapprovalPrevAmount)} → ใหม่ ฿${formatNumber(p.gttlAmount)}` : ""}
                           {" "}— อนุมัติ = ใช้ยอดใหม่ · ปฏิเสธ = คืนยอดเดิม
+                        </div>
+                      )}
+                      {isSelf && (
+                        <div style={{ fontSize: "0.7rem", color: "#64748b", fontWeight: 600 }}>
+                          🙋 รายการที่คุณสร้างหรือแก้ — ให้ผู้อนุมัติคนอื่นอนุมัติ
                         </div>
                       )}
                       {/* CTRL-04b: บันทึกว่าจ่ายแล้วโดยผู้ไม่มีสิทธิ์อนุมัติ → อนุมัติแล้วเป็นจ่ายแล้วทันที */}

@@ -17,10 +17,12 @@ import {
   monthsToSnapshot,
   mergeSnapshots,
   dropSnapshotsFrom,
+  pendingSettlementsInPeriod,
   type PeriodCloseSettings,
   type PeriodTotals,
 } from "@/lib/period-close";
 import { yearMonthBangkok } from "@/lib/utils/date";
+import { getSheetsService } from "../lib/sheets-context";
 
 const YM = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, "เดือนไม่ถูกต้อง");
 
@@ -102,6 +104,18 @@ export const periodCloseRouter = router({
     }
     if (org.period.closedThrough && input.month <= org.period.closedThrough) {
       return { success: true, closedThrough: org.period.closedThrough };
+    }
+    // CTRL-04c: ยังมีรายการจ่ายแล้วที่รออนุมัติในงวดนี้ → ให้จัดการก่อน (ปิดแล้วจะอนุมัติ/ปฏิเสธไม่ได้)
+    const sheets = await getSheetsService(ctx.org.orgId);
+    const waiting = pendingSettlementsInPeriod(await sheets.getPayments(), input.month);
+    if (waiting.length > 0) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: `ยังมี ${waiting.length} รายการที่จ่ายเงินแล้วแต่รออนุมัติในงวดนี้ (${waiting
+          .slice(0, 3)
+          .map((r) => r.Description || r.PaymentID)
+          .join(", ")}${waiting.length > 3 ? " …" : ""}) — อนุมัติหรือปฏิเสธที่หน้าอนุมัติก่อนปิดงวด`,
+      });
     }
     const snaps = await computeSnapshots(ctx, monthsToSnapshot(org.period.closedThrough, input.month)); // CTRL-03
     await savePeriod(ctx.org.orgId, org.settings, {

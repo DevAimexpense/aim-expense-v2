@@ -20,6 +20,21 @@ export function initialPaymentStatus(
   return canApprove ? { status: "paid", approveTo: "" } : { status: "pending", approveTo: "paid" };
 }
 
+/** ผู้แก้สาระสำคัญที่ยังรออนุมัติ (ReapprovalBy เก็บหลายคนคั่นด้วย ",") */
+export function editorsOf(reapprovalBy: string | undefined): string[] {
+  return (reapprovalBy || "").split(",").map((s) => s.trim()).filter(Boolean);
+}
+
+/**
+ * CTRL-04d: ผู้แก้สาระสำคัญล่าสุด — แก้หลังอนุมัติ = เริ่มนับใหม่ (คนเดียว) · แก้ระหว่างรออนุมัติ = สะสม
+ * (ผู้จัดการแก้ยอดของพนักงานแล้ว ต้องให้คนอื่นอนุมัติ)
+ */
+export function nextReapprovalBy(current: string | undefined, editorUserId: string, restart: boolean): string {
+  if (restart) return editorUserId;
+  const list = editorsOf(current);
+  return list.includes(editorUserId) ? list.join(",") : [...list, editorUserId].join(",");
+}
+
 /**
  * รายการที่ผู้อนุมัติคนนี้อนุมัติไม่ได้ เพราะเป็นคนสร้าง หรือคนที่แก้สาระสำคัญล่าสุด
  * otherApprovers = จำนวนสมาชิกอื่นที่อนุมัติได้ (0 = ไม่มีใครอื่น → อนุมัติเองได้)
@@ -32,7 +47,7 @@ export function selfApprovalViolations<T extends Record<string, string | undefin
 ): T[] {
   if (otherApprovers === 0) return [];
   return rows.filter((r) => {
-    if (r.ReapprovalBy && r.ReapprovalBy === approverUserId) return true;
+    if (editorsOf(r.ReapprovalBy).includes(approverUserId)) return true;
     // รายการจาก LINE: ผู้สร้างตัวจริง = ผู้ส่ง (กลุ่ม LINE บันทึกในนามแอดมินที่ผูกกลุ่ม — แอดมินไม่ใช่ผู้ขอเบิก)
     if (r.CreatedBy === "LINE OA") {
       return !!r.LineSenderId && !!approverLineUserId && r.LineSenderId === approverLineUserId;

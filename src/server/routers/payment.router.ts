@@ -18,7 +18,7 @@ import { materialChanges, statusAfterReapproval, reapprovalSnapshot, revertReapp
 import { NON_DEDUCTIBLE_VALUES, resolveNonDeductibleVat } from "@/lib/input-vat-rules";
 import { findDuplicateBills, duplicateWarningText } from "@/lib/duplicate-bill";
 import { assertPeriodOpen, assertPaymentPeriodOpen, getClosedThrough } from "../lib/period-lock";
-import { canApprovePayments, initialPaymentStatus, selfApprovalViolations } from "@/lib/approval-policy";
+import { canApprovePayments, initialPaymentStatus, selfApprovalViolations, nextReapprovalBy } from "@/lib/approval-policy";
 import { vatClaimMonthFor, lateClaimPatch } from "@/lib/period-close";
 
 const PaymentInputSchema = z.object({
@@ -124,6 +124,8 @@ function toPaymentRow(payment: Record<string, string>) {
     // CTRL-04: รออนุมัติใหม่หลังแก้ (สถานะเดิม) · PUR-03: ภาษีซื้อต้องห้าม · PUR-06: อาจซ้ำกับ
     reapprovalOf: payment.ReapprovalOf || "",
     approveTo: payment.ApproveTo || "", // CTRL-04b
+    reapprovalBy: payment.ReapprovalBy || "", // CTRL-04e: หน้าอนุมัติรู้ว่ารายการไหนอนุมัติเองไม่ได้
+    lineSenderId: payment.LineSenderId || "",
     vatClaimMonth: payment.VatClaimMonth || "", // PUR-08
     // CTRL-15: ยอดจ่ายก่อนแก้ (ปฏิเสธ = คืนยอดนี้)
     reapprovalPrevAmount: (() => {
@@ -555,14 +557,19 @@ export const paymentRouter = router({
       updates.UpdatedAt = new Date().toISOString();
 
       // CTRL-04: แก้สาระสำคัญหลังอนุมัติ → กลับไปรออนุมัติ (เก็บสถานะเดิมไว้คืนตอนอนุมัติใหม่)
-      const changed = isPostApproval ? materialChanges(existing, updates) : [];
+      const material = materialChanges(existing, updates);
+      const changed = isPostApproval ? material : [];
       const requiresReapproval = changed.length > 0;
+      // CTRL-04d: แก้สาระสำคัญระหว่างรออนุมัติ → ผู้แก้อนุมัติรายการนี้เองไม่ได้ (ห้ามอนุมัติรายการที่ตัวเองแก้)
+      if (!isPostApproval && material.length > 0) {
+        updates.ReapprovalBy = nextReapprovalBy(existing.ReapprovalBy, ctx.session.userId, false);
+      }
       if (requiresReapproval) {
         updates.Status = "pending";
         updates.ReapprovalOf = existing.ReapprovalOf || existing.Status;
         // CTRL-15: เก็บค่าที่เคยอนุมัติไว้ — ผู้อนุมัติ "ปฏิเสธ" = คืนค่าเดิม (ไม่ใช่ทิ้งรายการที่จ่ายแล้ว)
         updates.ReapprovalSnapshot = reapprovalSnapshot(existing);
-        updates.ReapprovalBy = ctx.session.userId; // CTRL-04b: ผู้แก้อนุมัติการแก้ของตัวเองไม่ได้
+        updates.ReapprovalBy = nextReapprovalBy(existing.ReapprovalBy, ctx.session.userId, true); // CTRL-04b
         updates.ApprovedBy = "";
         updates.ApprovedAt = "";
       }
@@ -723,6 +730,15 @@ export const paymentRouter = router({
       await autoSaveWhtCert({ orgId: ctx.org.orgId, paymentId: input.paymentId, userId: ctx.session.userId, spreadsheetId: ctx.org.googleSpreadsheetId });
       return { success: true, duplicateWarning: duplicateWarningText(duplicates) };
     }),
+
+  /** CTRL-04e: ข้อมูลให้หน้าอนุมัติรู้ว่ารายการไหนเป็นของผู้ดูเอง (กติกาเดียวกับ approve) */
+  approvalContext: permissionProcedure("approvePayments").query(async ({ ctx }) => {
+    const [user, otherApprovers] = await Promise.all([
+      prisma.user.findUnique({ where: { id: ctx.session.userId }, select: { lineUserId: true } }),
+      otherApproverCount(ctx.org.orgId, ctx.session.userId),
+    ]);
+    return { userId: ctx.session.userId, lineUserId: user?.lineUserId ?? null, otherApprovers };
+  }),
 
   approve: permissionProcedure("approvePayments")
     .input(
