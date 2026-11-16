@@ -154,7 +154,7 @@ export const periodCloseRouter = router({
       throw new TRPCError({ code: "FORBIDDEN", message: "ไม่มีสิทธิ์ตรวจงวดบัญชี" });
     }
     const months = snapshotMonthsToVerify(org.period);
-    if (months.length === 0) return { checked: [] as string[], mismatches: [] };
+    if (months.length === 0) return { checked: [] as string[], unchecked: [] as string[], partial: [] as string[], mismatches: [] };
     return verifyClosedPeriods(ctx, org.period, months);
   }),
 

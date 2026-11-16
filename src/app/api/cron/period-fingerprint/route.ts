@@ -16,7 +16,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getOrgContext } from "@/lib/auth/middleware";
 import { pushMessage } from "@/lib/line/messaging";
-import { readPeriodClose, snapshotMonthsToVerify } from "@/lib/period-close";
+import { cronVerifyOutcome, readPeriodClose, snapshotMonthsToVerify } from "@/lib/period-close";
 import { yearMonthBangkok } from "@/lib/utils/date";
 import { verifyClosedPeriods } from "@/server/lib/period-fingerprint";
 import { safeAuditLog } from "@/server/lib/audit";
@@ -59,7 +59,12 @@ export async function GET(req: NextRequest) {
       const months = snapshotMonthsToVerify(o.period, 3);
       if (months.length > 0) {
         const org = await getOrgContext(o.ownerId, o.id);
-        if (!org) continue;
+        if (!org) {
+          // เจ้าของไม่ใช่สมาชิก active ขององค์กรแล้ว (ข้อมูลผิดปกติ) — ให้ทีมเห็น ไม่ mark
+          failed.push(o.id);
+          console.error(`[cron/period-fingerprint] org=${o.id} owner has no active membership — skipped`);
+          continue;
+        }
         const ctx: TRPCContext = {
           session: {
             userId: o.ownerId,
@@ -84,7 +89,16 @@ export async function GET(req: NextRequest) {
           },
         };
         const result = await verifyClosedPeriods(ctx, o.period, months);
-        if (result.mismatches.length > 0) {
+        const outcome = cronVerifyOutcome(result);
+        if (outcome === "failed") {
+          // CRON-02: อ่านชีตไม่ได้ (บางเดือน/บางส่วน) และไม่เจอยอดไม่ตรง → ไม่ถือว่าตรวจแล้ว · ลองใหม่พรุ่งนี้
+          failed.push(o.id);
+          console.error(
+            `[cron/period-fingerprint] org=${o.id} incomplete — unchecked=${result.unchecked.join(",") || "-"} partial=${result.partial.join(",") || "-"}`,
+          );
+          continue;
+        }
+        if (outcome === "alert") {
           const lines = result.mismatches.map((m) => `${m.label}\n${m.diffs.map((d) => `· ${d}`).join("\n")}`).join("\n\n");
           const text =
             `⚠️ ${o.name}: ตัวเลขงวดที่ปิดแล้วไม่ตรงกับตอนปิด\n\n${lines}\n\n` +

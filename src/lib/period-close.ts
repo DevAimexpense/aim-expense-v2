@@ -319,3 +319,51 @@ export function lockedMonthTotals(
   }
   return { revenue: round2(revenue), expense: round2(expense) };
 }
+
+/**
+ * CRON-02: ผลการเทียบลายนิ้วมือ — แยกเดือนที่ตรวจไม่ได้ (อ่านชีตล้ม) ออกจากเดือนที่ตรวจแล้ว
+ *   unchecked = มีลายนิ้วมือแต่คำนวณยอดปัจจุบันไม่ได้ · partial = ตรวจได้แค่ภาษี (รายได้/ค่าใช้จ่ายอ่านไม่ได้)
+ */
+export function compareFingerprints(
+  snapshots: Record<string, PeriodTotals> | undefined,
+  current: Record<string, PeriodTotals>,
+  months: string[],
+): {
+  checked: string[];
+  unchecked: string[];
+  partial: string[];
+  mismatches: { month: string; label: string; diffs: string[] }[];
+} {
+  const checked: string[] = [];
+  const unchecked: string[] = [];
+  const partial: string[] = [];
+  const mismatches: { month: string; label: string; diffs: string[] }[] = [];
+  for (const ym of months) {
+    const snap = snapshots?.[ym];
+    if (!snap) continue; // ไม่มีลายนิ้วมือ = ไม่มีอะไรให้ตรวจ (ไม่ใช่ความล้มเหลว)
+    const cur = current[ym];
+    if (!cur) {
+      unchecked.push(ym);
+      continue;
+    }
+    checked.push(ym);
+    if ((snap.revenue !== undefined && cur.revenue === undefined) || (snap.expense !== undefined && cur.expense === undefined)) {
+      partial.push(ym);
+    }
+    const diffs = periodTotalsDiffs(snap, cur);
+    if (diffs.length > 0) mismatches.push({ month: ym, label: thaiPeriodLabel(ym), diffs });
+  }
+  return { checked, unchecked, partial, mismatches };
+}
+
+/**
+ * CRON-02: cron ตัดสินผลต่อองค์กร
+ *   alert  = เจอยอดไม่ตรง → แจ้งเจ้าของ + mark (ไม่แจ้งซ้ำพรุ่งนี้ แม้บางเดือนตรวจไม่ได้)
+ *   failed = ตรวจไม่ครบ (อ่านชีตไม่ได้บางส่วน) และไม่เจออะไร → ไม่ mark · ลองใหม่พรุ่งนี้ · อยู่ในรายชื่อ failed
+ *   ok     = ตรวจครบ ตรงทั้งหมด → mark
+ */
+export function cronVerifyOutcome(r: { unchecked: string[]; partial: string[]; mismatches: unknown[] }): "alert" | "failed" | "ok" {
+  if (r.mismatches.length > 0) return "alert";
+  if (r.unchecked.length > 0 || r.partial.length > 0) return "failed";
+  return "ok";
+}

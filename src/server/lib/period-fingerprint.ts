@@ -11,9 +11,8 @@ import { reportRouter } from "../routers/report.router";
 import { getSheetsService, ensureTabsCached } from "./sheets-context";
 import { SHEET_TABS } from "../services/google-sheets.service";
 import {
+  compareFingerprints,
   lockedMonthTotals,
-  periodTotalsDiffs,
-  thaiPeriodLabel,
   type PeriodCloseSettings,
   type PeriodTotals,
 } from "@/lib/period-close";
@@ -75,22 +74,15 @@ export async function computePeriodTotals(ctx: TRPCContext, months: string[]): P
 
 export type PeriodMismatch = { month: string; label: string; diffs: string[] };
 
-/** เทียบยอดปัจจุบันกับลายนิ้วมือ → เดือนที่ไม่ตรง (ข้ามเดือนที่คำนวณไม่ได้) */
+/**
+ * เทียบยอดปัจจุบันกับลายนิ้วมือ — CRON-02: เดือนที่คำนวณไม่ได้อยู่ใน unchecked (ไม่ถือว่า "ตรง")
+ * partial = ตรวจได้แค่ภาษี (รายได้/ค่าใช้จ่ายอ่านไม่ได้)
+ */
 export async function verifyClosedPeriods(
   ctx: TRPCContext,
   settings: PeriodCloseSettings,
   months: string[],
-): Promise<{ checked: string[]; mismatches: PeriodMismatch[] }> {
+): Promise<{ checked: string[]; unchecked: string[]; partial: string[]; mismatches: PeriodMismatch[] }> {
   const current = await computePeriodTotals(ctx, months);
-  const mismatches: PeriodMismatch[] = [];
-  const checked: string[] = [];
-  for (const ym of months) {
-    const snap = settings.snapshots?.[ym];
-    const cur = current[ym];
-    if (!snap || !cur) continue;
-    checked.push(ym);
-    const diffs = periodTotalsDiffs(snap, cur);
-    if (diffs.length > 0) mismatches.push({ month: ym, label: thaiPeriodLabel(ym), diffs });
-  }
-  return { checked, mismatches };
+  return compareFingerprints(settings.snapshots, current, months);
 }

@@ -115,12 +115,24 @@ export function PeriodCloseSection() {
                     </span>
                   </div>
                   {verifyMut.error && <div className="app-error-msg">{verifyMut.error.message}</div>}
+                  {/* CRON-02: เดือนที่ตรวจไม่ได้ ≠ "ตรง" */}
+                  {verifyMut.data && (verifyMut.data.unchecked.length > 0 || verifyMut.data.partial.length > 0) && (
+                    <div style={{ color: "#b45309", marginTop: "0.375rem" }}>
+                      {verifyMut.data.unchecked.length > 0 &&
+                        `ตรวจไม่ได้ ${verifyMut.data.unchecked.length} เดือน (${verifyMut.data.unchecked.map(thaiPeriodLabel).join(", ")}) — อ่าน Google Sheet ไม่ได้ ลองเชื่อมต่อ Google ใหม่แล้วกดตรวจอีกครั้ง`}
+                      {verifyMut.data.unchecked.length > 0 && verifyMut.data.partial.length > 0 && <br />}
+                      {verifyMut.data.partial.length > 0 &&
+                        `ตรวจได้เฉพาะตัวเลขภาษี ${verifyMut.data.partial.length} เดือน — อ่านรายได้/ค่าใช้จ่ายไม่ได้ ลองใหม่อีกครั้ง`}
+                    </div>
+                  )}
                   {verifyMut.data &&
                     (verifyMut.data.mismatches.length === 0 ? (
                       <div style={{ color: "#166534", marginTop: "0.375rem" }}>
                         {verifyMut.data.checked.length > 0
-                          ? `✅ ตัวเลข ${verifyMut.data.checked.length} เดือนตรงกับตอนปิดงวด`
-                          : "ยังไม่มีงวดที่เก็บยอดตอนปิดไว้ (ปิดงวดครั้งถัดไประบบจะเก็บให้)"}
+                          ? `✅ ตัวเลข ${verifyMut.data.checked.length} เดือนที่ตรวจได้ตรงกับตอนปิดงวด`
+                          : verifyMut.data.unchecked.length > 0
+                            ? ""
+                            : "ยังไม่มีงวดที่เก็บยอดตอนปิดไว้ (ปิดงวดครั้งถัดไประบบจะเก็บให้)"}
                       </div>
                     ) : (
                       <div
