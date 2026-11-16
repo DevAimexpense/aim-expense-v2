@@ -9,9 +9,12 @@
 //       (หัก ณ ที่จ่าย ไม่ใช่ส่วนลด — เป็นภาษีที่นำส่งแทนผู้รับเงิน ค่าใช้จ่ายยังเต็มจำนวน)
 // ===========================================
 
+import { roundMoney } from "@/lib/money";
 import { isInputVatClaimable } from "./input-vat-rules";
+import { purchaseNoteCostEffect } from "./purchase-note";
 
 export type PlPayment = {
+  paymentId?: string;
   eventId: string;
   status: string;
   ttlAmount: number;
@@ -77,6 +80,8 @@ export function computeDashboardPL(params: {
   taxInvoices?: PlTaxInvoice[];
   /** SALE-02: ใบลดหนี้ (ลดรายได้) / ใบเพิ่มหนี้ (เพิ่มรายได้) ตามวันที่ออกใบ */
   notes?: { status: string; kind: "credit" | "debit"; docDate: string; eventId: string; diffAmount: number }[];
+  /** PUR-11: ใบลด/เพิ่มหนี้ที่ได้รับจากผู้ขาย — ปรับต้นทุนในเดือนที่ได้รับ */
+  purchaseNotes?: { paymentId: string; status: string; kind: "credit" | "debit"; receivedDate: string; eventId: string; baseAmount: number; vatAmount: number }[];
   /** YYYY-MM · "" = ทั้งหมด */
   month: string;
   /** "all" หรือ EventID */
@@ -84,7 +89,7 @@ export function computeDashboardPL(params: {
   vatRegistered: boolean;
 }) {
   const { payments, billings, month, eventId, vatRegistered } = params;
-  const round2 = (n: number) => Math.round(n * 100) / 100;
+  const round2 = roundMoney; // RPT-09
 
   let revenue = 0;
   // ใบเสนอราคาที่แปลงเป็นใบวางบิลแล้ว — ใบกำกับจากใบเสนอราคาเดียวกันเป็นรายการขายเดียวกัน (ไม่นับซ้ำ)
@@ -153,6 +158,15 @@ export function computeDashboardPL(params: {
     if (!INCURRED.has(p.status)) continue;
     expense += expenseCostOf(p, vatRegistered);
   }
+  let purchaseNoteAdjustment = 0;
+  if (params.purchaseNotes?.length) {
+    const byId = new Map(payments.filter((p) => p.paymentId).map((p) => [p.paymentId as string, p]));
+    for (const n of params.purchaseNotes) {
+      if (!inEvent(n.eventId, eventId) || !inPeriod(n.receivedDate, month)) continue;
+      purchaseNoteAdjustment += purchaseNoteCostEffect(n, byId.get(n.paymentId), vatRegistered);
+    }
+  }
+  expense += purchaseNoteAdjustment;
 
   revenue = round2(revenue);
   expense = round2(expense);
@@ -166,6 +180,8 @@ export function computeDashboardPL(params: {
     /** RPT-03: ใบกำกับที่ไม่นับเพราะน่าจะซ้ำกับใบวางบิล/ใบเสร็จ (ควรผูก) */
     possibleDuplicates,
     expense,
+    /** PUR-11: ปรับต้นทุนจากใบลด/เพิ่มหนี้ของผู้ขาย (+/−) */
+    purchaseNoteAdjustment: round2(purchaseNoteAdjustment),
     profit,
     margin: revenue > 0 ? (profit / revenue) * 100 : null,
     pendingCount,

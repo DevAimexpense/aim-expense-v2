@@ -1,8 +1,10 @@
 "use client";
 
+import { roundMoney } from "@/lib/money";
 import { useEffect, useMemo, useState } from "react";
 import { todayBangkok } from "@/lib/utils/date";
 import { trpc } from "@/lib/trpc/client";
+import { PurchaseNotesSection } from "./purchase-notes-section";
 import { calculatePayment } from "@/lib/calculations";
 import { WTH_TYPES, findWthTypeByRate, wthTypeIdToSend } from "@/lib/wth-types";
 import SearchableSelect, { type SearchableSelectOption } from "@/components/searchable-select";
@@ -349,7 +351,7 @@ export function PaymentModal({
         }),
         isVatPayee: form.isVatPayee,
         // PUR-02c: ส่ง VAT ตามใบเมื่อผู้ใช้กรอก/รายการเดิมเป็นค่าตามใบ — ไม่ส่ง = server คิด 7% (หรือคงเดิมถ้าฐานไม่เปลี่ยน)
-        vatAmount: form.isVatPayee && vatOverride !== null ? Math.round(vatOverride * 100) / 100 : undefined,
+        vatAmount: form.isVatPayee && vatOverride !== null ? roundMoney(vatOverride) : undefined,
         dueDate: form.dueDate,
         notes: form.notes.trim() || undefined,
         // R5/R6: tax compliance fields
@@ -1025,6 +1027,17 @@ export function PaymentModal({
                   🧾 ดูใบเสร็จ →
                 </a>
               </div>
+            )}
+
+            {/* PUR-11: ใบลด/เพิ่มหนี้ที่ได้รับจากผู้ขาย (เฉพาะรายการที่จ่ายแล้ว) */}
+            {isEdit && payment && (payment.status === "paid" || payment.status === "cleared") && (
+              <PurchaseNotesSection
+                paymentId={payment.paymentId}
+                description={payment.description || ""}
+                ttlAmount={payment.ttlAmount || 0}
+                vatAmount={payment.vatAmount || 0}
+                canAdjust={myRole === "admin" || canEditAfterApproval}
+              />
             )}
 
             {/* ข้อมูลภาษีย้ายไปบันทึกค่าใช้จ่ายแล้ว — ตั้งเบิกใช้แค่ข้อมูลพื้นฐาน */}

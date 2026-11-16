@@ -50,8 +50,9 @@ export async function POST(req: NextRequest) {
     if (!paymentId) {
       return NextResponse.json({ error: "ต้องระบุ paymentId" }, { status: 400 });
     }
-    if (fileType !== "invoice" && fileType !== "receipt") {
-      return NextResponse.json({ error: "fileType ต้องเป็น invoice หรือ receipt" }, { status: 400 });
+    // PUR-11: vendor_note = ไฟล์ใบลด/เพิ่มหนี้จากผู้ขาย — เก็บไฟล์อย่างเดียว ไม่แก้แถวรายการจ่าย
+    if (fileType !== "invoice" && fileType !== "receipt" && fileType !== "vendor_note") {
+      return NextResponse.json({ error: "fileType ต้องเป็น invoice, receipt หรือ vendor_note" }, { status: 400 });
     }
 
     console.log(`[upload] paymentId=${paymentId} fileType=${fileType} size=${file.size}`);
@@ -166,7 +167,9 @@ export async function POST(req: NextRequest) {
     const updates: Record<string, string | number> = {
       UpdatedAt: new Date().toISOString(),
     };
-    if (fileType === "invoice") {
+    if (fileType === "vendor_note") {
+      // PUR-11: URL ไปเก็บในแถวใบลด/เพิ่มหนี้ (purchaseNote.create) — รายการจ่ายเดิมไม่เปลี่ยน
+    } else if (fileType === "invoice") {
       updates.InvoiceFileURL = result.webViewLink;
       if (invoiceNumber) updates.InvoiceNumber = invoiceNumber;
     } else {
@@ -176,7 +179,9 @@ export async function POST(req: NextRequest) {
       if (invoiceNumber) updates.ReceiptNumber = invoiceNumber;
     }
 
-    await sheets.updateById(SHEET_TABS.PAYMENTS, "PaymentID", paymentId, updates);
+    if (fileType !== "vendor_note") {
+      await sheets.updateById(SHEET_TABS.PAYMENTS, "PaymentID", paymentId, updates);
+    }
 
     await safeAuditLog({
       data: {
@@ -185,7 +190,7 @@ export async function POST(req: NextRequest) {
         action: "upload",
         entityType: "payment",
         entityRef: paymentId,
-        summary: `อัปโหลด${fileType === "invoice" ? "ใบแจ้งหนี้" : "ใบเสร็จ"} → ${result.folderPath}/${result.fileName}`,
+        summary: `อัปโหลด${fileType === "invoice" ? "ใบแจ้งหนี้" : fileType === "vendor_note" ? "ใบลด/เพิ่มหนี้จากผู้ขาย" : "ใบเสร็จ"} → ${result.folderPath}/${result.fileName}`,
       },
     });
 

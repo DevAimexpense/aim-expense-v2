@@ -6,6 +6,8 @@
 // Replace ad-hoc `ALLOWED_PLANS` checks with `hasFeature()` / `checkQuota()`.
 // ===========================================
 
+import { roundMoney } from "@/lib/money";
+
 // ===== Plan tiers =====
 
 export const PLAN_TIERS = [
@@ -350,5 +352,5 @@ export function computeCommission(
     (e) => e.monthIndex === monthIndex,
   );
   if (!entry) return 0;
-  return Math.round(monthlyPriceTHB * (entry.percent / 100) * 100) / 100;
+  return roundMoney(monthlyPriceTHB * (entry.percent / 100));
 }

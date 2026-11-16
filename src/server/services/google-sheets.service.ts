@@ -41,6 +41,7 @@ export const SHEET_TABS = {
   TAX_INVOICE_LINES: "TaxInvoiceLines",
   BANK_STATEMENTS: "BankStatements", // statement ธนาคารรายเดือน (ไฟล์อยู่ใน Drive Reports/ปี/เดือน) — ส่งสำนักงานบัญชี
   CREDIT_NOTES: "CreditNotes", // SALE-02: ใบลดหนี้/ใบเพิ่มหนี้ (ม.86/9-10) — อ้างใบกำกับภาษีเดิม
+  PURCHASE_NOTES: "PurchaseNotes", // PUR-11: ใบลด/เพิ่มหนี้ที่ได้รับจากผู้ขาย (ม.82/9-10) — อ้างรายการจ่ายเดิม
 } as const;
 
 // ===== Column Headers per Tab =====
@@ -377,6 +378,30 @@ export const SHEET_HEADERS: Record<string, string[]> = {
     "PdfUrl",
     "PdfFor",
     "PdfContentFor",
+  ],
+  [SHEET_TABS.PURCHASE_NOTES]: [
+    "NoteID",
+    "Kind", // credit = ใบลดหนี้ · debit = ใบเพิ่มหนี้
+    "PaymentID", // รายการจ่ายเดิม
+    "PayeeID",
+    "VendorNameSnapshot",
+    "VendorTaxIdSnapshot",
+    "VendorDocNumber", // เลขที่ใบลด/เพิ่มหนี้ของผู้ขาย
+    "VendorDocDate", // วันที่บนใบ
+    "ReceivedDate", // วันที่ได้รับ = งวดภาษีซื้อที่ปรับ (ม.82/10)
+    "RefInvoiceNumber", // เลขที่ใบกำกับเดิม (snapshot)
+    "BaseAmount", // มูลค่าที่ลด/เพิ่ม ก่อน VAT (บวกเสมอ — ทิศทางตาม Kind)
+    "VATAmount", // ภาษีของผลต่าง (บวกเสมอ)
+    "Reason",
+    "FileURL",
+    "EventID",
+    "Status", // active | void
+    "VoidedAt",
+    "VoidReason",
+    "CreatedBy",
+    "CreatedByUserId",
+    "CreatedAt",
+    "UpdatedAt",
   ],
   [SHEET_TABS.BANK_STATEMENTS]: [
     "StatementID",

@@ -9,6 +9,7 @@
 // Linkage: SourceBillingID OR SourceQuotationID (optional — direct sale OK)
 // ===========================================
 
+import { roundMoney } from "@/lib/money";
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { router, featureProcedure } from "../trpc";
@@ -62,7 +63,7 @@ const TaxInvoiceCreateInput = z.object({
 // ===== Helpers =====
 
 function round2(n: number): number {
-  return Math.round(n * 100) / 100;
+  return roundMoney(n); // RPT-09
 }
 
 /**

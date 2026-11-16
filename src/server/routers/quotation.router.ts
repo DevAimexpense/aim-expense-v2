@@ -4,6 +4,7 @@
 // State machine: draft → sent → accepted | rejected | void  (+ converted in S24)
 // ===========================================
 
+import { roundMoney } from "@/lib/money";
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { router, featureProcedure } from "../trpc";
@@ -61,7 +62,7 @@ const QuotationCreateInput = z.object({
  * Round to 2 decimal places (banker's rounding not needed — half-up acceptable for SME)
  */
 function round2(n: number): number {
-  return Math.round(n * 100) / 100;
+  return roundMoney(n); // RPT-09
 }
 
 /**
@@ -615,8 +616,8 @@ export const quotationRouter = router({
       const customerWht = parseFloat(customer.DefaultWHTPercent);
       const whtPercent =
         input.whtPercent ?? (Number.isFinite(customerWht) ? customerWht : 0);
-      const whtAmount = Math.round(((subtotal * whtPercent) / 100) * 100) / 100;
-      const amountReceivable = Math.round((grandTotal - whtAmount) * 100) / 100;
+      const whtAmount = roundMoney(((subtotal * whtPercent) / 100));
+      const amountReceivable = roundMoney((grandTotal - whtAmount));
 
       const billingId = GoogleSheetsService.generateId("BIL");
       const docDate = input.docDate || todayBangkok(); // DOC-05

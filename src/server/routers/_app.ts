@@ -27,6 +27,7 @@ import { googleAccessRouter } from "./google-access.router";
 import { statementRouter } from "./statement.router";
 import { creditNoteRouter } from "./creditNote.router";
 import { periodCloseRouter } from "./periodClose.router";
+import { purchaseNoteRouter } from "./purchaseNote.router";
 
 export const appRouter = router({
   event: eventRouter,
@@ -47,6 +48,7 @@ export const appRouter = router({
   taxInvoice: taxInvoiceRouter,
   creditNote: creditNoteRouter, // SALE-02
   periodClose: periodCloseRouter, // CTRL-01
+  purchaseNote: purchaseNoteRouter, // PUR-11
   lineGroup: lineGroupRouter,
   affiliate: affiliateRouter,
   affiliateAdmin: affiliateAdminRouter,

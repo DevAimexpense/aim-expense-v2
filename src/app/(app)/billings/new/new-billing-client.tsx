@@ -1,5 +1,6 @@
 "use client";
 
+import { roundMoney } from "@/lib/money";
 import { useEffect, useMemo, useState } from "react";
 import { todayBangkok } from "@/lib/utils/date";
 import { useRouter } from "next/navigation";
@@ -13,7 +14,7 @@ import {
   vatFlagsOf,
 } from "@/components/shared/vat-mode-picker";
 
-const round2 = (n: number) => Math.round(n * 100) / 100;
+const round2 = roundMoney; // RPT-09
 
 function computeTotalsClient(
   lines: { quantity: number; unitPrice: number; discountPercent: number }[],

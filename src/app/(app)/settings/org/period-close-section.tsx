@@ -16,6 +16,8 @@ export function PeriodCloseSection() {
   const closeMut = trpc.periodClose.close.useMutation();
   const reopenMut = trpc.periodClose.reopen.useMutation();
   const managersMut = trpc.periodClose.setManagers.useMutation();
+  // CTRL-03r: ตรวจว่ายอดงวดที่ปิดแล้วยังตรงกับตอนปิด
+  const verifyMut = trpc.periodClose.verify.useMutation();
   const lastMonth = prevMonth(yearMonthBangkok());
   const [month, setMonth] = useState(lastMonth);
   const [error, setError] = useState<string | null>(null);
@@ -58,6 +60,7 @@ export function PeriodCloseSection() {
           <h2 className="app-card-title">🔒 ปิดงวดบัญชี</h2>
           <p className="app-card-subtitle">
             ยื่น ภ.พ.30 / ภ.ง.ด. ของเดือนไหนแล้ว ให้ปิดงวดเดือนนั้น — ระบบจะไม่ให้แก้ ยกเลิก หรือออกเอกสารย้อนหลังเข้าเดือนนั้น
+            และใบกำกับภาษีซื้อที่มาถึงช้าจะไปลงเดือนที่ยังเปิดให้อัตโนมัติ (ม.82/3)
           </p>
         </div>
       </div>
@@ -95,6 +98,49 @@ export function PeriodCloseSection() {
                   </button>
                 )}
               </div>
+
+              {d.closedThrough && (
+                <div>
+                  <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap" }}>
+                    <button
+                      type="button"
+                      className="app-btn app-btn-secondary app-btn-sm"
+                      onClick={() => verifyMut.mutate()}
+                      disabled={verifyMut.isPending}
+                    >
+                      {verifyMut.isPending ? "กำลังตรวจ…" : "ตรวจตัวเลขงวดที่ปิดแล้ว"}
+                    </button>
+                    <span style={{ color: "#64748b" }}>
+                      เทียบภาษีขาย ภาษีซื้อ ภาษีหัก ณ ที่จ่าย รายได้ และค่าใช้จ่ายรวม กับตอนปิด (6 เดือนล่าสุด) · ระบบตรวจให้อัตโนมัติทุกเดือนด้วย
+                    </span>
+                  </div>
+                  {verifyMut.error && <div className="app-error-msg">{verifyMut.error.message}</div>}
+                  {verifyMut.data &&
+                    (verifyMut.data.mismatches.length === 0 ? (
+                      <div style={{ color: "#166534", marginTop: "0.375rem" }}>
+                        {verifyMut.data.checked.length > 0
+                          ? `✅ ตัวเลข ${verifyMut.data.checked.length} เดือนตรงกับตอนปิดงวด`
+                          : "ยังไม่มีงวดที่เก็บยอดตอนปิดไว้ (ปิดงวดครั้งถัดไประบบจะเก็บให้)"}
+                      </div>
+                    ) : (
+                      <div
+                        role="alert"
+                        style={{ marginTop: "0.375rem", background: "#fef2f2", border: "1px solid #fca5a5", borderRadius: "0.5rem", padding: "0.5rem 0.75rem", color: "#991b1b" }}
+                      >
+                        <strong>⚠️ ตัวเลขงวดที่ปิดแล้วไม่ตรงกับตอนปิด — มีการแก้ข้อมูลหลังปิดงวด (เช่นแก้ใน Google Sheet โดยตรง)</strong>
+                        {verifyMut.data.mismatches.map((m) => (
+                          <div key={m.month} style={{ marginTop: "0.25rem" }}>
+                            <div style={{ fontWeight: 600 }}>{m.label}</div>
+                            {m.diffs.map((x) => (
+                              <div key={x}>· {x}</div>
+                            ))}
+                          </div>
+                        ))}
+                        <div style={{ marginTop: "0.25rem" }}>ตรวจกับแบบที่ยื่นแล้ว · ดูประวัติเวอร์ชันของ Google Sheet ว่าใครแก้ · ถ้าจำเป็นให้ยื่นเพิ่มเติม</div>
+                      </div>
+                    ))}
+                </div>
+              )}
 
               <div>
                 <div style={{ fontWeight: 600, marginBottom: "0.25rem" }}>ผู้มีสิทธิ์ปิด/เปิดงวด</div>

@@ -66,6 +66,9 @@ type VatRow = {
   vatAmount: number;
   description: string;
   expenseNature: string;
+  /** PUR-11: ใบลด/เพิ่มหนี้จากผู้ขาย (ยอดมีเครื่องหมาย) */
+  kind?: "credit_note" | "debit_note";
+  refDocNumber?: string;
 };
 
 const DATE_FIELD_LABEL: Record<DateField, string> = {
@@ -151,6 +154,12 @@ export function VatClient({ orgName }: { orgName: string }) {
               <div className="num" style={{ fontSize: "0.8125rem" }}>
                 {inv || "—"}
               </div>
+              {row.original.kind && (
+                <div style={{ fontSize: "0.7rem", color: row.original.kind === "credit_note" ? "#b91c1c" : "#1d4ed8" }}>
+                  {row.original.kind === "credit_note" ? "ใบลดหนี้" : "ใบเพิ่มหนี้"}จากผู้ขาย
+                  {row.original.refDocNumber ? ` · อ้าง ${row.original.refDocNumber}` : ""}
+                </div>
+              )}
               {rcpt && rcpt !== inv && (
                 <div
                   className="num"

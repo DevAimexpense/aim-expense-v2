@@ -14,6 +14,7 @@
 // งวดภาษี: ผู้ออกนำไปลด/เพิ่มภาษีขายในเดือนที่ **ออกใบ** (ไม่ย้อนแก้เดือนของใบกำกับเดิม)
 // ===========================================
 
+import { roundMoney } from "@/lib/money";
 export type NoteKind = "credit" | "debit";
 
 export const CREDIT_NOTE_REASONS = [
@@ -42,7 +43,7 @@ export function noteReasonLabel(kind: NoteKind, code: string): string {
 
 export const NOTE_TITLE: Record<NoteKind, string> = { credit: "ใบลดหนี้", debit: "ใบเพิ่มหนี้" };
 
-const round2 = (n: number) => Math.round(n * 100) / 100;
+const round2 = roundMoney; // RPT-09
 
 type Row = Record<string, string | undefined>;
 const num = (v: string | undefined) => {

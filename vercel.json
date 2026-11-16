@@ -43,6 +43,10 @@
     {
       "path": "/api/cron/cleanup-line-drafts",
       "schedule": "0 20 * * *"
+    },
+    {
+      "path": "/api/cron/period-fingerprint",
+      "schedule": "40 1 * * *"
     }
   ]
 }

@@ -115,7 +115,7 @@ export class GoogleDriveService {
     projectName: string;
     payeeName: string;
     invoiceNumber?: string;
-    fileType: "invoice" | "receipt";
+    fileType: "invoice" | "receipt" | "vendor_note";
     fileName: string; // original filename (for extension)
     mimeType: string;
     fileBuffer: Buffer;

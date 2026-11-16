@@ -41,7 +41,8 @@ import { isInputVatClaimable, resolveNonDeductibleVat, nonDeductibleLabel } from
 import { noteOutputVatRows } from "@/lib/credit-note";
 import { vendorTaxIdFor, inputVatPeriodDate, singleClosedMonth, periodTotalsDiffs, thaiPeriodLabel } from "@/lib/period-close";
 import { getClosedThrough, getPeriodClose } from "../lib/period-lock";
-import { getSheetsService } from "../lib/sheets-context";
+import { purchaseNoteInputRows } from "@/lib/purchase-note";
+import { getSheetsService, ensureTabsCached } from "../lib/sheets-context";
 import { SHEET_TABS } from "../services/google-sheets.service";
 
 // -------------------------------------------------------------------
@@ -1187,10 +1188,12 @@ export const reportRouter = router({
       const closedThrough = await getClosedThrough(ctx.org.orgId); // PUR-09b
       // NOTE: skip ensureAllTabsExist (read-only — same as other reports).
 
-      const [payments, events, payees] = await Promise.all([
+      await ensureTabsCached(sheets, ctx.org.orgId); // PUR-11: แท็บ PurchaseNotes
+      const [payments, events, payees, purchaseNotes] = await Promise.all([
         sheets.getPayments(),
         sheets.getEvents(),
         sheets.getPayees(),
+        sheets.getAll(SHEET_TABS.PURCHASE_NOTES),
       ]);
 
       // Project-scoped roles only see their assigned events (CO-07)
@@ -1262,6 +1265,9 @@ export const reportRouter = router({
         // Auxiliary
         description: string;
         expenseNature: string; // "goods" | "service" | ""
+        /** PUR-11: แถวปรับจากใบลด/เพิ่มหนี้ของผู้ขาย (ยอดมีเครื่องหมาย · วันที่ = วันที่ได้รับ) */
+        kind?: "credit_note" | "debit_note";
+        refDocNumber?: string;
       };
 
       const rows: VatRow[] = [];
@@ -1314,6 +1320,39 @@ export const reportRouter = router({
           description: p.Description || "",
           expenseNature: p.ExpenseNature || "",
         });
+      }
+
+      // PUR-11: ใบลด/เพิ่มหนี้ที่ได้รับจากผู้ขาย — ลงเดือนที่ได้รับใบ (ม.82/10)
+      {
+        const paymentsById = new Map(payments.map((p) => [p.PaymentID, p]));
+        for (const r of purchaseNoteInputRows(purchaseNotes, paymentsById)) {
+          const p = r.payment;
+          if (scope !== null && !scope.includes((p.EventID || "").trim())) continue;
+          if (input.eventId && p.EventID !== input.eventId) continue;
+          if (r.date < input.from || r.date > input.to) continue;
+          const info = payeeMap.get(p.PayeeID);
+          rows.push({
+            paymentId: p.PaymentID,
+            date: r.date,
+            receiptDate: r.note.VendorDocDate || "",
+            paymentDate: r.date,
+            invoiceNumber: r.note.VendorDocNumber || "",
+            receiptNumber: "",
+            payeeId: p.PayeeID,
+            payeeName: info?.name || r.note.VendorNameSnapshot || p.PayeeID || "—",
+            taxId: r.note.VendorTaxIdSnapshot || info?.taxId || "",
+            branchLabel: branchLabelOf(info?.branchType || "", info?.branchNumber || ""),
+            address: info?.address || "",
+            eventId: p.EventID,
+            eventName: eventMap.get(p.EventID) || p.EventID || "—",
+            baseAmount: r.base,
+            vatAmount: r.vat,
+            description: `${r.kind === "credit_note" ? "ใบลดหนี้" : "ใบเพิ่มหนี้"} อ้าง ${r.note.RefInvoiceNumber || p.Description || ""}`.trim(),
+            expenseNature: p.ExpenseNature || "",
+            kind: r.kind,
+            refDocNumber: r.note.RefInvoiceNumber || "",
+          });
+        }
       }
 
       // Sort: date asc, then payeeName (Thai locale)
@@ -1548,6 +1587,8 @@ export const reportRouter = router({
       const periodSettings = await getPeriodClose(ctx.org.orgId); // PUR-09b + CTRL-03
       const closedThrough = periodSettings.closedThrough;
 
+      // แท็บที่เพิ่มทีหลัง (CreditNotes / PurchaseNotes) ต้องมีก่อน batchGet — ไม่งั้นทั้งรายงาน error
+      await ensureTabsCached(sheets, ctx.org.orgId);
       const [payments, payees, batch] = await Promise.all([
         sheets.getPayments(),
         sheets.getPayees(),
@@ -1556,6 +1597,7 @@ export const reportRouter = router({
           SHEET_TABS.TAX_INVOICE_LINES,
           SHEET_TABS.BILLINGS,
           SHEET_TABS.CREDIT_NOTES, // SALE-02
+          SHEET_TABS.PURCHASE_NOTES, // PUR-11
         ]),
       ]);
 
@@ -1591,6 +1633,9 @@ export const reportRouter = router({
         taxId: string;
         baseAmount: number;
         vatAmount: number;
+        /** PUR-11: แถวปรับจากใบลด/เพิ่มหนี้ของผู้ขาย (ยอดมีเครื่องหมาย) */
+        kind?: "credit_note" | "debit_note";
+        refDocNumber?: string;
       };
       const inputRows: InputRow[] = [];
       // PUR-03/04: ภาษีซื้อที่ไม่นำมาหัก (ต้องห้าม / ใบกำกับอย่างย่อ) — แสดงแยกให้ผู้ทำบัญชีเห็น ไม่รวมในยอด
@@ -1630,6 +1675,28 @@ export const reportRouter = router({
           baseAmount: taxableBaseFromVat(num(p.TTLAmount), vat), // PUR-02d
           vatAmount: vat,
         });
+      }
+      // PUR-11: ใบลด/เพิ่มหนี้ที่ได้รับจากผู้ขาย — ปรับภาษีซื้อในเดือนที่ได้รับ (ม.82/10)
+      {
+        const paymentsById = new Map(payments.map((p) => [p.PaymentID, p]));
+        for (const r of purchaseNoteInputRows(batch[SHEET_TABS.PURCHASE_NOTES] || [], paymentsById)) {
+          if (scope !== null && !scope.includes((r.payment.EventID || "").trim())) continue;
+          if (r.date < input.from || r.date > input.to) continue;
+          const info = payeeMap.get(r.payment.PayeeID);
+          inputRows.push({
+            paymentId: r.payment.PaymentID,
+            date: r.date,
+            invoiceNumber: r.note.VendorDocNumber || "",
+            receiptNumber: "",
+            payeeId: r.payment.PayeeID,
+            payeeName: info?.name || r.note.VendorNameSnapshot || r.payment.PayeeID || "—",
+            taxId: r.note.VendorTaxIdSnapshot || info?.taxId || "",
+            baseAmount: r.base,
+            vatAmount: r.vat,
+            kind: r.kind,
+            refDocNumber: r.note.RefInvoiceNumber || "",
+          });
+        }
       }
       inputRows.sort((a, b) =>
         a.date !== b.date ? (a.date < b.date ? -1 : 1) : 0,

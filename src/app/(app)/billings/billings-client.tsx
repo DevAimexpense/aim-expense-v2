@@ -1,5 +1,6 @@
 "use client";
 
+import { roundMoney } from "@/lib/money";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { trpc } from "@/lib/trpc/client";
@@ -468,9 +469,9 @@ function QuickIncomeModal({
   const amountNum = parseFloat(form.amount) || 0;
   const whtNum = parseFloat(form.whtPercent) || 0;
   const whtAmount = isSalary
-    ? Math.round((parseFloat(form.whtBaht) || 0) * 100) / 100
-    : Math.round(((amountNum * whtNum) / 100) * 100) / 100;
-  const net = Math.round((amountNum - whtAmount) * 100) / 100;
+    ? roundMoney((parseFloat(form.whtBaht) || 0))
+    : roundMoney(((amountNum * whtNum) / 100));
+  const net = roundMoney((amountNum - whtAmount));
 
   const fmt = (n: number) =>
     n.toLocaleString("th-TH", {

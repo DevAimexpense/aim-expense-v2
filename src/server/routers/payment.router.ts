@@ -3,6 +3,7 @@
 // CRUD รายการจ่าย + calc + approve + mark paid + clear reconciliation
 // ===========================================
 
+import { roundMoney } from "@/lib/money";
 import { z } from "zod";
 import { router, orgProcedure, permissionProcedure } from "../trpc";
 import { getSheetsService, ensureTabsCached } from "../lib/sheets-context";
@@ -20,6 +21,7 @@ import { findDuplicateBills, duplicateWarningText } from "@/lib/duplicate-bill";
 import { assertPeriodOpen, assertPaymentPeriodOpen, getClosedThrough } from "../lib/period-lock";
 import { canApprovePayments, initialPaymentStatus, selfApprovalViolations, nextReapprovalBy } from "@/lib/approval-policy";
 import { vatClaimMonthFor, lateClaimPatch } from "@/lib/period-close";
+import { activePurchaseNotes } from "@/lib/purchase-note";
 
 const PaymentInputSchema = z.object({
   eventId: z.string().min(1),
@@ -74,6 +76,21 @@ async function otherApproverCount(orgId: string, selfUserId: string): Promise<nu
   });
   const withPerm = new Set(perms.map((p) => p.userId));
   return members.filter((m) => m.role === "admin" || withPerm.has(m.userId)).length;
+}
+
+/** PUR-11: ห้ามยกเลิก/ลบรายการที่ยังมีใบลด/เพิ่มหนี้จากผู้ขายอ้างอยู่ (ยกเลิกใบเหล่านั้นก่อน) */
+async function assertNoActivePurchaseNotes(sheets: GoogleSheetsService, paymentIds: string[]): Promise<void> {
+  const notes = await sheets.getAll(SHEET_TABS.PURCHASE_NOTES).catch(() => [] as Record<string, string>[]);
+  const hit = paymentIds.flatMap((id) => activePurchaseNotes(notes, id));
+  if (hit.length > 0) {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: `รายการนี้มีใบลด/เพิ่มหนี้จากผู้ขายอ้างอยู่ (${hit
+        .slice(0, 3)
+        .map((n) => n.VendorDocNumber || n.NoteID)
+        .join(", ")}) — ยกเลิกใบเหล่านั้นก่อน`,
+    });
+  }
 }
 
 function toPaymentRow(payment: Record<string, string>) {
@@ -493,7 +510,7 @@ export const paymentRouter = router({
         // PUR-02: ส่ง VAT ตามใบมา → ใช้ตามนั้น · ไม่ส่งและฐานเดิม + ยังเป็นผู้จด VAT
         // (เช่นแก้แค่ % หัก ณ ที่จ่าย) → คง VAT เดิมไว้ (VAT จริงจากใบเสร็จ LINE ไม่ถูกทับด้วย 7%)
         const ttlBefore = parseFloat(existing.TTLAmount) || 0;
-        const ttlAfter = Math.round(base.costPerUnit * base.days * base.numberOfPeople * 100) / 100;
+        const ttlAfter = roundMoney(base.costPerUnit * base.days * base.numberOfPeople);
         const sameBase = Math.abs(ttlAfter - ttlBefore) < 0.005;
         const vatOverride =
           !isVatPayee
@@ -906,6 +923,7 @@ export const paymentRouter = router({
         await Promise.all(input.paymentIds.map((id) => sheets.getById(SHEET_TABS.PAYMENTS, "PaymentID", id)))
       ).filter((r): r is Record<string, string> => !!r && CANCELLABLE.includes(r.Status));
       await assertPaymentPeriodOpen(ctx.org.orgId, rows, "ยกเลิกรายการ"); // CTRL-01
+      await assertNoActivePurchaseNotes(sheets, rows.map((r) => r.PaymentID)); // PUR-11
       for (const existing of rows) {
         const id = existing.PaymentID;
         const ok = await sheets.updateById(SHEET_TABS.PAYMENTS, "PaymentID", id, {
@@ -1100,6 +1118,7 @@ export const paymentRouter = router({
       const sheets = await getSheetsService(ctx.org.orgId);
       const existing = await sheets.getById(SHEET_TABS.PAYMENTS, "PaymentID", input.paymentId);
       if (!existing) throw new Error("ไม่พบรายการ");
+      await assertNoActivePurchaseNotes(sheets, [input.paymentId]); // PUR-11
       // Admin ลบได้ทุกสถานะ (เช่น รายการที่คีย์ผิด/ทดสอบ ซึ่ง "บันทึกค่าใช้จ่าย" ข้ามอนุมัติเป็น paid ทันที)
       // คนอื่นลบได้เฉพาะรายการที่ยังไม่อนุมัติ
       const isAdmin = ctx.org.role === "admin";

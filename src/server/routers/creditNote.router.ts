@@ -4,6 +4,7 @@
 // ภาษีขายลด/เพิ่มในเดือนที่ออกใบ (ไม่แก้ใบกำกับเดิม) · ยกเลิกได้ (เลขคงอยู่) — ต้องระบุเหตุผล
 // ===========================================
 
+import { roundMoney } from "@/lib/money";
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { router, featureProcedure } from "../trpc";
@@ -177,7 +178,7 @@ export const creditNoteRouter = router({
         customerName: src.customerName,
         originalSubtotal: src.subtotal,
         prior,
-        currentValue: Math.round((src.subtotal + prior) * 100) / 100,
+        currentValue: roundMoney((src.subtotal + prior)),
         notes: notes.filter((n) => n.SourceID === input.sourceId).map(shapeNote),
         creditReasons: noteReasons("credit"),
         debitReasons: noteReasons("debit"),
@@ -253,7 +254,7 @@ export const creditNoteRouter = router({
             SourceDocDate: src.docDate,
             OriginalSubtotal: src.subtotal,
             PriorAdjustment: prior,
-            CorrectSubtotal: Math.round(input.correctSubtotal * 100) / 100,
+            CorrectSubtotal: roundMoney(input.correctSubtotal),
             DiffAmount: calc.diff,
             VATAmount: calc.vat,
             GrandTotal: calc.total,

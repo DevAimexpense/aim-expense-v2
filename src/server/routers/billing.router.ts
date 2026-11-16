@@ -4,6 +4,7 @@
 // State: draft → sent → partial → paid | void  (overdue = derived)
 // ===========================================
 
+import { roundMoney } from "@/lib/money";
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { router, featureProcedure, createCallerFactory, type TRPCContext } from "../trpc";
@@ -83,7 +84,7 @@ const BillingCreateInput = z.object({
 // ===== Helpers =====
 
 function round2(n: number): number {
-  return Math.round(n * 100) / 100;
+  return roundMoney(n); // RPT-09
 }
 
 /**

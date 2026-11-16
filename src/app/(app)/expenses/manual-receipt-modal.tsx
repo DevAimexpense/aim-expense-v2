@@ -1,5 +1,6 @@
 "use client";
 
+import { roundMoney } from "@/lib/money";
 import { useEffect, useMemo, useState } from "react";
 import { todayBangkok } from "@/lib/utils/date";
 import { trpc } from "@/lib/trpc/client";
@@ -128,7 +129,7 @@ export function ManualReceiptModal({ events, payees, onClose, onSuccess, attachT
     // ถ้า attach mode: คำนวน subtotal จาก gttl + vat (กลับกันจาก auto-calc)
     const gttl = p?.gttlAmount || 0;
     const vat = p?.vatAmount || 0;
-    const initialSubtotal = gttl > 0 ? Math.round((gttl - vat) * 100) / 100 : 0;
+    const initialSubtotal = gttl > 0 ? roundMoney((gttl - vat)) : 0;
     return {
       eventId: p?.eventId || "", documentDate: todayISO(),
       documentType: "id_card" as NoReceiptDocType,
@@ -160,8 +161,8 @@ export function ManualReceiptModal({ events, payees, onClose, onSuccess, attachT
   // Auto-calc VAT + ยอดรวม จาก subtotal + hasVat
   // (เฉพาะเมื่อ subtotal > 0 เพื่อป้องกัน overwrite ค่า initial จาก attach mode)
   useEffect(() => {
-    const vat = form.hasVat && form.subtotal > 0 ? Math.round(form.subtotal * 0.07 * 100) / 100 : 0;
-    const total = Math.round((form.subtotal + vat) * 100) / 100;
+    const vat = form.hasVat && form.subtotal > 0 ? roundMoney(form.subtotal * 0.07) : 0;
+    const total = roundMoney((form.subtotal + vat));
     setForm((p) => {
       if (p.vatAmount === vat && p.totalAmount === total) return p;
       return { ...p, vatAmount: vat, totalAmount: total };
@@ -234,7 +235,7 @@ export function ManualReceiptModal({ events, payees, onClose, onSuccess, attachT
   if (form.vendorTaxId && form.vendorTaxId.length !== 13) warnings.push({ field: "vendorTaxId", message: `เลขผู้เสียภาษีผู้ขายไม่ครบ 13 หลัก (${form.vendorTaxId.length})`, severity: "error" });
   if (!form.documentDate) warnings.push({ field: "documentDate", message: "ไม่พบวันที่ออกเอกสาร", severity: "warning" });
   if (form.hasVat && form.subtotal > 0 && form.vatAmount > 0) {
-    const exp = Math.round(form.subtotal * 0.07 * 100) / 100;
+    const exp = roundMoney(form.subtotal * 0.07);
     if (Math.abs(exp - form.vatAmount) > 1) warnings.push({ field: "vatAmount", message: `VAT 7% คำนวณ (฿${fmtN(exp)}) ≠ ที่ระบุ (฿${fmtN(form.vatAmount)})`, severity: "warning" });
   }
   if (buyerCheck) {
@@ -335,7 +336,7 @@ export function ManualReceiptModal({ events, payees, onClose, onSuccess, attachT
           // วันที่จ่ายเงิน = วันที่ตามใบเสร็จ/เอกสาร (ใช้ออกใบหัก ณ ที่จ่าย) — ไม่ใช่วันที่คีย์
           paymentDate: form.documentDate || undefined,
           description: form.description.trim() || form.vendorName.trim() || "ค่าใช้จ่าย",
-          costPerUnit: Math.round(costPerUnit * 100) / 100, days: 1, numberOfPeople: 1,
+          costPerUnit: roundMoney(costPerUnit), days: 1, numberOfPeople: 1,
           pctWTH: effectiveWthRate, isVatPayee: form.hasVat,
           wthTypeId: effectiveWthRate > 0 ? form.wthTypeId : undefined, // WHT-19
           initialStatus: "paid",

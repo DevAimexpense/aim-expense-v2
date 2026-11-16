@@ -1,5 +1,6 @@
 "use client";
 
+import { roundMoney } from "@/lib/money";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { todayBangkok } from "@/lib/utils/date";
 import { useRouter } from "next/navigation";
@@ -7,7 +8,7 @@ import Link from "next/link";
 import { trpc } from "@/lib/trpc/client";
 import DateInput from "@/components/shared/date-input";
 
-const round2 = (n: number) => Math.round(n * 100) / 100;
+const round2 = roundMoney; // RPT-09
 
 function computeTotalsClient(
   lines: { quantity: number; unitPrice: number; discountPercent: number }[],

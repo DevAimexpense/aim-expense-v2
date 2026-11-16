@@ -4,6 +4,8 @@
 // สูตรเดิม 100% — TTL, WTH, VAT, GTTL
 // ===========================================
 
+import { roundMoney } from "@/lib/money";
+
 /**
  * Payment calculation input
  */
@@ -171,5 +173,5 @@ export function formatNumber(amount: number): string {
  * ปัดเศษ 2 ตำแหน่ง
  */
 function roundTwo(value: number): number {
-  return Math.round(value * 100) / 100;
+  return roundMoney(value); // RPT-09
 }

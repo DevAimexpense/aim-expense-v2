@@ -5,8 +5,9 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { Prisma } from "@prisma/client";
-import { router, orgProcedure, createCallerFactory, type TRPCContext } from "../trpc";
-import { reportRouter } from "./report.router";
+import { router, orgProcedure } from "../trpc";
+import { computePeriodTotals, verifyClosedPeriods } from "../lib/period-fingerprint";
+import { readVatRegistered } from "@/lib/org-settings";
 import { prisma } from "@/lib/prisma";
 import { safeAuditLog } from "@/server/lib/audit";
 import {
@@ -17,9 +18,9 @@ import {
   monthsToSnapshot,
   mergeSnapshots,
   dropSnapshotsFrom,
+  snapshotMonthsToVerify,
   pendingSettlementsInPeriod,
   type PeriodCloseSettings,
-  type PeriodTotals,
 } from "@/lib/period-close";
 import { yearMonthBangkok } from "@/lib/utils/date";
 import { getSheetsService } from "../lib/sheets-context";
@@ -41,30 +42,6 @@ async function savePeriod(orgId: string, _settings: unknown, period: PeriodClose
   await prisma.$executeRaw(
     Prisma.sql`UPDATE organizations SET settings = jsonb_set(COALESCE(settings, '{}'::jsonb), '{periodClose}', ${json}::jsonb, true) WHERE id = ${orgId}`,
   );
-}
-
-/**
- * CTRL-03: ยอดรวมของแต่ละเดือนที่ปิด (ทั้งองค์กร) จากรายงานตัวเดียวกับที่ผู้ใช้เปิดดู
- * อ่านชีตไม่สำเร็จ → ปิดงวดได้ตามเดิม แค่ไม่มีลายนิ้วมือของเดือนนั้น (ไม่บล็อกงานปิดงวด)
- */
-async function computeSnapshots(ctx: TRPCContext, months: string[]): Promise<Record<string, PeriodTotals>> {
-  if (!ctx.org || months.length === 0) return {};
-  // มุมมองทั้งองค์กร (ผู้ได้รับมอบสิทธิ์ปิดงวดอาจเป็นหัวหน้าโครงการที่เห็นแค่บางโครงการ)
-  const caller = createCallerFactory(reportRouter)({ ...ctx, org: { ...ctx.org, role: "admin" } });
-  const out: Record<string, PeriodTotals> = {};
-  const at = new Date().toISOString();
-  for (const ym of months) {
-    try {
-      const [y, m] = ym.split("-").map(Number);
-      const from = `${ym}-01`;
-      const to = `${ym}-${String(new Date(Date.UTC(y, m, 0)).getUTCDate()).padStart(2, "0")}`;
-      const [vat, wht] = await Promise.all([caller.vat30({ from, to }), caller.wht({ from, to })]);
-      out[ym] = { outputVat: vat.output.totalVAT, inputVat: vat.input.totalVAT, wht: wht.stats.totalWHT, at };
-    } catch (err) {
-      console.error(`[periodClose] snapshot ${ym} failed — closing without fingerprint`, err);
-    }
-  }
-  return out;
 }
 
 export const periodCloseRouter = router({
@@ -117,7 +94,12 @@ export const periodCloseRouter = router({
           .join(", ")}${waiting.length > 3 ? " …" : ""}) — อนุมัติหรือปฏิเสธที่หน้าอนุมัติก่อนปิดงวด`,
       });
     }
-    const snaps = await computeSnapshots(ctx, monthsToSnapshot(org.period.closedThrough, input.month)); // CTRL-03
+    // CTRL-03/03r: ยอดภาษี + รายได้/ค่าใช้จ่าย ตอนปิด (อ่านไม่ได้ → ปิดได้ แค่ไม่มีลายนิ้วมือเดือนนั้น)
+    const snaps = await computePeriodTotals(
+      ctx,
+      monthsToSnapshot(org.period.closedThrough, input.month),
+      readVatRegistered(org.settings),
+    );
     await savePeriod(ctx.org.orgId, org.settings, {
       ...org.period,
       closedThrough: input.month,
@@ -166,6 +148,20 @@ export const periodCloseRouter = router({
       });
       return { success: true, closedThrough };
     }),
+
+  /**
+   * CTRL-03r: ตรวจว่ายอดของงวดที่ปิดแล้ว (ล่าสุด 6 เดือน) ยังตรงกับตอนปิด
+   * ไม่ตรง = มีการแก้ข้อมูลหลังปิด (เช่นแก้ในชีตตรง) — ผู้มีสิทธิ์ปิดงวดเท่านั้น
+   */
+  verify: orgProcedure.mutation(async ({ ctx }) => {
+    const org = await loadOrg(ctx.org.orgId);
+    if (!canManagePeriod(ctx.session.userId, org.ownerId, org.period)) {
+      throw new TRPCError({ code: "FORBIDDEN", message: "ไม่มีสิทธิ์ตรวจงวดบัญชี" });
+    }
+    const months = snapshotMonthsToVerify(org.period);
+    if (months.length === 0) return { checked: [] as string[], mismatches: [] };
+    return verifyClosedPeriods(ctx, org.period, months, readVatRegistered(org.settings));
+  }),
 
   /** มอบ/ถอนสิทธิ์ปิด-เปิดงวด — เจ้าของมีสิทธิ์เสมอ (ถอดไม่ได้) */
   setManagers: orgProcedure.input(z.object({ userIds: z.array(z.string()).max(50) })).mutation(async ({ ctx, input }) => {

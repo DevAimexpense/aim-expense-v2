@@ -611,6 +611,8 @@ function InputTab({
     taxId: string;
     baseAmount: number;
     vatAmount: number;
+    kind?: "credit_note" | "debit_note";
+    refDocNumber?: string;
   }[];
   totals: { totalBase: number; totalVAT: number; totalCount: number };
 }) {
@@ -641,11 +643,17 @@ function InputTab({
           </tr>
         </thead>
         <tbody>
-          {rows.map((r) => (
-            <tr key={r.paymentId}>
+          {rows.map((r, i) => (
+            <tr key={`${r.paymentId}-${r.kind || "inv"}-${i}`}>
               <td>{r.date}</td>
               <td className="mono">
                 {r.receiptNumber || r.invoiceNumber || "—"}
+                {/* PUR-11: ใบลด/เพิ่มหนี้จากผู้ขาย — ลงเดือนที่ได้รับ */}
+                {r.kind && (
+                  <div style={{ fontSize: "0.7rem", color: r.kind === "credit_note" ? "#b91c1c" : "#1d4ed8", fontFamily: "inherit" }}>
+                    {r.kind === "credit_note" ? "ใบลดหนี้" : "ใบเพิ่มหนี้"}จากผู้ขาย{r.refDocNumber ? ` · อ้าง ${r.refDocNumber}` : ""}
+                  </div>
+                )}
               </td>
               <td>{r.payeeName}</td>
               <td className="mono" style={{ fontSize: "0.8125rem" }}>

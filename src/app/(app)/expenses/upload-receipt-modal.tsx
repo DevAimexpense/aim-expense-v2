@@ -1,5 +1,6 @@
 "use client";
 
+import { roundMoney } from "@/lib/money";
 import { useEffect, useMemo, useState } from "react";
 import { todayBangkok } from "@/lib/utils/date";
 import { trpc } from "@/lib/trpc/client";
@@ -179,7 +180,7 @@ export function UploadReceiptModal({ events, payees, onClose, onSuccess, attachT
     if (!form.receiptNumber) warnings.push({ field: "receiptNumber", message: "ไม่พบเลขที่ใบเสร็จ/ใบกำกับภาษี", severity: "warning" });
     if (!form.documentDate) warnings.push({ field: "documentDate", message: "ไม่พบวันที่ออกเอกสาร", severity: "warning" });
     if (form.hasVat && form.subtotal > 0 && form.vatAmount > 0) {
-      const exp = Math.round(form.subtotal * 0.07 * 100) / 100;
+      const exp = roundMoney(form.subtotal * 0.07);
       if (Math.abs(exp - form.vatAmount) > 1) warnings.push({ field: "vatAmount", message: `VAT 7% คำนวณ (฿${fmtN(exp)}) ≠ ที่ระบุ (฿${fmtN(form.vatAmount)})`, severity: "warning" });
     }
     // Buyer mismatch
@@ -307,7 +308,7 @@ export function UploadReceiptModal({ events, payees, onClose, onSuccess, attachT
       // PUR-02b: VAT ตามใบ (ผู้ใช้กรอก/OCR อ่าน) → ฐาน = ยอดชำระ − VAT ตามใบ · ไม่มี → คิดย้อน 7% แบบเดิม
       // (server ตรวจซ้ำว่า VAT ไม่เกิน 7% ของฐาน — assertVatOverride)
       const vatFromInvoice =
-        form.hasVat && form.vatAmount > 0 ? Math.round(form.vatAmount * 100) / 100 : undefined;
+        form.hasVat && form.vatAmount > 0 ? roundMoney(form.vatAmount) : undefined;
       const costPerUnit = !form.hasVat
         ? form.totalAmount
         : vatFromInvoice !== undefined
@@ -365,7 +366,7 @@ export function UploadReceiptModal({ events, payees, onClose, onSuccess, attachT
           // วันที่จ่ายเงิน = วันที่ตามใบเสร็จ/เอกสาร (ใช้ออกใบหัก ณ ที่จ่าย) — ไม่ใช่วันที่คีย์
           paymentDate: form.documentDate || undefined,
           description: form.description.trim() || form.vendorName.trim() || "ค่าใช้จ่าย",
-          costPerUnit: Math.round(costPerUnit * 100) / 100, days: 1, numberOfPeople: 1,
+          costPerUnit: roundMoney(costPerUnit), days: 1, numberOfPeople: 1,
           pctWTH: effectiveWthRate, isVatPayee: form.hasVat,
           vatAmount: vatFromInvoice,
           initialStatus: "paid",

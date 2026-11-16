@@ -11,12 +11,13 @@
 // ยอดที่ส่งให้ billing.recordPayment = ยอดตัดหนี้ (นิยามเดียวกับ "รับแล้ว / คงค้าง" = GrandTotal)
 // ===========================================
 
+import { roundMoney } from "@/lib/money";
 import { useState } from "react";
 import { todayBangkok } from "@/lib/utils/date";
 import { trpc } from "@/lib/trpc/client";
 import DateInput from "@/components/shared/date-input";
 
-const round2 = (n: number) => Math.round(n * 100) / 100;
+const round2 = roundMoney; // RPT-09
 const formatTHB = (n: number) =>
   n.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const toNum = (s: string) => round2(parseFloat(s) || 0);

@@ -6,6 +6,7 @@
 // เก็บใน organization.settings (ค่าตั้งค่า ไม่ใช่ข้อมูลธุรกิจ — Zero Data Retention)
 // ===========================================
 
+import { roundMoney } from "@/lib/money";
 import { whtPeriodDate } from "./wht-doc-utils";
 
 export type PeriodCloseSettings = {
@@ -15,10 +16,30 @@ export type PeriodCloseSettings = {
   managers: string[];
   /** CTRL-03: ยอดรวมของแต่ละเดือน ณ ตอนปิดงวด (ลายนิ้วมือ) — ใช้ตรวจว่ามีการแก้ข้อมูลในชีตนอกระบบ */
   snapshots?: Record<string, PeriodTotals>;
+  /** CTRL-03r: เดือน (YYYY-MM) ที่ระบบตรวจงวดที่ปิดอัตโนมัติล่าสุด (cron) */
+  lastVerified?: string;
 };
 
 /** CTRL-03: ยอดรวมของงวด (ทั้งองค์กร) */
-export type PeriodTotals = { outputVat: number; inputVat: number; wht: number; at?: string };
+export type PeriodTotals = {
+  outputVat: number;
+  inputVat: number;
+  wht: number;
+  /** CTRL-03r: ค่าใช้จ่ายรวม / รายได้รวม (ก่อน VAT ตาม Dashboard) — ไม่มีในลายนิ้วมือรุ่นแรก */
+  expense?: number;
+  revenue?: number;
+  at?: string;
+};
+
+/** CTRL-03r: ตัวที่เทียบ (ภาษี + ยอดบัญชีที่ไม่มีภาษี) */
+export const PERIOD_TOTAL_LABELS = {
+  outputVat: "ภาษีขาย",
+  inputVat: "ภาษีซื้อ",
+  wht: "ภาษีหัก ณ ที่จ่าย",
+  revenue: "รายได้รวม",
+  expense: "ค่าใช้จ่ายรวม",
+} as const;
+export type PeriodTotalKey = keyof typeof PERIOD_TOTAL_LABELS;
 
 const YM = /^\d{4}-(0[1-9]|1[0-2])$/;
 
@@ -36,10 +57,24 @@ export function readPeriodClose(settings: unknown): PeriodCloseSettings {
       if (!YM.test(ym) || !v || typeof v !== "object") continue;
       const t = v as Record<string, unknown>;
       const n = (x: unknown) => (typeof x === "number" && Number.isFinite(x) ? x : 0);
-      snapshots[ym] = { outputVat: n(t.outputVat), inputVat: n(t.inputVat), wht: n(t.wht), ...(typeof t.at === "string" ? { at: t.at } : {}) };
+      const opt = (x: unknown) => (typeof x === "number" && Number.isFinite(x) ? x : undefined);
+      snapshots[ym] = {
+        outputVat: n(t.outputVat),
+        inputVat: n(t.inputVat),
+        wht: n(t.wht),
+        ...(opt(t.expense) !== undefined ? { expense: opt(t.expense) } : {}),
+        ...(opt(t.revenue) !== undefined ? { revenue: opt(t.revenue) } : {}),
+        ...(typeof t.at === "string" ? { at: t.at } : {}),
+      };
     }
   }
-  return Object.keys(snapshots).length > 0 ? { closedThrough, managers, snapshots } : { closedThrough, managers };
+  const lastVerified = typeof raw?.lastVerified === "string" && YM.test(raw.lastVerified) ? raw.lastVerified : "";
+  return {
+    closedThrough,
+    managers,
+    ...(Object.keys(snapshots).length > 0 ? { snapshots } : {}),
+    ...(lastVerified ? { lastVerified } : {}),
+  };
 }
 
 /** วันที่ (YYYY-MM-DD) อยู่ในงวดที่ปิดแล้วไหม */
@@ -197,27 +232,32 @@ export function dropSnapshotsFrom(
   return Object.fromEntries(Object.entries(existing || {}).filter(([m]) => m < month));
 }
 
-const round2 = (n: number) => Math.round(n * 100) / 100;
+const round2 = roundMoney; // RPT-09
 
 /** ยอดที่ไม่ตรงกับตอนปิดงวด (ต่างเกิน 0.01) → รายการข้อความ · [] = ตรง */
 export function periodTotalsDiffs(
   snapshot: PeriodTotals,
-  current: Partial<Pick<PeriodTotals, "outputVat" | "inputVat" | "wht">>,
+  current: Partial<Record<PeriodTotalKey, number>>,
 ): string[] {
-  const labels: Record<"outputVat" | "inputVat" | "wht", string> = {
-    outputVat: "ภาษีขาย",
-    inputVat: "ภาษีซื้อ",
-    wht: "ภาษีหัก ณ ที่จ่าย",
-  };
   const diffs: string[] = [];
-  for (const k of ["outputVat", "inputVat", "wht"] as const) {
+  for (const k of Object.keys(PERIOD_TOTAL_LABELS) as PeriodTotalKey[]) {
     const cur = current[k];
-    if (cur === undefined) continue;
-    if (Math.abs(round2(cur) - round2(snapshot[k])) > 0.01) {
-      diffs.push(`${labels[k]} ตอนปิด ${round2(snapshot[k]).toFixed(2)} → ตอนนี้ ${round2(cur).toFixed(2)}`);
+    const was = snapshot[k];
+    // ลายนิ้วมือรุ่นแรกไม่มีรายได้/ค่าใช้จ่าย → ข้าม (ไม่เตือนผิด)
+    if (cur === undefined || was === undefined) continue;
+    if (Math.abs(round2(cur) - round2(was)) > 0.01) {
+      diffs.push(`${PERIOD_TOTAL_LABELS[k]} ตอนปิด ${round2(was).toFixed(2)} → ตอนนี้ ${round2(cur).toFixed(2)}`);
     }
   }
   return diffs;
+}
+
+/** CTRL-03r: เดือนที่ปิดแล้วและมีลายนิ้วมือ ล่าสุด n เดือน (ใช้ตรวจอัตโนมัติ) */
+export function snapshotMonthsToVerify(settings: PeriodCloseSettings, n = 6): string[] {
+  return Object.keys(settings.snapshots || {})
+    .filter((m) => isDateInClosedPeriod(`${m}-01`, settings.closedThrough))
+    .sort()
+    .slice(-n);
 }
 
 /** รายงานช่วงนี้ = เดือนเดียวเต็มเดือนที่ปิดแล้วและมีลายนิ้วมือไหม → คืนเดือน (YYYY-MM) */

@@ -68,6 +68,8 @@ export function DashboardClient({
   const taxInvoicesQuery = trpc.taxInvoice.list.useQuery(undefined, { enabled: features.pl });
   // SALE-02: ใบลด/เพิ่มหนี้ ปรับรายได้ตามวันที่ออกใบ
   const notesQuery = trpc.creditNote.list.useQuery(undefined, { enabled: features.pl });
+  // PUR-11: ใบลด/เพิ่มหนี้จากผู้ขาย ปรับต้นทุนตามเดือนที่ได้รับ
+  const purchaseNotesQuery = trpc.purchaseNote.list.useQuery(undefined, { enabled: features.pl });
   const billings = billingsQuery.data || [];
   const quotations = quotationsQuery.data || [];
 
@@ -85,11 +87,12 @@ export function DashboardClient({
         billings: billingsQuery.data || [],
         taxInvoices: taxInvoicesQuery.data || [],
         notes: notesQuery.data || [],
+        purchaseNotes: purchaseNotesQuery.data || [],
         month: filterMonth,
         eventId: filterEvent,
         vatRegistered,
       }),
-    [paymentsQuery.data, billingsQuery.data, taxInvoicesQuery.data, notesQuery.data, filterMonth, filterEvent, vatRegistered],
+    [paymentsQuery.data, billingsQuery.data, taxInvoicesQuery.data, notesQuery.data, purchaseNotesQuery.data, filterMonth, filterEvent, vatRegistered],
   );
   const totalInvoiced = pl.revenue;
   const totalProfit = pl.profit;

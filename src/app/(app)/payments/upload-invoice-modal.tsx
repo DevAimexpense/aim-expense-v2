@@ -1,5 +1,6 @@
 "use client";
 
+import { roundMoney } from "@/lib/money";
 import { useEffect, useState } from "react";
 import { trpc } from "@/lib/trpc/client";
 import { WTH_TYPES } from "@/lib/wth-types";
@@ -351,10 +352,10 @@ export function UploadInvoiceModal({
   const [multiVatInput, setMultiVatInput] = useState("");
   const multiVatTotal =
     multiVatInput.trim() !== "" && Number.isFinite(parseFloat(multiVatInput))
-      ? Math.round(parseFloat(multiVatInput) * 100) / 100
+      ? roundMoney(parseFloat(multiVatInput))
       : null;
   const multiVatBase = lineItems.filter((it) => it.hasVat).reduce((s, it) => s + (it.amount || 0), 0);
-  const multiVatCap = Math.round(((multiVatBase * 7) / 107) * 100) / 100;
+  const multiVatCap = roundMoney(((multiVatBase * 7) / 107));
   const multiVatError =
     multiVatTotal !== null && (multiVatTotal < 0 || multiVatTotal > multiVatCap + 1)
       ? `VAT รวมตามใบต้องไม่เกิน ${multiVatCap.toFixed(2)} บาท (7/107 ของยอดรายการที่มี VAT)`
@@ -445,7 +446,7 @@ export function UploadInvoiceModal({
         const result = await createPaymentMut.mutateAsync({
           ...sharedBase,
           description,
-          costPerUnit: Math.round(costPerUnit * 100) / 100,
+          costPerUnit: roundMoney(costPerUnit),
           days,
           numberOfPeople,
           pctWTH: effectiveWthRate,
@@ -470,7 +471,7 @@ export function UploadInvoiceModal({
           const result = await createPaymentMut.mutateAsync({
             ...sharedBase,
             description: item.description.trim(),
-            costPerUnit: Math.round(costPerUnit * 100) / 100,
+            costPerUnit: roundMoney(costPerUnit),
             days: 1,
             numberOfPeople: 1,
             pctWTH: itemWthRate,
@@ -515,10 +516,10 @@ export function UploadInvoiceModal({
 
   // Calc for single mode
   // PUR-02: VAT ตามใบ (ถ้ากรอก/OCR อ่านได้) แทน 7% ที่คิดย้อนจากยอดรวม
-  const vatAuto = form.hasVat ? Math.round((form.totalAmount / 1.07) * 0.07 * 100) / 100 : 0;
+  const vatAuto = form.hasVat ? roundMoney((form.totalAmount / 1.07) * 0.07) : 0;
   const vatFromInvoice =
     form.hasVat && form.vatOverride.trim() !== "" && Number.isFinite(parseFloat(form.vatOverride))
-      ? Math.round(parseFloat(form.vatOverride) * 100) / 100
+      ? roundMoney(parseFloat(form.vatOverride))
       : null;
   const vatCalc = form.hasVat ? (vatFromInvoice ?? vatAuto) : 0;
   const subtotalCalc = form.hasVat ? form.totalAmount - vatCalc : form.totalAmount;

@@ -3,6 +3,7 @@
 // Flow: Image → OCR → Select Project → Confirm → Save expense
 // ===========================================
 
+import { roundMoney } from "@/lib/money";
 import { prisma } from "@/lib/prisma";
 import { ttlForTab, invalidateTab } from "@/server/lib/cache";
 import { findDuplicateBills, duplicateWarningText } from "@/lib/duplicate-bill";
@@ -66,7 +67,7 @@ const APP_BASE_URL =
 const DRAFT_TTL_HOURS = 24;
 
 /** ปัดทศนิยม 2 ตำแหน่ง (สูตรเดียวกับ calculations.ts ซึ่งไม่ได้ export) */
-const roundTwo = (v: number): number => Math.round(v * 100) / 100;
+const roundTwo = roundMoney; // RPT-09
 
 const THAI_RE = /[\u0E00-\u0E7F]/;
 
