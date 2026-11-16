@@ -147,6 +147,7 @@ function shapeHeader(r: Record<string, string>) {
     createdAt: r.CreatedAt || "",
     updatedAt: r.UpdatedAt || "",
     pdfUrl: r.PdfUrl || "",
+    pdfFor: r.PdfFor || "",
   };
 }
 

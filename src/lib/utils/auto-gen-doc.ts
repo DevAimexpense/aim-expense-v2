@@ -9,6 +9,9 @@
 // ===========================================
 
 export type SystemDocType = "wht-cert" | "substitute-receipt" | "receipt-voucher";
+/** เอกสารขาย — หน้า /documents/{kind}/{id}?auto=1 บันทึกเองผ่าน /api/documents/save-sales-pdf */
+export type SalesDocType = "quotation" | "billing" | "tax-invoice" | "receipt";
+export type AutoDocType = SystemDocType | SalesDocType;
 
 /**
  * ตัดสินว่า payment นั้นควร auto-generate doc type ไหนบ้าง
@@ -45,7 +48,7 @@ export type AutoGenOptions = {
  */
 export function triggerBackgroundDocGen(
   paymentId: string,
-  docType: SystemDocType,
+  docType: AutoDocType,
   options: AutoGenOptions = {}
 ): Promise<AutoGenResult> {
   const { onProgress, timeoutMs = 90000 } = options;
@@ -162,7 +165,11 @@ export function triggerBackgroundDocGen(
 // แสดง toast feedback ให้ user รู้ว่า auto-save กำลังทำงาน
 // ไม่ block UI, fade-in/out smooth
 
-const DOC_LABEL: Record<SystemDocType, string> = {
+const DOC_LABEL: Record<AutoDocType, string> = {
+  quotation: "ใบเสนอราคา",
+  billing: "ใบวางบิล",
+  "tax-invoice": "ใบกำกับภาษี",
+  receipt: "ใบเสร็จรับเงิน",
   "wht-cert": "หนังสือรับรองหัก ณ ที่จ่าย",
   "substitute-receipt": "ใบรับรองแทนใบเสร็จ",
   "receipt-voucher": "ใบสำคัญรับเงิน",
@@ -180,7 +187,7 @@ function ensureToastContainer(): HTMLDivElement {
   return container;
 }
 
-function createToast(docType: SystemDocType): {
+function createToast(docType: AutoDocType): {
   setStatus: (status: "saving" | "capturing" | "uploading" | "done" | "error", info?: { fileUrl?: string; message?: string }) => void;
   close: () => void;
 } {
@@ -256,7 +263,7 @@ function createToast(docType: SystemDocType): {
  */
 export function fireAutoGenDoc(
   paymentId: string,
-  docType: SystemDocType,
+  docType: AutoDocType,
   options: AutoGenOptions & { silent?: boolean } = {}
 ): void {
   const { silent = false, onProgress: userProgress, ...rest } = options;
@@ -287,5 +294,31 @@ export function fireAutoGenDoc(
     } else {
       console.warn(`[auto-gen] ✗ failed ${docType} for ${paymentId}:`, result.error);
     }
+  });
+}
+
+
+/**
+ * หน้ารายละเอียดเอกสารขายเรียกตอนโหลด: PDF ใน Drive ยังไม่มีหรือเก่ากว่าข้อมูล → บันทึกเบื้องหลัง
+ * (iframe ซ่อน /documents/{kind}/{id}?auto=1) — กันสั่งซ้ำด้วย key kind:id:version ต่อหน้าเว็บ
+ */
+const salesSaveStarted = new Set<string>();
+export function ensureSalesDocSaved(params: {
+  kind: SalesDocType;
+  id: string;
+  version: string;
+  savedFor: string;
+  savedUrl: string;
+  onDone?: (fileUrl?: string) => void;
+}): void {
+  const { kind, id, version, savedFor, savedUrl, onDone } = params;
+  if (typeof window === "undefined" || !id || !version) return;
+  if (savedUrl && savedFor === version) return;
+  const key = `${kind}:${id}:${version}`;
+  if (salesSaveStarted.has(key)) return;
+  salesSaveStarted.add(key);
+  triggerBackgroundDocGen(id, kind, { timeoutMs: 90000 }).then((r) => {
+    if (r.success) onDone?.(r.fileUrl);
+    else salesSaveStarted.delete(key);
   });
 }

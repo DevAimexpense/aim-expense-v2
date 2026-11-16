@@ -77,6 +77,15 @@ export default async function BillingDocumentPage({
   return (
     <BillingDocument
       billingId={id}
+      driveSave={{
+        kind: "billing",
+        id,
+        version: header.UpdatedAt || "",
+        savedFor: header.PdfFor || "",
+        savedUrl: header.PdfUrl || "",
+        // ใบเสร็จออกตรง (DocKind=receipt) เปิดผ่าน /documents/receipt เท่านั้น
+        enabled: (header.Status || "draft") !== "draft" && header.DocKind !== "receipt",
+      }}
       org={{
         name: org.name,
         taxId: org.taxId,

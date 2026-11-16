@@ -163,6 +163,7 @@ function shapeHeader(r: Record<string, string>) {
     createdAt: r.CreatedAt || "",
     updatedAt: r.UpdatedAt || "",
     pdfUrl: r.PdfUrl || "",
+    pdfFor: r.PdfFor || "",
     // Payment tracking (Phase 2)
     paidAmount: parseFloat(r.PaidAmount) || 0,
     paidDate: r.PaidDate || "",

@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { trpc } from "@/lib/trpc/client";
+import { ensureSalesDocSaved } from "@/lib/utils/auto-gen-doc";
 import { StatusBadge } from "../quotations-client";
 import DateInput from "@/components/shared/date-input";
 import { formatDate, todayBangkok } from "@/lib/utils/date";
@@ -28,6 +29,21 @@ export function QuotationDetailClient({
   const router = useRouter();
   const utils = trpc.useUtils();
   const detail = trpc.quotation.getById.useQuery({ quotationId });
+
+  // spec: บันทึก PDF ลง Drive อัตโนมัติ — ยังไม่มี/เก่ากว่าข้อมูล → บันทึกเบื้องหลัง (ไม่บันทึกฉบับร่าง)
+  const qh = detail.data?.header;
+  useEffect(() => {
+    if (!qh || qh.status === "draft") return;
+    ensureSalesDocSaved({
+      kind: "quotation",
+      id: quotationId,
+      version: qh.updatedAt,
+      savedFor: qh.pdfFor,
+      savedUrl: qh.pdfUrl,
+      onDone: () => utils.quotation.getById.invalidate({ quotationId }),
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [qh?.status, qh?.updatedAt, qh?.pdfFor, qh?.pdfUrl, quotationId]);
   const sendMut = trpc.quotation.send.useMutation();
   const acceptMut = trpc.quotation.accept.useMutation();
   const rejectMut = trpc.quotation.reject.useMutation();
@@ -99,6 +115,16 @@ export function QuotationDetailClient({
           <p className="app-page-subtitle">
             ออกเมื่อ {formatDate(header.docDate)} • ใช้ได้ถึง {formatDate(header.validUntil)}
           </p>
+          {header.pdfUrl && (
+            <a
+              href={header.pdfUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ fontSize: "0.8125rem", color: "#166534", marginRight: "0.75rem" }}
+            >
+              ☁️ PDF ใบเสนอราคาใน Drive
+            </a>
+          )}
         </div>
         <Link href="/quotations" className="app-btn app-btn-secondary">
           ← กลับ

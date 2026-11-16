@@ -82,6 +82,14 @@ export default async function TaxInvoiceDocumentPage({
   return (
     <TaxInvoiceDocument
       taxInvoiceId={id}
+      driveSave={{
+        kind: "tax-invoice",
+        id,
+        version: header.UpdatedAt || "",
+        savedFor: header.PdfFor || "",
+        savedUrl: header.PdfUrl || "",
+        enabled: (header.Status || "draft") !== "draft",
+      }}
       org={{
         name: org.name,
         taxId: org.taxId,

@@ -90,6 +90,14 @@ export default async function ReceiptDocumentPage({
   return (
     <BillingDocument
       billingId={id}
+      driveSave={{
+        kind: "receipt",
+        id,
+        version: header.UpdatedAt || "",
+        savedFor: header.ReceiptPdfFor || "",
+        savedUrl: header.ReceiptPdfUrl || "",
+        enabled: !!header.ReceiptNumber || header.DocKind === "receipt",
+      }}
       org={{
         name: org.name,
         taxId: org.taxId,

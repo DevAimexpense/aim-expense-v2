@@ -277,6 +277,51 @@ export class GoogleDriveService {
   }
 
   /**
+   * บันทึกเอกสารขาย (ใบเสนอราคา/ใบวางบิล/ใบกำกับภาษี/ใบเสร็จ) ลง Documents/{YYYY}/{MM}/
+   * มีไฟล์เดิม (existingUrl) → เขียนทับเนื้อหาไฟล์เดิม ลิงก์เดิมใช้ต่อได้ · ทับไม่ได้ (ถูกลบ/ไม่มีสิทธิ์) → สร้างใหม่
+   */
+  async uploadOrReplaceDocument(params: {
+    documentsFolderId: string;
+    docDate: string; // ISO YYYY-MM-DD — ใช้จัดโฟลเดอร์ปี/เดือน
+    fileName: string;
+    fileBuffer: Buffer;
+    existingUrl?: string;
+  }): Promise<{ fileId: string; webViewLink: string; fileName: string; folderPath: string; replaced: boolean }> {
+    let date = new Date(params.docDate);
+    if (isNaN(date.getTime())) date = new Date();
+    const year = date.getFullYear();
+    const paddedMonth = String(date.getMonth() + 1).padStart(2, "0");
+    const folderPath = `Documents/${year}/${paddedMonth}`;
+
+    const existingId = params.existingUrl?.match(/\/d\/([A-Za-z0-9_-]{10,})/)?.[1];
+    if (existingId) {
+      try {
+        const res = await this.drive.files.update({
+          fileId: existingId,
+          requestBody: { name: params.fileName },
+          media: { mimeType: "application/pdf", body: Readable.from(params.fileBuffer) },
+          fields: "id, webViewLink, trashed",
+        });
+        if (!res.data.trashed) {
+          return {
+            fileId: res.data.id!,
+            webViewLink: res.data.webViewLink || params.existingUrl!,
+            fileName: params.fileName,
+            folderPath,
+            replaced: true,
+          };
+        }
+      } catch (err) {
+        console.warn("[drive] replace failed — creating a new file", existingId, err);
+      }
+    }
+
+    const monthFolderId = await this.getOrCreateYearMonthFolder(params.documentsFolderId, year, date.getMonth() + 1);
+    const result = await this.uploadFile(monthFolderId, params.fileName, "application/pdf", params.fileBuffer);
+    return { ...result, fileName: params.fileName, folderPath, replaced: false };
+  }
+
+  /**
    * แอปเข้าถึงไฟล์/โฟลเดอร์นี้ได้ไหม (อ่านแค่ metadata — ไม่อ่านข้อมูลในไฟล์)
    * ใช้ตรวจสิทธิ์ drive.file ของชีต/โฟลเดอร์ของ org ก่อนและหลังยืนยันผ่าน Google Picker
    */

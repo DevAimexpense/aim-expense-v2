@@ -77,6 +77,14 @@ export default async function QuotationDocumentPage({
   return (
     <QuotationDocument
       quotationId={id}
+      driveSave={{
+        kind: "quotation",
+        id,
+        version: header.UpdatedAt || "",
+        savedFor: header.PdfFor || "",
+        savedUrl: header.PdfUrl || "",
+        enabled: (header.Status || "draft") !== "draft",
+      }}
       org={{
         name: org.name,
         taxId: org.taxId,

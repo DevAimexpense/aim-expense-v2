@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { trpc } from "@/lib/trpc/client";
+import { ensureSalesDocSaved } from "@/lib/utils/auto-gen-doc";
 import { BillingStatusBadge } from "../billings-client";
 import { RecordBillingPaymentModal } from "./billing-payment-modal";
 import { ReceiptDateModal } from "./receipt-date-modal";
@@ -17,6 +18,27 @@ const formatTHB = (n: number) =>
 export function BillingDetailClient({ billingId }: { billingId: string }) {
   const utils = trpc.useUtils();
   const detail = trpc.billing.getById.useQuery({ billingId });
+
+  // spec: บันทึก PDF ลง Drive อัตโนมัติ — ใบวางบิล (ไม่ใช่ร่าง) + ใบเสร็จ (ถ้าออกแล้ว)
+  const bh = detail.data?.header;
+  useEffect(() => {
+    if (!bh) return;
+    const done = () => utils.billing.getById.invalidate({ billingId });
+    if (bh.status !== "draft" && bh.docKind !== "receipt") {
+      ensureSalesDocSaved({ kind: "billing", id: billingId, version: bh.updatedAt, savedFor: bh.pdfFor, savedUrl: bh.pdfUrl, onDone: done });
+    }
+    if (bh.receiptNumber) {
+      ensureSalesDocSaved({
+        kind: "receipt",
+        id: billingId,
+        version: bh.updatedAt,
+        savedFor: bh.receiptPdfFor,
+        savedUrl: bh.receiptPdfUrl,
+        onDone: done,
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bh?.status, bh?.updatedAt, bh?.pdfFor, bh?.pdfUrl, bh?.receiptPdfFor, bh?.receiptPdfUrl, bh?.receiptNumber, billingId]);
   const sendMut = trpc.billing.send.useMutation();
   const voidMut = trpc.billing.void.useMutation();
   const receiptMut = trpc.billing.issueReceipt.useMutation();
@@ -133,6 +155,26 @@ export function BillingDetailClient({ billingId }: { billingId: string }) {
               </>
             )}
           </p>
+          {header.pdfUrl && (
+            <a
+              href={header.pdfUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ fontSize: "0.8125rem", color: "#166534", marginRight: "0.75rem" }}
+            >
+              ☁️ PDF ใบวางบิลใน Drive
+            </a>
+          )}
+          {header.receiptPdfUrl && (
+            <a
+              href={header.receiptPdfUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ fontSize: "0.8125rem", color: "#166534", marginRight: "0.75rem" }}
+            >
+              ☁️ PDF ใบเสร็จใน Drive
+            </a>
+          )}
         </div>
         <Link href="/billings" className="app-btn app-btn-secondary">
           ← กลับ

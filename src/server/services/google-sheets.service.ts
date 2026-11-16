@@ -191,8 +191,9 @@ export const SHEET_HEADERS: Record<string, string[]> = {
     "PreparedByUserId",
     "CreatedAt",
     "UpdatedAt",
-    "PdfUrl", // defer S24+
+    "PdfUrl", // ไฟล์ PDF ใน Drive (บันทึกอัตโนมัติ — /api/documents/save-sales-pdf)
     "IsVAT", // FALSE = ไม่มี VAT (ธุรกิจไม่จด VAT) — ว่าง/TRUE = มี VAT 7% (legacy rows)
+    "PdfFor", // UpdatedAt ของข้อมูลที่ใช้สร้าง PdfUrl — ไม่ตรง = เอกสารถูกแก้ ต้องบันทึกใหม่
   ],
   [SHEET_TABS.QUOTATION_LINES]: [
     "LineID",
@@ -248,6 +249,9 @@ export const SHEET_HEADERS: Record<string, string[]> = {
     "DocKind", // "receipt" = ใบเสร็จรับเงินที่ออกโดยตรง (ไม่มีใบวางบิล, DocNumber = เลข RC) — ว่าง = ใบวางบิลปกติ
     "PaymentNote", // รายละเอียดการรับเงิน (รับจริง/หัก ณ ที่จ่าย/ปรับลด/หมายเหตุ) — ต่อท้ายทีละครั้งที่รับเงิน
     "PaymentEvidenceUrl", // หลักฐานการโอน/รับเงิน (ลิงก์ Drive) — รับหลายครั้ง = หลายบรรทัด
+    "PdfFor", // UpdatedAt ของข้อมูลที่ใช้สร้าง PdfUrl (ใบวางบิล)
+    "ReceiptPdfUrl", // ใบเสร็จรับเงิน PDF ใน Drive (บันทึกอัตโนมัติ)
+    "ReceiptPdfFor", // UpdatedAt ของข้อมูลที่ใช้สร้าง ReceiptPdfUrl
   ],
   [SHEET_TABS.BILLING_LINES]: [
     "LineID",
@@ -303,6 +307,7 @@ export const SHEET_HEADERS: Record<string, string[]> = {
     "PaymentEvidenceUrl", // หลักฐานการโอนเงิน (Drive)
     "WHTCertUrl", // ใบหัก ณ ที่จ่าย (Drive, optional — แนบทีหลังได้)
     "PaymentRecordedAt", // ISO timestamp
+    "PdfFor", // UpdatedAt ของข้อมูลที่ใช้สร้าง PdfUrl — ไม่ตรง = ต้องบันทึกใหม่
   ],
   [SHEET_TABS.TAX_INVOICE_LINES]: [
     "LineID",

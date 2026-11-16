@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { trpc } from "@/lib/trpc/client";
+import { ensureSalesDocSaved } from "@/lib/utils/auto-gen-doc";
 import { TaxInvoiceStatusBadge } from "../tax-invoices-client";
 import { RecordTaxInvoicePaymentModal } from "./payment-modal";
 import { formatDate, formatDateTime } from "@/lib/utils/date";
@@ -22,6 +23,21 @@ export function TaxInvoiceDetailClient({
   const router = useRouter();
   const utils = trpc.useUtils();
   const detail = trpc.taxInvoice.getById.useQuery({ taxInvoiceId });
+
+  // spec: บันทึก PDF ลง Drive อัตโนมัติ — ยังไม่มี/เก่ากว่าข้อมูล → บันทึกเบื้องหลัง (ไม่บันทึกฉบับร่าง)
+  const th = detail.data?.header;
+  useEffect(() => {
+    if (!th || th.status === "draft") return;
+    ensureSalesDocSaved({
+      kind: "tax-invoice",
+      id: taxInvoiceId,
+      version: th.updatedAt,
+      savedFor: th.pdfFor,
+      savedUrl: th.pdfUrl,
+      onDone: () => utils.taxInvoice.getById.invalidate({ taxInvoiceId }),
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [th?.status, th?.updatedAt, th?.pdfFor, th?.pdfUrl, taxInvoiceId]);
   const issueMut = trpc.taxInvoice.issue.useMutation();
   const voidMut = trpc.taxInvoice.void.useMutation();
   const deleteMut = trpc.taxInvoice.delete.useMutation();
@@ -149,6 +165,16 @@ export function TaxInvoiceDetailClient({
               </>
             )}
           </p>
+          {header.pdfUrl && (
+            <a
+              href={header.pdfUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ fontSize: "0.8125rem", color: "#166534", marginRight: "0.75rem" }}
+            >
+              ☁️ PDF ใบกำกับภาษีใน Drive
+            </a>
+          )}
         </div>
         <Link href="/tax-invoices" className="app-btn app-btn-secondary">
           ← กลับ

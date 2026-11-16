@@ -16,6 +16,12 @@
     },
     "src/app/api/documents/save-pdf/route.ts": {
       "maxDuration": 30
+    },
+    "src/app/api/documents/save-sales-pdf/route.ts": {
+      "maxDuration": 60
+    },
+    "src/app/api/documents/wht-cert/[paymentId]/save/route.ts": {
+      "maxDuration": 60
     }
   },
   "crons": [

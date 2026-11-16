@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { DriveSaveStatus, type DriveSaveProps } from "@/components/documents/drive-save-status";
 import { formatDate as formatThaiDate } from "@/lib/utils/date";
 import { FitLine } from "@/components/shared/fit-line";
 
@@ -48,6 +49,8 @@ interface DocData {
 
 interface Props extends DocData {
   quotationId: string;
+  /** บันทึก PDF ลง Drive อัตโนมัติ (ไม่ส่ง = ไม่บันทึก) */
+  driveSave?: DriveSaveProps;
 }
 
 const formatMoney = (n: number) =>
@@ -118,7 +121,7 @@ async function generateAndDownloadPdf(
   }
 }
 
-export function QuotationDocument({ quotationId, org, header, lines, banks }: Props) {
+export function QuotationDocument({ quotationId, org, header, lines, banks, driveSave }: Props) {
   const [downloadState, setDownloadState] = useState<
     "idle" | "downloading" | "done" | "error"
   >("idle");
@@ -181,6 +184,7 @@ export function QuotationDocument({ quotationId, org, header, lines, banks }: Pr
           zIndex: 10,
         }}
       >
+        {driveSave && <DriveSaveStatus {...driveSave} />}
         <button
           onClick={() => window.close()}
           className="app-btn app-btn-secondary"
