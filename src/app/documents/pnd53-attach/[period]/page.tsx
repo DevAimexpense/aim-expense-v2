@@ -44,6 +44,8 @@ export default async function PND53AttachPage({
 
   const orgCtx = await getOrgContext(session.userId);
   if (!orgCtx) redirect("/");
+  // CTRL-06: ใบแนบ ภ.ง.ด. มีเลขภาษี/ยอดของผู้รับเงินทุกราย — เฉพาะผู้มีสิทธิ์ดูรายงาน (เหมือนเมนู)
+  if (orgCtx.role !== "admin" && !orgCtx.permissions.viewReports) redirect("/dashboard");
 
   const { period } = await params;
   const periodInfo = parsePeriod(period);
@@ -81,7 +83,7 @@ export default async function PND53AttachPage({
     if (paidDate < periodInfo.fromISO || paidDate > periodInfo.toISO) continue;
 
     const info = payeeMap.get(p.PayeeID);
-    const taxId = info?.taxId || p.VendorTaxIdSnapshot || "";
+    const taxId = p.VendorTaxIdSnapshot || info?.taxId || "" /* PUR-09: ตามที่บันทึกตอนจ่าย (แก้ทะเบียนทีหลังไม่ทำให้รายงานที่ยื่นแล้วเปลี่ยน) */;
 
     // Filter to ภ.ง.ด.53 (juristic — TaxID 13 digits starting with "0")
     if (vendorTypeOf(taxId, info?.branchType) !== "pnd53") continue;

@@ -20,6 +20,21 @@ export const SAVING_STALE_MS = 3 * 60 * 1000;
 /** cron: ค้างเกิน 10 นาที → คืนเป็น pending */
 export const SAVING_STALE_CRON_MS = 10 * 60 * 1000;
 
+/** LINE-40: webhook LINE ทำงานได้นานสุด (vercel.json maxDuration) */
+export const LINE_WEBHOOK_MAX_MS = 30_000;
+
+/**
+ * LINE-40: รอบ retry (หลังค้าง SAVING_STALE_MS) อาจยังเห็น snapshot cache ของ Payments ที่ยังไม่มีแถวที่
+ * รอบก่อน append ไหม — จริงเมื่อ TTL cache + เวลาสูงสุดของ webhook ≥ เวลาที่ถือว่าค้าง → ต้องอ่านสด
+ */
+export function paymentsCacheMayHideRetry(
+  paymentsTtlSec: number,
+  webhookMaxMs: number = LINE_WEBHOOK_MAX_MS,
+  staleMs: number = SAVING_STALE_MS,
+): boolean {
+  return paymentsTtlSec * 1000 + webhookMaxMs >= staleMs;
+}
+
 /** ฟิลด์ที่ helper ต้องใช้ — updatedAt เป็น optional เพราะ select เก่า/แถวก่อน db push อาจไม่มี */
 export type DraftStatusRow = { status: string; createdAt: Date; updatedAt?: Date | null };
 

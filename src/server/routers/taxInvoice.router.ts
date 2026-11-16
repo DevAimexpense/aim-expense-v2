@@ -813,9 +813,10 @@ export const taxInvoiceRouter = router({
             customer.BranchType || "",
             customer.BranchNumber || "",
           ),
+          // SALE-09: ใบกำกับต้องใช้ที่อยู่ตาม ภ.พ.20 ของผู้ซื้อ (Address) — ใบวางบิล snapshot "ที่อยู่ส่งบิล"
           CustomerAddressSnapshot:
-            billing.CustomerAddressSnapshot ||
             customer.Address ||
+            billing.CustomerAddressSnapshot ||
             customer.BillingAddress ||
             "",
           SourceBillingID: billing.BillingID,
@@ -968,9 +969,10 @@ export const taxInvoiceRouter = router({
             customer.BranchType || "",
             customer.BranchNumber || "",
           ),
+          // SALE-09: ที่อยู่ตาม ภ.พ.20 (Address) ก่อนที่อยู่ส่งบิลที่ใบเสนอราคา snapshot ไว้
           CustomerAddressSnapshot:
-            quotation.CustomerAddressSnapshot ||
             customer.Address ||
+            quotation.CustomerAddressSnapshot ||
             customer.BillingAddress ||
             "",
           SourceBillingID: "",

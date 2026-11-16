@@ -120,6 +120,12 @@ export default function PayeesPage() {
                   </td>
                   <td className="text-right num">
                     {p.defaultWTH > 0 ? `${p.defaultWTH}%` : "-"}
+                    {/* WHT-20: 1%/5% มักเป็นค่าเก่าจากตัวเลือก "รับเหมา 1%" ที่ผิด — ให้ตรวจ */}
+                    {(p.defaultWTH === 1 || p.defaultWTH === 5) && (
+                      <span title="1% = ค่าขนส่งเท่านั้น · 5% = ค่าเช่า/ค่าแสดง — ผู้รับเหมา/บริการต้อง 3%" style={{ color: "#b45309", marginLeft: "0.25rem" }}>
+                        ⚠️
+                      </span>
+                    )}
                   </td>
                   <td>
                     {p.phone && (
@@ -312,10 +318,19 @@ function PayeeModal({
                   min={0}
                   max={100}
                   step={0.5}
-                  placeholder="เช่น 3 (สำหรับ freelance), 1 (บริษัท)"
+                  placeholder="เช่น 3 (ค่าบริการ/รับเหมา)"
                   className="app-input num"
                 />
-                <p className="app-hint">ค่า default ตอนสร้าง payment</p>
+                {/* WHT-20: เดิม placeholder แนะนำ "1 (บริษัท)" — ผิด (ค่าจ้างทำของ/บริการจ่ายนิติบุคคล = 3%) */}
+                <p className="app-hint">
+                  ค่า default ตอนสร้าง payment · ค่าบริการ/ค่าจ้างทำของ/รับเหมา/วิชาชีพอิสระ 3% (ทั้งบุคคลและนิติบุคคล) ·
+                  ค่าโฆษณา 2% · ค่าเช่า/ค่าแสดง 5% · ค่าขนส่ง 1%
+                </p>
+                {(form.defaultWTH === 1 || form.defaultWTH === 5) && (
+                  <p className="app-hint" style={{ color: "#b45309" }}>
+                    ⚠️ {form.defaultWTH}% ใช้ได้เฉพาะ{form.defaultWTH === 1 ? "ค่าขนส่ง" : "ค่าเช่า/ค่าแสดงสาธารณะ"} — ถ้าผู้รับเงินนี้เป็นผู้รับเหมา/ผู้ให้บริการ ต้องเป็น 3%
+                  </p>
+                )}
               </div>
             </div>
 

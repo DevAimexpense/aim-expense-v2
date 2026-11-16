@@ -42,6 +42,8 @@ export default async function PND3SummaryPage({
 
   const orgCtx = await getOrgContext(session.userId);
   if (!orgCtx) redirect("/");
+  // CTRL-06: ใบแนบ ภ.ง.ด. มีเลขภาษี/ยอดของผู้รับเงินทุกราย — เฉพาะผู้มีสิทธิ์ดูรายงาน (เหมือนเมนู)
+  if (orgCtx.role !== "admin" && !orgCtx.permissions.viewReports) redirect("/dashboard");
 
   const { period } = await params;
   const periodInfo = parsePeriod(period);
@@ -73,7 +75,7 @@ export default async function PND3SummaryPage({
     if (paidDate < periodInfo.fromISO || paidDate > periodInfo.toISO) continue;
 
     const info = payeeInfoMap.get(p.PayeeID);
-    const taxId = info?.taxId || p.VendorTaxIdSnapshot || "";
+    const taxId = p.VendorTaxIdSnapshot || info?.taxId || "" /* PUR-09: ตามที่บันทึกตอนจ่าย (แก้ทะเบียนทีหลังไม่ทำให้รายงานที่ยื่นแล้วเปลี่ยน) */;
     if (vendorTypeOf(taxId, info?.branchType) !== "pnd3") continue;
 
     totalCount += 1;

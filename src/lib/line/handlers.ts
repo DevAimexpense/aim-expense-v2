@@ -4,6 +4,7 @@
 // ===========================================
 
 import { prisma } from "@/lib/prisma";
+import { ttlForTab, invalidateTab } from "@/server/lib/cache";
 import {
   replyMessage,
   pushMessage,
@@ -30,6 +31,7 @@ import {
   isSavingStatus,
   isSavingStale,
   savingClaimedAt,
+  paymentsCacheMayHideRetry,
 } from "@/lib/line/draft-status";
 import {
   buildOcrConfirmFlex,
@@ -1127,7 +1129,7 @@ async function writeDraftToSheets(
 
   // LINE-33: รอบก่อนอาจ append แถวลง Sheet แล้วแต่ function ตายก่อนลบ draft → status ถูกคืนเป็น pending
   // (LINE-25) แล้วผู้ใช้กดบันทึกซ้ำ → ต้องไม่ append อีกแถว: ทุกแถวที่ LINE สร้างมี Notes "LINE draft <id>"
-  // → หาแถวนั้นก่อน (getPayments ติด cache 60 วิ แต่ retry เกิดหลัง claim ≥ 3 นาที จึงเห็นแถวจริงเสมอ)
+  // → หาแถวนั้นก่อน (getPayments ติด cache 90 วิ + webhook ≤ 30 วิ แต่ retry เกิดหลัง claim ≥ 3 นาที จึงเห็นแถวจริงเสมอ — LINE-40 ตรวจค่าคงที่ให้)
   // เจอ = บันทึกไปแล้ว → ลบ draft + ส่งการ์ดเดิม แล้วจบ โดยไม่แตะ Drive/Sheet อีก
   const draftTag = `LINE draft ${draft.id}`;
   const existingRow = await findPaymentRowByDraftTag(sheets, draftTag);
@@ -1381,6 +1383,12 @@ async function findPaymentRowByDraftTag(
   draftTag: string,
 ): Promise<Record<string, string> | null> {
   try {
+    // LINE-40: กันซ้ำได้เพราะ TTL cache Payments (90 วิ) + เวลาสูงสุดของ webhook (30 วิ) < เวลาที่ถือว่า
+    // draft ค้าง (SAVING_STALE_MS 180 วิ) → รอบ retry เห็นแถวจริงเสมอ · ถ้าวันหนึ่งค่าคงที่เปลี่ยนจนไม่จริง
+    // → อ่านสด (เสีย 1 read) แทนที่จะ append ซ้ำเงียบ ๆ
+    if (paymentsCacheMayHideRetry(ttlForTab(SHEET_TABS.PAYMENTS))) {
+      await invalidateTab(sheets.sheetId, SHEET_TABS.PAYMENTS);
+    }
     const rows = await sheets.getPayments();
     return rows.find((r) => (r.Notes || "").includes(draftTag)) ?? null;
   } catch (err) {

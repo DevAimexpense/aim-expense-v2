@@ -49,6 +49,8 @@ export default async function DashboardPage() {
         plan={plan}
         entityType={org.entityType}
         vatRegistered={readVatRegistered(orgRow?.settings)}
+        // CTRL-06: การ์ด VAT อ่าน report.vat30 (ต้องมีสิทธิ์ดูรายงาน)
+        canViewReports={org.role === "admin" || !!org.permissions.viewReports}
       />
     </>
   );

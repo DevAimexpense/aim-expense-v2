@@ -63,9 +63,19 @@ export function BillingDetailClient({ billingId }: { billingId: string }) {
     confirmText?: string
   ) => {
     if (confirmText && !confirm(confirmText)) return;
+    // RPT-08: ยกเลิกใบที่รับเงินบางส่วนแล้ว → ต้องระบุเหตุผล/การจัดการเงินที่รับไว้
+    let reason: string | undefined;
+    if (mut === voidMut && detail.data?.header.status === "partial") {
+      const r = window.prompt(
+        `ใบวางบิลนี้รับเงินแล้ว ${detail.data.header.paidAmount.toLocaleString("th-TH")} บาท\nระบุเหตุผลและการจัดการเงินที่รับไว้ (เช่น คืนลูกค้าแล้ว / โอนไปใบวางบิลใหม่):`,
+        "",
+      );
+      if (r === null) return;
+      reason = r.trim();
+    }
     setError(null);
     try {
-      await mut.mutateAsync({ billingId });
+      await (mut === voidMut ? voidMut.mutateAsync({ billingId, reason }) : sendMut.mutateAsync({ billingId }));
       refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "เกิดข้อผิดพลาด");

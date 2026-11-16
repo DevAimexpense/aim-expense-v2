@@ -31,10 +31,12 @@ import {
   type LinkCandidate,
 } from "@/server/lib/receipt-output-vat";
 import { z } from "zod";
-import { router, orgProcedure } from "../trpc";
+import { router, permissionProcedure } from "../trpc";
 import { scopedEventIds } from "@/lib/permissions";
 import { isSettled } from "@/lib/payment-status";
 import { getPndForm, whtPeriodDate } from "@/lib/wht-doc-utils";
+import { todayBangkok } from "@/lib/utils/date";
+import { taxableBaseFromVat } from "@/lib/calculations";
 import { getSheetsService } from "../lib/sheets-context";
 import { SHEET_TABS } from "../services/google-sheets.service";
 
@@ -174,7 +176,7 @@ export const reportRouter = router({
    *   - rows:  [{ paymentId, date, eventName, payeeName, description,
    *               expenseType, amount, status }] — DataTable rows
    */
-  expenseSummary: orgProcedure
+  expenseSummary: permissionProcedure("viewReports") // CTRL-06: เมนูรายงานกันด้วยสิทธิ์นี้อยู่แล้ว — กันฝั่ง server ด้วย (เข้าด้วย URL ตรง)
     .input(ExpenseSummaryInput)
     .query(async ({ ctx, input }) => {
       const sheets = await getSheetsService(ctx.org.orgId);
@@ -268,7 +270,7 @@ export const reportRouter = router({
    *   - projects: [{ eventId, eventName, status, budget, totalSpent, remaining,
    *                  percentage, isOverBudget, paymentCount, startDate, endDate }]
    */
-  byProject: orgProcedure
+  byProject: permissionProcedure("viewReports") // CTRL-06: เมนูรายงานกันด้วยสิทธิ์นี้อยู่แล้ว — กันฝั่ง server ด้วย (เข้าด้วย URL ตรง)
     .input(ByProjectInput)
     .query(async ({ ctx, input }) => {
       const sheets = await getSheetsService(ctx.org.orgId);
@@ -367,7 +369,7 @@ export const reportRouter = router({
    *   - vendors: [{ payeeId, payeeName, taxId, totalSpent, paymentCount,
    *                 lastPaymentDate, branchInfo }]
    */
-  byVendor: orgProcedure
+  byVendor: permissionProcedure("viewReports") // CTRL-06: เมนูรายงานกันด้วยสิทธิ์นี้อยู่แล้ว — กันฝั่ง server ด้วย (เข้าด้วย URL ตรง)
     .input(ByVendorInput)
     .query(async ({ ctx, input }) => {
       const sheets = await getSheetsService(ctx.org.orgId);
@@ -482,7 +484,7 @@ export const reportRouter = router({
    * Returns: { summary, byProject, byVendor } — same shape as the individual
    * procedures (intentional, so each tab component can keep its existing typings).
    */
-  combined: orgProcedure
+  combined: permissionProcedure("viewReports") // CTRL-06: เมนูรายงานกันด้วยสิทธิ์นี้อยู่แล้ว — กันฝั่ง server ด้วย (เข้าด้วย URL ตรง)
     .input(CombinedInput)
     .query(async ({ ctx, input }) => {
       const sheets = await getSheetsService(ctx.org.orgId);
@@ -716,7 +718,7 @@ export const reportRouter = router({
    *   - pending:  rows waiting to be cleared (sorted by daysSincePaid desc)
    *   - cleared:  rows already cleared (sorted by clearedAt desc)
    */
-  clearance: orgProcedure
+  clearance: permissionProcedure("viewReports") // CTRL-06: เมนูรายงานกันด้วยสิทธิ์นี้อยู่แล้ว — กันฝั่ง server ด้วย (เข้าด้วย URL ตรง)
     .input(ClearanceInput)
     .query(async ({ ctx, input }) => {
       const sheets = await getSheetsService(ctx.org.orgId);
@@ -753,14 +755,8 @@ export const reportRouter = router({
         return Math.floor((db - da) / 86_400_000);
       }
 
-      // Today (server local) — used for daysSincePaid on pending rows
-      const today = (() => {
-        const d = new Date();
-        const y = d.getFullYear();
-        const m = String(d.getMonth() + 1).padStart(2, "0");
-        const day = String(d.getDate()).padStart(2, "0");
-        return `${y}-${m}-${day}`;
-      })();
+      // Today ตามเวลาไทย — RPT-12: เดิมใช้เวลาเครื่อง (Vercel = UTC) → 00:00–07:00 นับวันค้างเคลียร์ขาด 1 วัน
+      const today = todayBangkok();
 
       type PendingRow = {
         paymentId: string;
@@ -934,7 +930,7 @@ export const reportRouter = router({
    * The page can render either bucket via the `type` filter, or both at once
    * (default — UI uses tabs to flip between them without refetching).
    */
-  wht: orgProcedure
+  wht: permissionProcedure("viewReports") // CTRL-06: เมนูรายงานกันด้วยสิทธิ์นี้อยู่แล้ว — กันฝั่ง server ด้วย (เข้าด้วย URL ตรง)
     .input(WHTInput)
     .query(async ({ ctx, input }) => {
       const sheets = await getSheetsService(ctx.org.orgId);
@@ -1041,7 +1037,7 @@ export const reportRouter = router({
         if (paidDate < input.from || paidDate > input.to) continue;
 
         const info = payeeMap.get(p.PayeeID);
-        const taxId = info?.taxId || p.VendorTaxIdSnapshot || "";
+        const taxId = p.VendorTaxIdSnapshot || info?.taxId || "" /* PUR-09: ตามที่บันทึกตอนจ่าย (แก้ทะเบียนทีหลังไม่ทำให้รายงานที่ยื่นแล้วเปลี่ยน) */;
 
         const incomeAmount = num(p.TTLAmount);
         const rate = num(p.PctWTH);
@@ -1169,7 +1165,7 @@ export const reportRouter = router({
    *   - stats: { totalCount, totalBase, totalVAT, vendorCount }
    *   - rows:  one entry per qualifying payment, sorted by date asc then vendor name
    */
-  vat: orgProcedure
+  vat: permissionProcedure("viewReports") // CTRL-06: เมนูรายงานกันด้วยสิทธิ์นี้อยู่แล้ว — กันฝั่ง server ด้วย (เข้าด้วย URL ตรง)
     .input(VatInput)
     .query(async ({ ctx, input }) => {
       const sheets = await getSheetsService(ctx.org.orgId);
@@ -1275,7 +1271,7 @@ export const reportRouter = router({
         if (date < input.from || date > input.to) continue;
 
         const info = payeeMap.get(p.PayeeID);
-        const taxId = info?.taxId || p.VendorTaxIdSnapshot || "";
+        const taxId = p.VendorTaxIdSnapshot || info?.taxId || "" /* PUR-09: ตามที่บันทึกตอนจ่าย (แก้ทะเบียนทีหลังไม่ทำให้รายงานที่ยื่นแล้วเปลี่ยน) */;
 
         rows.push({
           paymentId: p.PaymentID,
@@ -1294,7 +1290,7 @@ export const reportRouter = router({
           address: info?.address || "",
           eventId: p.EventID,
           eventName: eventMap.get(p.EventID) || p.EventID || "—",
-          baseAmount: num(p.TTLAmount),
+          baseAmount: taxableBaseFromVat(num(p.TTLAmount), vatAmount), // PUR-02d
           vatAmount,
           description: p.Description || "",
           expenseNature: p.ExpenseNature || "",
@@ -1339,7 +1335,7 @@ export const reportRouter = router({
    *   - stats: counts + total base + total VAT + customer count + goods/service split
    *   - rows:  one entry per qualifying tax invoice, sorted by date asc
    */
-  vatSales: orgProcedure
+  vatSales: permissionProcedure("viewReports") // CTRL-06: เมนูรายงานกันด้วยสิทธิ์นี้อยู่แล้ว — กันฝั่ง server ด้วย (เข้าด้วย URL ตรง)
     .input(
       z.object({
         from: z.string().min(10),
@@ -1496,7 +1492,7 @@ export const reportRouter = router({
    *
    * Returns: { input: {totalBase, totalVAT, count}, output: {...}, net: {...} }
    */
-  vat30: orgProcedure
+  vat30: permissionProcedure("viewReports") // CTRL-06: เมนูรายงานกันด้วยสิทธิ์นี้อยู่แล้ว — กันฝั่ง server ด้วย (เข้าด้วย URL ตรง)
     .input(
       z.object({
         from: z.string().min(10),
@@ -1567,8 +1563,8 @@ export const reportRouter = router({
           receiptNumber: p.ReceiptNumber || "",
           payeeId: p.PayeeID,
           payeeName: info?.name || p.PayeeID || "—",
-          taxId: info?.taxId || p.VendorTaxIdSnapshot || "",
-          baseAmount: num(p.TTLAmount),
+          taxId: p.VendorTaxIdSnapshot || info?.taxId || "" /* PUR-09: ตามที่บันทึกตอนจ่าย (แก้ทะเบียนทีหลังไม่ทำให้รายงานที่ยื่นแล้วเปลี่ยน) */,
+          baseAmount: taxableBaseFromVat(num(p.TTLAmount), vat), // PUR-02d
           vatAmount: vat,
         });
       }

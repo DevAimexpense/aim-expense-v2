@@ -14,12 +14,15 @@ export function DashboardClient({
   plan,
   entityType = "company",
   vatRegistered = true,
+  canViewReports = false,
 }: {
   orgName: string;
   userName: string;
   plan: string;
   entityType?: string;
   vatRegistered?: boolean;
+  /** CTRL-06: การ์ด VAT ใช้ report.vat30 ซึ่งต้องมีสิทธิ์ดูรายงาน */
+  canViewReports?: boolean;
 }) {
   // BIL-07: ฟีเจอร์มาจาก plans.ts (แหล่งเดียวกับ require-plan/featureProcedure) — ไม่มีตารางเขียนมือ
   const features = {
@@ -92,7 +95,7 @@ export function DashboardClient({
   // RPT-01: การ์ด VAT ใช้ตัวเลขเดียวกับรายงาน ภ.พ.30 ของเดือนที่เลือก
   const vatRange = monthRange(filterMonth || currentMonth());
   const vat30Query = trpc.report.vat30.useQuery(vatRange ?? { from: "", to: "" }, {
-    enabled: features.vat && !!vatRange,
+    enabled: features.vat && !!vatRange && canViewReports, // CTRL-06
   });
   const inputVat = vat30Query.data?.input.totalVAT ?? 0;
   const outputVat = vat30Query.data?.output.totalVAT ?? 0;
@@ -286,7 +289,12 @@ export function DashboardClient({
             )}
           </div>
 
-          {features.vat ? (
+          {features.vat && !canViewReports ? (
+            // CTRL-06: ไม่มีสิทธิ์ดูรายงาน → ไม่แสดงตัวเลขภาษี (ไม่ใช่โชว์ 0 ให้เข้าใจผิด)
+            <p style={{ fontSize: "0.875rem", color: "#64748b", margin: 0 }}>
+              ต้องมีสิทธิ์ &ldquo;ดูรายงาน&rdquo; จึงจะเห็นยอดภาษีซื้อ-ขาย — ขอสิทธิ์จากผู้ดูแลองค์กร
+            </p>
+          ) : features.vat ? (
             <div style={{ display: "grid", gap: "0.875rem" }}>
               <VatRow label="ภาษีซื้อ (Input VAT)" value={inputVat} color="blue" />
               <VatRow label="ภาษีขาย (Output VAT)" value={outputVat} color="amber" />

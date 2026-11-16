@@ -150,9 +150,10 @@ export function ManualReceiptModal({ events, payees, onClose, onSuccess, attachT
   });
 
   // When documentType is substitute_receipt → force WHT to none
+  // PUR-15: ใบรับรองแทนใบเสร็จ = ผู้ขายไม่ออกเอกสาร → ไม่มี VAT ให้ขอคืน
   useEffect(() => {
-    if (form.documentType === "substitute_receipt" && form.wthTypeId !== "none") {
-      setForm((p) => ({ ...p, wthTypeId: "none", customWthRate: 0 }));
+    if (form.documentType === "substitute_receipt" && (form.wthTypeId !== "none" || form.hasVat)) {
+      setForm((p) => ({ ...p, wthTypeId: "none", customWthRate: 0, hasVat: false }));
     }
   }, [form.documentType]); // eslint-disable-line
 
@@ -656,9 +657,12 @@ export function ManualReceiptModal({ events, payees, onClose, onSuccess, attachT
                           <input
                             type="checkbox"
                             checked={form.hasVat}
+                            disabled={form.documentType === "substitute_receipt"}
                             onChange={(e) => setForm({ ...form, hasVat: e.target.checked })}
                           />
-                          <span style={{ fontWeight: form.hasVat ? 600 : 400, color: form.hasVat ? "#1d4ed8" : "#64748b" }}>จด VAT 7%</span>
+                          <span style={{ fontWeight: form.hasVat ? 600 : 400, color: form.hasVat ? "#1d4ed8" : "#64748b" }}>
+                            จด VAT 7%{form.documentType === "substitute_receipt" ? " (ใบรับรองแทนใบเสร็จไม่มี VAT)" : ""}
+                          </span>
                         </label>
                       </FG>
                     </div>

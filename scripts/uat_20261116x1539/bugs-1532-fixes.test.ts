@@ -6,7 +6,7 @@
   const { uncoveredBillingReceipts } = await import("../../src/server/lib/receipt-output-vat");
   const { filedVatPeriodWarning } = await import("../../src/server/lib/vat-period");
 
-  const base = { payments: [], month: "2026-10", eventId: "all", vatRegistered: true } as const;
+  const base = { payments: [] as never[], month: "2026-10", eventId: "all", vatRegistered: true };
   // ใบเสร็จออกตรงเก่า 10,000 (C1 VAT 700) + ใบกำกับที่ลูกค้าออกเอง ไม่ผูก (C1 VAT 700)
   const legacy = computeDashboardPL({
     ...base,

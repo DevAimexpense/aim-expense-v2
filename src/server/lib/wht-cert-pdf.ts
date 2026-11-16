@@ -171,6 +171,8 @@ async function saveLocked(
           fileName: systemDocFileName(data.payment.paymentDate, "wht-cert", description, paymentId),
           fileBuffer: Buffer.from(bytes),
           existingUrl: payment.GeneratedDocUrl,
+          // DOC-05b: ชื่อขึ้นต้นด้วยวันที่ → ใช้ "_wht-cert_…_PaymentID" หาฉบับก่อน ๆ ทุกฉบับ
+          relatedKey: `_${paymentId}`,
         })
       : await drive.uploadSystemDocument({
           documentsFolderId,

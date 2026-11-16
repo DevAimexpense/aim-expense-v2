@@ -236,6 +236,10 @@ export const paymentRouter = router({
 
       // PM may only record into their assigned events.
       assertPmWriteScope(ctx, { eventId: input.eventId });
+      // PUR-15: ใบรับรองแทนใบเสร็จ (ผู้ขายไม่ออกเอกสาร) ขอคืน VAT ไม่ได้
+      if (input.documentType === "substitute_receipt" && input.isVatPayee) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "ใบรับรองแทนใบเสร็จรับเงินไม่มี VAT — ยกเลิกการติ๊ก VAT" });
+      }
 
       const sheets = await getSheetsService(ctx.org.orgId);
       await ensureTabsCached(sheets, ctx.org.orgId);
@@ -517,6 +521,24 @@ export const paymentRouter = router({
         expenseType: existing.ExpenseType,
         createdByUserId: existing.CreatedByUserId,
       });
+
+      // CTRL-05: เปลี่ยนวันที่ใบเสร็จ/ใบกำกับที่บันทึกไว้แล้ว ของรายการที่จ่ายแล้ว = ย้ายงวดภาษีซื้อ/ภ.ง.ด.
+      // → ต้องมีสิทธิ์แก้หลังอนุมัติ (เหมือน payment.update) · แนบครั้งแรก (ยังไม่มีวันที่) ทำได้ตามเดิม
+      const changesFiledDate =
+        input.receiptDate !== undefined &&
+        !!existing.ReceiptDate &&
+        input.receiptDate.slice(0, 10) !== existing.ReceiptDate.slice(0, 10);
+      if (
+        changesFiledDate &&
+        (existing.Status === "paid" || existing.Status === "cleared") &&
+        ctx.org.role !== "admin" &&
+        !ctx.org.permissions.editPaymentAfterApproval
+      ) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "เปลี่ยนวันที่ใบเสร็จของรายการที่จ่ายแล้วได้เฉพาะผู้มีสิทธิ์แก้ไขหลังอนุมัติ (งวดภาษีจะเปลี่ยน)",
+        });
+      }
 
       const updates: Record<string, string | number> = {
         UpdatedAt: new Date().toISOString(),

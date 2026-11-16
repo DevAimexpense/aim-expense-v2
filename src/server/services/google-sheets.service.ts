@@ -432,6 +432,11 @@ export class GoogleSheetsService {
     this.spreadsheetId = spreadsheetId;
   }
 
+  /** id ของชีตองค์กร (อ่านอย่างเดียว) — ใช้ invalidate cache ของแท็บ */
+  get sheetId(): string {
+    return this.spreadsheetId;
+  }
+
   // ===== MASTER SHEET CREATION =====
 
   /**

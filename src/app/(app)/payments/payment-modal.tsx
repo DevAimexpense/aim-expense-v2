@@ -867,6 +867,17 @@ export function PaymentModal({
                 </div>
               )}
 
+              {/* WHT-20: อัตราเริ่มต้นจากทะเบียนผู้รับเงิน 1%/5% (มักเป็นค่าเก่า "รับเหมา 1%" ที่ผิด) → เตือนให้ตรวจ */}
+              {!isEdit &&
+                selectedPayee &&
+                (selectedPayee.defaultWTH === 1 || selectedPayee.defaultWTH === 5) &&
+                effectiveWthRate === selectedPayee.defaultWTH && (
+                  <p style={{ fontSize: "0.75rem", color: "#b45309", margin: "0.5rem 0 0" }}>
+                    ⚠️ อัตรา {selectedPayee.defaultWTH}% มาจากทะเบียนผู้รับเงิน — ใช้ได้เฉพาะ
+                    {selectedPayee.defaultWTH === 1 ? "ค่าขนส่ง" : "ค่าเช่า/ค่าแสดงสาธารณะ"} · ค่าบริการ/รับเหมา/วิชาชีพอิสระต้องหัก 3%
+                  </p>
+                )}
+
               {/* PUR-02c: VAT ตามใบกำกับ — ใบที่มีของยกเว้น VAT ปน VAT จริงน้อยกว่า 7% ของยอดรวม */}
               {form.isVatPayee && (
                 <div className="app-form-group" style={{ marginTop: "0.75rem", marginBottom: 0 }}>

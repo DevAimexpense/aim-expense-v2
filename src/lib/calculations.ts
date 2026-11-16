@@ -56,6 +56,17 @@ export function assertVatOverride(ttlAmount: number, vat: number): void {
 }
 
 /**
+ * PUR-02d: ฐานภาษีซื้อสำหรับรายงาน ภ.พ.30 — ใบที่มีสินค้ายกเว้น VAT ปน (VAT ตามใบ < 7% ของยอดก่อน VAT)
+ * ฐานที่เสียภาษีจริง = VAT ÷ 7% (ส่วนที่เหลือเป็นยอดยกเว้น) · ใบปกติ (VAT = 7% ± ปัดเศษ) → ยอดก่อน VAT เดิม
+ */
+export function taxableBaseFromVat(ttlAmount: number, vatAmount: number): number {
+  if (!(vatAmount > 0) || !(ttlAmount > 0)) return ttlAmount;
+  const full = roundTwo(ttlAmount * 0.07);
+  if (vatAmount >= full - 0.02) return ttlAmount; // VAT เต็ม 7% (เผื่อปัดเศษ)
+  return Math.min(ttlAmount, roundTwo(vatAmount / 0.07));
+}
+
+/**
  * PUR-02c: ใบเดียวแยกหลายรายการ — กระจาย "VAT รวมตามใบ" ไปยังรายการที่มี VAT ตามสัดส่วนยอด (รวม VAT)
  * เศษสตางค์ไปที่รายการ VAT สุดท้าย ให้ผลรวมเท่ายอดบนใบพอดี · รายการไม่มี VAT = 0
  */

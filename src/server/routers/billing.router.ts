@@ -807,9 +807,10 @@ export const billingRouter = router({
     }),
 
   void: featureProcedure("revenueModule", "manageBillings")
-    .input(z.object({ billingId: z.string() }))
+    .input(z.object({ billingId: z.string(), reason: z.string().trim().max(500).optional() }))
     .mutation(async ({ ctx, input }) => {
       const sheets = await getSheetsService(ctx.org.orgId);
+      await ensureTabsCached(sheets, ctx.org.orgId); // คอลัมน์ VoidReason
       const existing = await sheets.getBillingById(input.billingId);
       if (!existing) {
         throw new TRPCError({ code: "NOT_FOUND", message: "ไม่พบใบวางบิล" });
@@ -820,12 +821,33 @@ export const billingRouter = router({
           message: `ยกเลิกไม่ได้ — สถานะปัจจุบัน: ${existing.Status}`,
         });
       }
+      // RPT-08: รับเงินบางส่วนแล้ว → ต้องมีเหตุผล + จดยอดที่รับไว้ (รายได้หายจากรายงาน แต่เงินที่รับต้องตามได้
+      // ว่าคืนลูกค้า/โอนไปใบอื่น) · ยังไม่มีระบบคืนเงิน/ใบลดหนี้ จึงไม่บล็อก
+      const paidBefore = parseFloat(existing.PaidAmount) || 0;
+      const reason = (input.reason || "").trim();
+      if (existing.Status === "partial" && reason.length < 3) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `ใบวางบิลนี้รับเงินแล้ว ${paidBefore.toLocaleString("th-TH", { minimumFractionDigits: 2 })} บาท — กรุณาระบุเหตุผลและการจัดการเงินที่รับไว้ (คืนลูกค้า/โอนไปใบอื่น)`,
+        });
+      }
       await sheets.updateById(
         SHEET_TABS.BILLINGS,
         "BillingID",
         input.billingId,
         {
           Status: "void",
+          ...(reason ? { VoidReason: reason } : {}),
+          ...(paidBefore > 0
+            ? {
+                PaymentNote: [
+                  existing.PaymentNote,
+                  `ยกเลิกใบวางบิลหลังรับเงิน ${paidBefore.toLocaleString("th-TH", { minimumFractionDigits: 2 })} บาท: ${reason}`,
+                ]
+                  .filter(Boolean)
+                  .join("\n"),
+              }
+            : {}),
           UpdatedAt: new Date().toISOString(),
         }
       );
@@ -836,7 +858,7 @@ export const billingRouter = router({
           action: "update",
           entityType: "billing",
           entityRef: input.billingId,
-          summary: `ยกเลิกใบวางบิล ${existing.DocNumber}`,
+          summary: `ยกเลิกใบวางบิล ${existing.DocNumber}${paidBefore > 0 ? ` (รับเงินแล้ว ${paidBefore})` : ""}${reason ? `: ${reason}` : ""}`,
         },
       });
       return { success: true };
@@ -929,8 +951,9 @@ export const billingRouter = router({
             CustomerID: customer.CustomerID,
             CustomerNameSnapshot: customer.CustomerName || "",
             CustomerTaxIdSnapshot: customer.TaxID || "",
+            // SALE-09: โหมดรวม = ใบกำกับภาษี → ที่อยู่ตาม ภ.พ.20 ก่อนที่อยู่ส่งบิล
             CustomerAddressSnapshot:
-              customer.BillingAddress || customer.Address || "",
+              (taxDocMode === "combined" ? customer.Address || customer.BillingAddress : customer.BillingAddress || customer.Address) || "",
             IssuerBranchSnapshot: issuer.branchLabel,
             IssuerAddressSnapshot: issuer.address,
             SourceQuotationID: "",
@@ -1098,8 +1121,9 @@ export const billingRouter = router({
         CustomerID: customer.CustomerID,
         CustomerNameSnapshot: customer.CustomerName || "",
         CustomerTaxIdSnapshot: customer.TaxID || "",
+        // SALE-09: โหมดรวม = ใบกำกับภาษี → ที่อยู่ตาม ภ.พ.20 ก่อนที่อยู่ส่งบิล
         CustomerAddressSnapshot:
-          customer.BillingAddress || customer.Address || "",
+          (taxDocMode === "combined" ? customer.Address || customer.BillingAddress : customer.BillingAddress || customer.Address) || "",
         EventID: input.eventId || "",
         ProjectName: input.projectName || "",
         Subtotal: totals.subtotal,

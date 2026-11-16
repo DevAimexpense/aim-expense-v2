@@ -6,6 +6,25 @@
 import { google, drive_v3 } from "googleapis";
 import { Readable } from "stream"; // static import — หลีกเลี่ยง dynamic import ที่อาจ return undefined ใน Next.js runtime
 
+const escapeQ = (s: string) => s.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+
+/** Drive query: ชื่อมี base หรือ relatedKey (DOC-05b) */
+function nameMatchQuery(base: string, relatedKey?: string): string {
+  return relatedKey
+    ? `(name contains '${escapeQ(base)}' or name contains '${escapeQ(relatedKey)}')`
+    : `name contains '${escapeQ(base)}'`;
+}
+
+/** ไฟล์นี้เป็นฉบับหนึ่งของเอกสารเดียวกันไหม — ชื่อขึ้นต้นด้วย base หรือมี relatedKey (เช่น PaymentID) */
+export function isVersionOf(name: string, base: string, relatedKey?: string): boolean {
+  if (!/\.pdf$/i.test(name)) return false;
+  // relatedKey ต้องเป็นท้ายชื่อ (ก่อน .pdf หรือ _vN) — กัน "_PMT-1" ไปตรงกับ "_PMT-10"
+  return (
+    name.startsWith(base) ||
+    (!!relatedKey && (name.toLowerCase().endsWith(`${relatedKey}.pdf`.toLowerCase()) || name.includes(`${relatedKey}_v`)))
+  );
+}
+
 /**
  * GoogleDriveService
  * ใช้ owner's OAuth token เพื่อ access Google Drive
@@ -288,6 +307,11 @@ export class GoogleDriveService {
     fileName: string;
     fileBuffer: Buffer;
     existingUrl?: string;
+    /**
+     * DOC-05b: ส่วนของชื่อไฟล์ที่ไม่เปลี่ยนแม้วันที่เปลี่ยน (เช่น PaymentID ของ 50 ทวิ ที่ชื่อขึ้นต้นด้วยวันที่)
+     * ใช้หาฉบับก่อน ๆ ทุกฉบับตอนย้ายเดือน + นับเลขเวอร์ชัน
+     */
+    relatedKey?: string;
   }): Promise<{ fileId: string; webViewLink: string; fileName: string; folderPath: string; version: number }> {
     let date = new Date(params.docDate);
     if (isNaN(date.getTime())) date = new Date();
@@ -305,18 +329,21 @@ export class GoogleDriveService {
       const prevId = GoogleDriveService.fileIdFromUrl(params.existingUrl);
       if (prevId) {
         try {
-          await this.moveVersionsToFolder(prevId, base, monthFolderId);
+          await this.moveVersionsToFolder(prevId, base, monthFolderId, params.relatedKey);
         } catch (err) {
           console.warn("[drive] move previous versions failed — keep in old month", err);
         }
       }
       let maxSeen = 1; // ไฟล์เดิมนับเป็นเวอร์ชัน 1
       try {
-        const q = `'${monthFolderId}' in parents and trashed=false and name contains '${base.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`;
-        const res = await this.drive.files.list({ q, fields: "files(name)", pageSize: 100 });
+        const res = await this.drive.files.list({
+          q: `'${monthFolderId}' in parents and trashed=false and ${nameMatchQuery(base, params.relatedKey)}`,
+          fields: "files(name)",
+          pageSize: 100,
+        });
         for (const f of res.data.files || []) {
           const m = (f.name || "").match(/_v(\d+)\.pdf$/i);
-          if (m && (f.name || "").startsWith(base)) maxSeen = Math.max(maxSeen, parseInt(m[1], 10) || 1);
+          if (m && isVersionOf(f.name || "", base, params.relatedKey)) maxSeen = Math.max(maxSeen, parseInt(m[1], 10) || 1);
         }
       } catch (err) {
         console.warn("[drive] list versions failed — using timestamp suffix", err);
@@ -347,16 +374,24 @@ export class GoogleDriveService {
    * DOC-05: ย้ายไฟล์ฉบับเดิม (prevId) + ฉบับก่อนหน้าในโฟลเดอร์เดียวกันที่ชื่อขึ้นต้นด้วย base
    * ไปโฟลเดอร์ปลายทาง — ย้ายเท่านั้น ไม่แก้เนื้อไฟล์/ชื่อ (ลิงก์ที่ส่งให้ลูกค้ายังใช้ได้)
    */
-  private async moveVersionsToFolder(prevId: string, base: string, targetFolderId: string): Promise<void> {
+  private async moveVersionsToFolder(
+    prevId: string,
+    base: string,
+    targetFolderId: string,
+    relatedKey?: string,
+  ): Promise<void> {
     const prev = await this.drive.files.get({ fileId: prevId, fields: "id,parents", supportsAllDrives: true });
     const parents = prev.data.parents || [];
     if (parents.length === 0 || parents.includes(targetFolderId)) return;
     const oldFolderId = parents[0];
     const ids = new Set<string>([prevId]);
-    const q = `'${oldFolderId}' in parents and trashed=false and name contains '${base.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`;
-    const res = await this.drive.files.list({ q, fields: "files(id,name)", pageSize: 100 });
+    const res = await this.drive.files.list({
+      q: `'${oldFolderId}' in parents and trashed=false and ${nameMatchQuery(base, relatedKey)}`,
+      fields: "files(id,name)",
+      pageSize: 100,
+    });
     for (const f of res.data.files || []) {
-      if (f.id && (f.name || "").startsWith(base)) ids.add(f.id);
+      if (f.id && isVersionOf(f.name || "", base, relatedKey)) ids.add(f.id);
     }
     for (const fileId of ids) {
       await this.drive.files.update({
