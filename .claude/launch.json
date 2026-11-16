@@ -4,13 +4,28 @@
     {
       "name": "next-dev",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
+      "runtimeArgs": [
+        "run",
+        "dev"
+      ],
+      "port": 3000
+    },
+    {
+      "name": "next-dev-6543",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-c",
+        "export DATABASE_URL=\"$(grep -E '^DATABASE_URL=' .env.local | cut -d= -f2- | sed -E 's#:5432/#:6543/#')?pgbouncer=true&connection_limit=1\" && exec npx next dev -p 3000"
+      ],
       "port": 3000
     },
     {
       "name": "prisma-studio",
       "runtimeExecutable": "npx",
-      "runtimeArgs": ["prisma", "studio"],
+      "runtimeArgs": [
+        "prisma",
+        "studio"
+      ],
       "port": 5555
     }
   ]
