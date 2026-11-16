@@ -38,6 +38,7 @@ export function ReceiptsClient() {
   const pendingPdf = issued.filter(
     (b) =>
       b.status !== "draft" &&
+      b.status !== "void" && // ใบที่ยกเลิก/แถวกันเลขซ้ำ (SALE-11) ไม่ต้องสร้าง PDF ใหม่
       (!b.receiptPdfUrl || b.receiptPdfFor !== b.updatedAt) &&
       !failedRef.current.has(`${b.billingId}:${b.updatedAt}`),
   );

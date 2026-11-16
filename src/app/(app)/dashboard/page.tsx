@@ -9,6 +9,7 @@ import { getOrgContext } from "@/lib/auth/middleware";
 import { prisma } from "@/lib/prisma";
 import { DashboardClient } from "./dashboard-client";
 import { GoogleRevokedBanner } from "@/components/shared/google-revoked-banner";
+import { readVatRegistered } from "@/lib/org-settings";
 
 export default async function DashboardPage() {
   const session = await getSession();
@@ -28,6 +29,7 @@ export default async function DashboardPage() {
     where: { id: org.orgId },
     select: {
       ownerId: true,
+      settings: true,
       owner: { select: { googleConnection: { select: { isActive: true, googleEmail: true } } } },
     },
   });
@@ -46,6 +48,7 @@ export default async function DashboardPage() {
         userName={session.displayName}
         plan={plan}
         entityType={org.entityType}
+        vatRegistered={readVatRegistered(orgRow?.settings)}
       />
     </>
   );

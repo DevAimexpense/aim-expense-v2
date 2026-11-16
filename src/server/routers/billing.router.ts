@@ -6,7 +6,8 @@
 
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { router, featureProcedure } from "../trpc";
+import { router, featureProcedure, createCallerFactory, type TRPCContext } from "../trpc";
+import { taxInvoiceRouter } from "./taxInvoice.router";
 import { getSheetsService, ensureTabsCached } from "../lib/sheets-context";
 import {
   GoogleSheetsService,
@@ -21,7 +22,7 @@ import { todayBangkok } from "@/lib/utils/date";
 import { resolveIssuerBranch } from "../lib/issuer-branch";
 import { prisma } from "@/lib/prisma";
 import { safeAuditLog } from "@/server/lib/audit";
-import { hasSpecialFeature } from "@/lib/org-settings";
+import { hasSpecialFeature, readReceiptMode } from "@/lib/org-settings";
 
 // ===== Schemas =====
 
@@ -226,6 +227,40 @@ function monthMoveWarning(
 }
 
 // ===== Router =====
+
+/**
+ * SALE-01: ออกใบกำกับภาษีคู่กับใบเสร็จรับเงินที่ออกตรง (โหมด "ออกแยก")
+ * ใช้ procedure ของ taxInvoice (convertFromBilling → issue) ผ่าน caller — สิทธิ์/แพ็กเกจ/เลขรัน/lock
+ * ชุดเดียวกับการกดออกเองจากหน้าเอกสาร · ไม่ throw (ใบเสร็จออกไปแล้ว)
+ */
+async function issuePairedTaxInvoice(
+  ctx: TRPCContext,
+  billingId: string,
+  docDate: string,
+  customer: Record<string, string>,
+): Promise<{ taxInvoiceId?: string; docNumber?: string; warning?: string }> {
+  const followUp = "ใบเสร็จนี้ยังนับในรายงานภาษีขายตามปกติ — ออกใบกำกับภาษีได้ที่เมนูใบกำกับภาษี";
+  if (!customer.TaxID || !customer.BranchType) {
+    return {
+      warning: `ยังไม่ได้ออกใบกำกับภาษีคู่ — ลูกค้าไม่มีเลขประจำตัวผู้เสียภาษี/ข้อมูลสาขา\n${followUp}`,
+    };
+  }
+  let taxInvoiceId: string | undefined;
+  try {
+    const caller = createCallerFactory(taxInvoiceRouter)(ctx);
+    const created = await caller.convertFromBilling({ billingId, docDate });
+    taxInvoiceId = created.taxInvoiceId;
+    const issued = await caller.issue({ taxInvoiceId });
+    return { taxInvoiceId, docNumber: issued.docNumber };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error("[billing.createReceipt] paired tax invoice", billingId, msg);
+    return {
+      taxInvoiceId,
+      warning: `ยังออกใบกำกับภาษีคู่ไม่สำเร็จ: ${msg}\n${followUp}`,
+    };
+  }
+}
 
 export const billingRouter = router({
   list: featureProcedure("revenueModule")
@@ -801,6 +836,15 @@ export const billingRouter = router({
       );
       const issuer = await resolveIssuerBranch(ctx.org.orgId, input.branchId);
       const now = new Date().toISOString();
+      // SALE-01: ใบเสร็จมี VAT ของธุรกิจจด VAT (assertVatAllowed ผ่านแล้ว) → ออกตามวิธีที่ตั้งค่าองค์กรไว้
+      // snapshot ลงเอกสาร — เปลี่ยนตั้งค่าทีหลังไม่ทำให้หัวเอกสารเก่าเปลี่ยน
+      const taxDocMode: "" | "combined" | "separate" =
+        input.isVat && totals.vatAmount > 0
+          ? readReceiptMode(
+              (await prisma.organization.findUnique({ where: { id: ctx.org.orgId }, select: { settings: true } }))
+                ?.settings,
+            )
+          : "";
 
       try {
         // เลขเอกสาร: อ่าน max สด + append header ภายใน lock ต่อ org/ประเภท/เดือน (DOC-03 / CO-04)
@@ -854,6 +898,7 @@ export const billingRouter = router({
             ReceiptNumber: no,
             ReceiptDate: input.docDate,
             DocKind: "receipt",
+            TaxDocMode: taxDocMode,
           });
           return no;
         });
@@ -894,11 +939,24 @@ export const billingRouter = router({
           action: "create",
           entityType: "receipt",
           entityRef: billingId,
-          summary: `สร้างใบเสร็จรับเงิน ${receiptNumber}`,
+          summary: `สร้างใบเสร็จรับเงิน ${receiptNumber}${taxDocMode === "combined" ? " (ใบเสร็จรับเงิน/ใบกำกับภาษี)" : ""}`,
         },
       });
 
-      return { success: true, billingId, receiptNumber };
+      // SALE-01 โหมดแยก: ออกใบกำกับภาษีคู่ลงวันที่เดียวกับใบเสร็จ (จุดความรับผิด ม.78/1) อัตโนมัติ
+      // ออกไม่ได้ (ลูกค้าไม่มีเลขผู้เสียภาษี/สาขา, ไม่มีสิทธิ์ออกใบกำกับ ฯลฯ) → ใบเสร็จยังถูกนับในรายงานภาษีขาย
+      // (receipt-output-vat.ts) และแจ้งให้ตามออกใบกำกับ — ไม่ล้มการออกใบเสร็จ
+      let taxInvoiceId: string | undefined;
+      let taxInvoiceNumber: string | undefined;
+      let warning: string | undefined;
+      if (taxDocMode === "separate") {
+        const paired = await issuePairedTaxInvoice(ctx, billingId, input.docDate, customer);
+        taxInvoiceId = paired.taxInvoiceId;
+        taxInvoiceNumber = paired.docNumber;
+        warning = paired.warning;
+      }
+
+      return { success: true, billingId, receiptNumber, taxInvoiceId, taxInvoiceNumber, warning };
     }),
 
   /**
@@ -924,6 +982,17 @@ export const billingRouter = router({
         throw new TRPCError({
           code: "PRECONDITION_FAILED",
           message: "ใบเสร็จรับเงินนี้ถูกยกเลิกแล้ว แก้ไขไม่ได้",
+        });
+      }
+      // SALE-01: มีใบกำกับภาษีคู่ที่ออกเลขแล้ว → แก้ยอด/ลูกค้าที่ใบเสร็จฝั่งเดียวจะทำให้ 2 เอกสารไม่ตรงกัน
+      // (ภาษีขายนับจากใบกำกับ) — ต้องยกเลิกใบกำกับก่อน แล้วค่อยแก้
+      const pairedTi = (await sheets.getAll(SHEET_TABS.TAX_INVOICES)).find(
+        (t) => t.SourceBillingID === input.billingId && t.Status === "issued",
+      );
+      if (pairedTi) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: `ใบเสร็จนี้มีใบกำกับภาษีคู่ ${pairedTi.DocNumber} แล้ว — แก้ไขไม่ได้ ให้ยกเลิกใบกำกับภาษีก่อน (หรือออกใบลดหนี้/เพิ่มหนี้)`,
         });
       }
       const customer = await sheets.getCustomerById(input.customerId);
@@ -1174,8 +1243,38 @@ export const billingRouter = router({
               "ReceiptNumber",
               { spreadsheetId: ctx.org.googleSpreadsheetId }
             );
-            await sheets.updateById(SHEET_TABS.BILLINGS, "BillingID", input.billingId, { ...patch, ReceiptNumber: no });
+            await sheets.updateById(SHEET_TABS.BILLINGS, "BillingID", input.billingId, {
+              ...patch,
+              ReceiptNumber: no,
+              PaymentNote: `${patch.PaymentNote}\nเปลี่ยนเลขใบเสร็จ ${existing.ReceiptNumber} → ${no}`,
+            });
             return no;
+          });
+          // SALE-11: เลขเดิมต้องคง "ถูกใช้แล้ว" — ไม่งั้นใบเสร็จใหม่ของเดือนเดิมได้เลขซ้ำกับใบที่ลูกค้าถืออยู่
+          // (computeNextDocNumber หา max จากคอลัมน์ ReceiptNumber) → เก็บเป็นแถวยกเลิกที่อธิบายว่าเลขย้ายไปไหน
+          await withDocNumberLock(ctx.org.orgId, "RC", oldDate || input.receiptDate, async () => {
+            await sheets.appendRowByHeaders(SHEET_TABS.BILLINGS, {
+              BillingID: GoogleSheetsService.generateId("RCV"),
+              DocNumber: existing.ReceiptNumber,
+              ReceiptNumber: existing.ReceiptNumber,
+              DocDate: oldDate,
+              ReceiptDate: oldDate,
+              DueDate: oldDate,
+              DocKind: "receipt",
+              Status: "void",
+              CustomerID: existing.CustomerID || "",
+              CustomerNameSnapshot: existing.CustomerNameSnapshot || "",
+              Subtotal: 0,
+              VATAmount: 0,
+              GrandTotal: 0,
+              PaidAmount: 0,
+              IsVAT: existing.IsVAT || "",
+              Notes: `เลขที่นี้ถูกเปลี่ยนเป็น ${newNumber} (แก้วันที่ใบเสร็จของ ${existing.DocNumber}) — เก็บไว้ไม่ให้ออกซ้ำ`,
+              PreparedBy: "ระบบ",
+              PreparedByUserId: ctx.session.userId,
+              CreatedAt: new Date().toISOString(),
+              UpdatedAt: new Date().toISOString(),
+            });
           });
         } else {
           await sheets.updateById(SHEET_TABS.BILLINGS, "BillingID", input.billingId, patch);

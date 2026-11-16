@@ -381,7 +381,10 @@ export default function ExpensesPage() {
                         if (!canGen) return <span style={{ fontSize: "0.7rem", color: "#94a3b8" }}>—</span>;
 
                         const hasWth = p.wthAmount > 0;
-                        // ถ้ามี WTH → ออก WHT cert อย่างเดียว
+                        // ถ้ามี WTH → ออก WHT cert อย่างเดียว (WHT-18: เฉพาะจ่ายแล้ว — อนุมัติแต่ยังไม่จ่าย แสดงว่ารอจ่าย)
+                        if (hasWth && p.status === "approved") {
+                          return <span style={{ fontSize: "0.7rem", color: "#94a3b8" }}>50 ทวิ ออกเมื่อจ่ายแล้ว</span>;
+                        }
                         if (hasWth) {
                           return (
                             <a href={`/documents/wht-cert/${p.paymentId}`} target="_blank" rel="noopener noreferrer"

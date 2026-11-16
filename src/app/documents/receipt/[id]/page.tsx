@@ -131,6 +131,8 @@ export default async function ReceiptDocumentPage({
           number: header.ReceiptNumber,
           date: header.ReceiptDate || header.PaidDate || header.DocDate,
           direct: header.DocKind === "receipt",
+          // SALE-01: โหมดรวม (snapshot ตอนออก) → เอกสารนี้คือ "ใบเสร็จรับเงิน/ใบกำกับภาษี"
+          taxInvoice: header.DocKind === "receipt" && header.TaxDocMode === "combined",
           // ฝั่งบุคคล: ยอดที่ได้รับจริง = หลังหัก ณ ที่จ่าย (ผู้จ่ายออก 50 ทวิ) — DOC-07
           personal: org.entityType === "personal",
         },

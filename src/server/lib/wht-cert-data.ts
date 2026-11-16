@@ -43,6 +43,16 @@ export interface WhtCertData {
   };
 }
 
+/** WHT-18: ยังไม่ได้จ่ายเงิน → ยังไม่หักภาษีจริง ออกหนังสือรับรอง (และเลข) ไม่ได้ */
+export class WhtCertNotPaidError extends Error {
+  constructor() {
+    super(
+      "ยังออกหนังสือรับรองหัก ณ ที่จ่ายไม่ได้ — รายการนี้ยังไม่ได้จ่ายเงิน (ระบบจะออกและบันทึกลง Drive ให้อัตโนมัติเมื่อบันทึกจ่ายเงิน)"
+    );
+    this.name = "WhtCertNotPaidError";
+  }
+}
+
 /** ยังไม่มีวันที่จ่ายเงิน/วันที่ใบเสร็จ → ออกหนังสือรับรองไม่ได้ */
 export class WhtCertNoDateError extends Error {
   constructor() {
@@ -103,6 +113,11 @@ export async function loadWhtCertData(
   // (เช็คก่อนออกเลข — ผู้ที่ไม่มีสิทธิ์ต้องไม่ทำให้เลข 50 ทวิ ถูกออก/บันทึก)
   if (viewer && !isPaymentInScope(viewer, payment)) {
     return null;
+  }
+  // WHT-18: ห้ามออกเลข 50 ทวิ ให้รายการที่ยังไม่จ่าย (เปิดดูก็ออกเลขถาวร — ไม่อนุมัติ = เลขหาย,
+  // วันที่จะเป็นวันที่ใบเสร็จแทนวันจ่ายจริง) · รายการที่มีเลขแล้วเปิดดูซ้ำได้เสมอ
+  if (!payment.WhtCertNo && payment.Status !== "paid" && payment.Status !== "cleared") {
+    throw new WhtCertNotPaidError();
   }
 
   let event = null;

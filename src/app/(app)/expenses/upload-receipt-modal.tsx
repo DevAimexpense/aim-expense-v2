@@ -334,6 +334,9 @@ export function UploadReceiptModal({ events, payees, onClose, onSuccess, attachT
           receiptUrl: uploadedReceiptUrl || undefined,
           receiptNumber: form.receiptNumber.trim() || undefined,
           receiptDate: form.documentDate || undefined,
+          // PUR-01/07: ใบที่แนบคือใบกำกับเต็มรูป/ใบเสร็จ → อัปเดตประเภทให้รายงานภาษีซื้อถูก
+          documentType:
+            form.documentType === "tax_invoice" || form.documentType === "receipt" ? form.documentType : undefined,
         });
       } else {
         // Create mode: new payment — บันทึกค่าใช้จ่าย (จ่ายแล้ว มีใบเสร็จ) → ข้ามอนุมัติ

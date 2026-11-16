@@ -249,7 +249,8 @@ export default function DocumentsPage() {
 
                   {/* Document links */}
                   <td className="text-center" style={{ whiteSpace: "nowrap" }}>
-                    {p.wthAmount > 0 && (p.status === "paid" || p.status === "approved" || p.status === "cleared") && (
+                    {/* WHT-18: 50 ทวิ เฉพาะรายการที่จ่ายแล้ว */}
+                    {p.wthAmount > 0 && (p.status === "paid" || p.status === "cleared") && (
                       <a
                         href={`/documents/wht-cert/${p.paymentId}`}
                         target="_blank"

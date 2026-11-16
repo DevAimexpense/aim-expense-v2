@@ -35,6 +35,8 @@ interface DocData {
       number: string;
       date: string;
       direct?: boolean;
+      /** SALE-01: ใบเสร็จรับเงิน/ใบกำกับภาษี (องค์กรตั้งค่าออกรวมใบเดียว) */
+      taxInvoice?: boolean;
       /** ฝั่งบุคคล (entityType=personal): ใบเสร็จแสดงยอดรับจริงหลังหัก ณ ที่จ่าย — DOC-07 */
       personal?: boolean;
     } | null;
@@ -600,10 +602,14 @@ function DocPage({
         </div>
         <div className="doc-meta">
           <div className="doc-title">
-            {receipt ? "ใบเสร็จรับเงิน" : "ใบวางบิล / ใบแจ้งหนี้"}
+            {receipt
+              ? receipt.taxInvoice
+                ? "ใบเสร็จรับเงิน/ใบกำกับภาษี"
+                : "ใบเสร็จรับเงิน"
+              : "ใบวางบิล / ใบแจ้งหนี้"}
           </div>
           <div className="doc-title-sub">
-            {receipt ? "RECEIPT" : "BILLING / INVOICE"}
+            {receipt ? (receipt.taxInvoice ? "RECEIPT / TAX INVOICE" : "RECEIPT") : "BILLING / INVOICE"}
           </div>
           <div
             className={`copy-stamp copy-${copyType}`}

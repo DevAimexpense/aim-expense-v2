@@ -176,6 +176,7 @@ function SummaryTab({
         <div style={{ fontSize: "0.875rem", lineHeight: 1.8 }}>
           <div>
             <strong>จำนวนใบกำกับภาษีที่ออก:</strong> {output.totalCount} ใบ
+            <span style={{ color: "#64748b", fontSize: "0.8125rem" }}> (รวมใบเสร็จที่มี VAT)</span>
           </div>
           <div>
             <strong>ฐานภาษี (รวม):</strong>{" "}
@@ -272,6 +273,8 @@ function OutputTab({
 }: {
   rows: {
     taxInvoiceId: string;
+    kind?: "tax_invoice" | "receipt";
+    receiptMode?: "combined" | "separate";
     docNumber: string;
     date: string;
     customerName: string;
@@ -309,7 +312,16 @@ function OutputTab({
           {rows.map((r) => (
             <tr key={r.taxInvoiceId}>
               <td>{r.date}</td>
-              <td className="mono">{r.docNumber}</td>
+              <td className="mono">
+                {r.docNumber}
+                {r.kind === "receipt" && (
+                  <div style={{ fontSize: "0.75rem", color: r.receiptMode === "combined" ? "#64748b" : "#b45309" }}>
+                    {r.receiptMode === "combined"
+                      ? "ใบเสร็จรับเงิน/ใบกำกับภาษี"
+                      : "ใบเสร็จ — ยังไม่มีใบกำกับภาษีคู่"}
+                  </div>
+                )}
+              </td>
               <td>{r.customerName}</td>
               <td className="mono" style={{ fontSize: "0.8125rem" }}>
                 {r.customerTaxId}

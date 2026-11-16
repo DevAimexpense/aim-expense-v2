@@ -5,17 +5,21 @@ import { trpc } from "@/lib/trpc/client";
 import SearchableSelect, { type SearchableSelectOption } from "@/components/searchable-select";
 import { StatCard } from "@/components/shared";
 import { hasFeature, normalisePlan, PLAN_LABELS } from "@/lib/plans";
+import { computeDashboardPL, monthRange } from "@/lib/dashboard-pl";
+import { formatMonthYear } from "@/lib/utils/date";
 
 export function DashboardClient({
   orgName,
   userName,
   plan,
   entityType = "company",
+  vatRegistered = true,
 }: {
   orgName: string;
   userName: string;
   plan: string;
   entityType?: string;
+  vatRegistered?: boolean;
 }) {
   // BIL-07: ฟีเจอร์มาจาก plans.ts (แหล่งเดียวกับ require-plan/featureProcedure) — ไม่มีตารางเขียนมือ
   const features = {
@@ -56,20 +60,39 @@ export function DashboardClient({
   const quotationsQuery = trpc.quotation.list.useQuery(undefined, {
     enabled: features.pl,
   });
+  const paymentsQuery = trpc.payment.list.useQuery(undefined, { enabled: features.pl });
   const billings = billingsQuery.data || [];
   const quotations = quotationsQuery.data || [];
 
+  // RPT-01: กำไร/ขาดทุน ตามเดือน + โปรเจกต์ที่เลือก · ยอดก่อน VAT · เฉพาะรายจ่ายที่อนุมัติแล้ว
+  const inMonth = (d: string) => !filterMonth || (d || "").startsWith(filterMonth);
+  const inEvent = (id: string) => filterEvent === "all" || (id || "").trim() === filterEvent;
   const totalQuotation = quotations
     .filter((q) => q.status !== "rejected" && q.status !== "void")
-    .reduce((s, q) => s + q.grandTotal, 0);
-  const totalInvoiced = billings
-    .filter((b) => b.status !== "void" && b.status !== "draft")
-    .reduce((s, b) => s + b.grandTotal, 0);
-  const totalProfit = totalInvoiced - totalSpent;
+    .filter((q) => inEvent(q.eventId || "") && inMonth(q.docDate))
+    .reduce((s, q) => s + q.subtotal, 0);
+  const pl = useMemo(
+    () =>
+      computeDashboardPL({
+        payments: paymentsQuery.data || [],
+        billings: billingsQuery.data || [],
+        month: filterMonth,
+        eventId: filterEvent,
+        vatRegistered,
+      }),
+    [paymentsQuery.data, billingsQuery.data, filterMonth, filterEvent, vatRegistered],
+  );
+  const totalInvoiced = pl.revenue;
+  const totalProfit = pl.profit;
+  const periodLabel = filterMonth ? `เดือน ${thaiMonthLabel(filterMonth)}` : "ทุกเดือน";
 
-  // VAT card still pending real wiring (needs monthly ภ.พ.30 aggregation).
-  const inputVat = 0;
-  const outputVat = 0;
+  // RPT-01: การ์ด VAT ใช้ตัวเลขเดียวกับรายงาน ภ.พ.30 ของเดือนที่เลือก
+  const vatRange = monthRange(filterMonth || currentMonth());
+  const vat30Query = trpc.report.vat30.useQuery(vatRange ?? { from: "", to: "" }, {
+    enabled: features.vat && !!vatRange,
+  });
+  const inputVat = vat30Query.data?.input.totalVAT ?? 0;
+  const outputVat = vat30Query.data?.output.totalVAT ?? 0;
 
   return (
     <div className="app-page">
@@ -174,7 +197,7 @@ export function DashboardClient({
           <div>
             <h2 className="app-card-title">💼 รายได้ และ กำไร/ขาดทุน</h2>
             <p className="app-card-subtitle">
-              เปรียบเทียบรายรับ-รายจ่ายต่อโปรเจกต์
+              {periodLabel} · {filterEvent === "all" ? "ทุกโปรเจกต์" : "โปรเจกต์ที่เลือก"} · ยอดก่อน VAT
             </p>
           </div>
           {!features.pl && (
@@ -189,23 +212,27 @@ export function DashboardClient({
               icon="📜"
               label="ใบเสนอราคา (Quotation)"
               value={`฿${formatNumber(totalQuotation)}`}
-              sub="ยอดเสนอราคาทั้งหมด"
+              sub="ยอดเสนอราคา (ก่อน VAT)"
               compact
             />
             <StatCard
               color="blue"
               icon="🧾"
-              label="ใบวางบิล (Invoiced)"
+              label="รายได้ (ออกเอกสารแล้ว)"
               value={`฿${formatNumber(totalInvoiced)}`}
-              sub="ยอดที่ออกบิลแล้ว"
+              sub="ใบวางบิล/ใบเสร็จ ก่อน VAT"
               compact
             />
             <StatCard
               color="rose"
               icon="📤"
               label="ค่าใช้จ่าย"
-              value={`฿${formatNumber(totalSpent)}`}
-              sub="รายจ่ายทั้งหมด"
+              value={`฿${formatNumber(pl.expense)}`}
+              sub={
+                pl.pendingCount > 0
+                  ? `อนุมัติแล้ว · ไม่รวมรออนุมัติ ${pl.pendingCount} รายการ`
+                  : "อนุมัติแล้ว · ก่อนหัก ณ ที่จ่าย"
+              }
               compact
             />
             <StatCard
@@ -213,8 +240,8 @@ export function DashboardClient({
               icon={totalProfit >= 0 ? "📈" : "📉"}
               label={totalProfit >= 0 ? "กำไร" : "ขาดทุน"}
               value={`฿${formatNumber(Math.abs(totalProfit))}`}
-              sub={totalInvoiced > 0
-                ? `Margin ${((totalProfit / totalInvoiced) * 100).toFixed(1)}%`
+              sub={pl.margin != null
+                ? `Margin ${pl.margin.toFixed(1)}%`
                 : "ยังไม่มีรายได้"}
               compact
             />
@@ -238,7 +265,9 @@ export function DashboardClient({
         <div className="app-card">
           <div className="app-card-header">
             <div>
-              <h2 className="app-card-title">📊 ภาษีซื้อ-ขาย (เดือนนี้)</h2>
+              <h2 className="app-card-title">
+                📊 ภาษีซื้อ-ขาย ({thaiMonthLabel(filterMonth || currentMonth())})
+              </h2>
               <p className="app-card-subtitle">สำหรับยื่น ภ.พ.30</p>
             </div>
             {!features.vat && (
@@ -592,6 +621,11 @@ function formatNumber(n: number): string {
     minimumFractionDigits: 0,
     maximumFractionDigits: 2,
   }).format(n || 0);
+}
+
+/** YYYY-MM → mm/พ.ศ. */
+function thaiMonthLabel(month: string): string {
+  return /^\d{4}-\d{2}$/.test(month) ? formatMonthYear(`${month}-01T00:00:00`) : month;
 }
 
 function currentMonth(): string {

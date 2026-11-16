@@ -325,6 +325,10 @@ export function NewBillingClient({
         // DOC-02: บันทึก PDF ลง Drive เบื้องหลังทันที — ไม่พึ่งแท็บเอกสาร (Safari/iPad บล็อก popup หลัง await)
         // iframe อยู่ใน document.body จึงทำงานต่อได้แม้เปลี่ยนหน้าไป /receipts
         ensureSalesDocSaved({ kind: "receipt", id: result.billingId, version: `saved-${Date.now()}`, savedFor: "", savedUrl: "" });
+        // SALE-01: โหมดออกแยก → ใบกำกับภาษีคู่ออกเลขแล้ว บันทึก PDF ลง Drive ด้วย
+        if ("taxInvoiceId" in result && "taxInvoiceNumber" in result && result.taxInvoiceId && result.taxInvoiceNumber) {
+          ensureSalesDocSaved({ kind: "tax-invoice", id: String(result.taxInvoiceId), version: `saved-${Date.now()}`, savedFor: "", savedUrl: "" });
+        }
         window.open(`/documents/receipt/${result.billingId}`, "_blank", "noopener");
         router.push("/receipts");
         return;

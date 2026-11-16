@@ -104,7 +104,7 @@ export async function POST(req: NextRequest) {
         const fileName = `${sanitize(docNumber)}${customer ? `_${customer}` : ""}.pdf`;
 
         const { drive, documentsFolderId } = await getDriveService(org.orgId);
-        const saved = await drive.uploadOrReplaceDocument({
+        const saved = await drive.uploadDocumentVersion({
           documentsFolderId,
           docDate,
           fileName,
@@ -123,10 +123,10 @@ export async function POST(req: NextRequest) {
             action: "save_document",
             entityType: kind === "tax-invoice" ? "tax_invoice" : kind,
             entityRef: id,
-            summary: `บันทึก${cfg.label} ${docNumber} PDF${saved.replaced ? " (อัปเดตไฟล์เดิม)" : ""} → ${saved.folderPath}/${saved.fileName}`,
+            summary: `บันทึก${cfg.label} ${docNumber} PDF${saved.version > 1 ? ` (เวอร์ชัน ${saved.version} — ไฟล์เดิมเก็บไว้)` : ""} → ${saved.folderPath}/${saved.fileName}`,
           },
         });
-        return { status: 200 as const, body: { success: true, fileUrl: saved.webViewLink, replaced: saved.replaced } };
+        return { status: 200 as const, body: { success: true, fileUrl: saved.webViewLink, version: saved.version } };
       },
       { ttlMs: 60_000 },
     );

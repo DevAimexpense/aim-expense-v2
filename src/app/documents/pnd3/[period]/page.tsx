@@ -15,6 +15,7 @@ import {
   parsePeriod,
   vendorTypeOf,
 } from "@/lib/wht-form-utils";
+import { whtPeriodDate } from "@/lib/wht-doc-utils";
 import { isSettled } from "@/lib/payment-status";
 import { PND3SummaryDocument } from "./document";
 
@@ -27,11 +28,8 @@ const num = (s: string | undefined): number => {
   return isNaN(n) ? 0 : n;
 };
 
-const paidDateOf = (p: Record<string, string>): string => {
-  if (p.PaymentDate) return p.PaymentDate;
-  if (p.PaidAt && p.PaidAt.length >= 10) return p.PaidAt.slice(0, 10);
-  return "";
-};
+// WHT-12: งวด ภ.ง.ด. ใช้วันเดียวกับที่พิมพ์บน 50 ทวิ
+const paidDateOf = (p: Record<string, string>): string => whtPeriodDate(p);
 
 export default async function PND3SummaryPage({
   params,

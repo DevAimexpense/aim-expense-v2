@@ -8,7 +8,7 @@
 // ===========================================
 
 import { generateWhtCertPdf } from "@/lib/wht-cert/generate";
-import { loadWhtCertData, WhtCertNoDateError, type WhtCertData } from "@/server/lib/wht-cert-data";
+import { loadWhtCertData, WhtCertNoDateError, WhtCertNotPaidError, type WhtCertData } from "@/server/lib/wht-cert-data";
 import { getSheetsService, getDriveService, ensureTabsCached } from "@/server/lib/sheets-context";
 import { SHEET_TABS } from "@/server/services/google-sheets.service";
 import { safeAuditLog } from "@/server/lib/audit";
@@ -92,7 +92,7 @@ export function whtAutoSaveSkipReason(payment: WhtPaymentRow): "no_wht" | "not_p
   if (!PAID_STATUSES.has(payment.Status || "")) return "not_paid";
   if (payment.GeneratedDocUrl) {
     if (payment.GeneratedDocType !== "wht-cert") return "other_doc";
-    // WHT-03: ไฟล์เดิมสร้างจากข้อมูลชุดนี้แล้ว → ใช้ต่อ · ไม่ตรง (แก้ยอด/วันที่ ฯลฯ) → เขียนทับ
+    // WHT-03: ไฟล์เดิมสร้างจากข้อมูลชุดนี้แล้ว → ใช้ต่อ · ไม่ตรง (แก้ยอด/วันที่ ฯลฯ) → ไฟล์เวอร์ชันใหม่ (CTRL-09)
     if ((payment.WhtCertFor || "") === whtCertSignature(payment)) return "exists";
   }
   return null;
@@ -148,6 +148,7 @@ async function saveLocked(
       data = await loadWhtCertData(orgId, paymentId);
     } catch (e) {
       if (e instanceof WhtCertNoDateError) return { status: "skipped", reason: "no_date" };
+      if (e instanceof WhtCertNotPaidError) return { status: "skipped", reason: "not_paid" };
       throw e;
     }
     if (!data) return { status: "skipped", reason: "not_found" };
@@ -155,10 +156,11 @@ async function saveLocked(
     const bytes = await buildWhtCertPdf(data);
     const { drive, documentsFolderId } = await getDriveService(orgId);
     const description = payment.Description || "หนังสือรับรองหัก ณ ที่จ่าย";
-    // WHT-03: มีไฟล์ 50 ทวิ แล้วแต่ข้อมูลเปลี่ยน → เขียนทับไฟล์เดิม (เลขเดิม · ลิงก์เดิม · ย้ายโฟลเดอร์ถ้าเดือนเปลี่ยน)
+    // WHT-03 + CTRL-09: มีไฟล์ 50 ทวิ แล้วแต่ข้อมูลเปลี่ยน → บันทึกเป็นไฟล์เวอร์ชันใหม่ (_v2 …) เลขเดิม
+    // ไฟล์เดิมเก็บไว้ (ฉบับที่ให้ผู้รับเงินไปแล้วต้องไม่หาย) · GeneratedDocUrl ชี้ฉบับล่าสุด
     const replacing = payment.GeneratedDocType === "wht-cert" && !!payment.GeneratedDocUrl;
     const result = replacing
-      ? await drive.uploadOrReplaceDocument({
+      ? await drive.uploadDocumentVersion({
           documentsFolderId,
           docDate: data.payment.paymentDate,
           fileName: systemDocFileName(data.payment.paymentDate, "wht-cert", description, paymentId),
@@ -185,7 +187,7 @@ async function saveLocked(
         action: "save_document",
         entityType: "payment",
         entityRef: paymentId,
-        summary: `บันทึก หนังสือรับรองหัก ณ ที่จ่าย PDF (อัตโนมัติ${replacing ? " · อัปเดตไฟล์เดิมตามข้อมูลที่แก้" : ""}) → ${result.folderPath}/${result.fileName}`,
+        summary: `บันทึก หนังสือรับรองหัก ณ ที่จ่าย PDF (อัตโนมัติ${replacing ? " · ฉบับแก้ไข — ไฟล์เดิมเก็บไว้" : ""}) → ${result.folderPath}/${result.fileName}`,
       },
     });
     return { status: "saved", fileUrl: result.webViewLink };

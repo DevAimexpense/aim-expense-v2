@@ -43,6 +43,7 @@ interface ExtractedData {
   vatAmount: number | null;
   totalAmount: number | null;
   hasVat: boolean;
+  documentType?: string | null;
   items: Array<{
     description: string;
     quantity?: number;
@@ -118,6 +119,8 @@ export function UploadInvoiceModal({
     description: "",
     totalAmount: 0,
     hasVat: false,
+    // PUR-02: VAT ตามใบกำกับ (ว่าง = คิด 7% จากยอดรวมอัตโนมัติ)
+    vatOverride: "",
     wthTypeId: "none",
     customWthRate: 0,
     dueDate: addDaysISO(15),
@@ -126,7 +129,9 @@ export function UploadInvoiceModal({
     days: 1,
     numberOfPeople: 1,
     // R5/R6: tax compliance
-    documentType: "tax_invoice" as "" | "receipt" | "tax_invoice",
+    // PUR-01: ขั้นตั้งเบิกยังเป็นแค่ใบแจ้งหนี้ — ห้ามตั้งเป็นใบกำกับภาษีเอง (จะเข้าภาษีซื้อทั้งที่ยังไม่มีใบกำกับ)
+    // เป็นใบกำกับเต็มรูปเมื่อ OCR อ่านได้ว่าเป็น "ใบแจ้งหนี้/ใบกำกับภาษี" หรือผู้ใช้เลือกเอง หรือแนบใบกำกับทีหลัง
+    documentType: "" as "" | "receipt" | "tax_invoice",
     expenseNature: "" as "" | "goods" | "service",
     categoryMain: "",
     categorySub: "",
@@ -226,11 +231,13 @@ export function UploadInvoiceModal({
         newPayeeAddress: data.vendorAddress || "",
         newPayeePhone: data.vendorPhone || "",
         invoiceNumber: data.invoiceNumber || prev.invoiceNumber,
+        documentType: data.documentType === "tax_invoice" ? "tax_invoice" : prev.documentType,
         description: prev.description || (data.vendorName
           ? `${data.vendorName}${data.invoiceNumber ? " - " + data.invoiceNumber : ""}`
           : ""),
         totalAmount: data.totalAmount || data.subtotal || prev.totalAmount,
         hasVat: data.hasVat,
+        vatOverride: data.hasVat && data.vatAmount != null && data.vatAmount > 0 ? String(data.vatAmount) : "",
         dueDate: data.dueDate || prev.dueDate,
       }));
 
@@ -405,10 +412,11 @@ export function UploadInvoiceModal({
         // Note: ถ้า hasVat=true → ยอดรวม (totalAmount) คือยอดรวม VAT แล้ว
         //   ดังนั้น costPerUnit = totalAmount / 1.07 เพื่อให้ server คำนวณ VAT 7% กลับมาได้ตรง
         // ถ้า hasVat=false → totalAmount = costPerUnit × days × people ตรง ๆ
+        // PUR-02: มี VAT ตามใบ → ฐาน = ยอดรวม − VAT ตามใบ (ไม่ใช่ ÷ 1.07)
         const costPerUnit = useBreakdown
           ? form.costPerUnit
           : form.hasVat
-          ? form.totalAmount / 1.07
+          ? form.totalAmount - vatCalc
           : form.totalAmount;
         const days = useBreakdown ? form.days : 1;
         const numberOfPeople = useBreakdown ? form.numberOfPeople : 1;
@@ -428,6 +436,7 @@ export function UploadInvoiceModal({
           numberOfPeople,
           pctWTH: effectiveWthRate,
           isVatPayee: form.hasVat,
+          vatAmount: form.hasVat && vatFromInvoice != null ? vatFromInvoice : undefined,
         });
         firstPaymentId = result.paymentId;
       } else {
@@ -480,7 +489,13 @@ export function UploadInvoiceModal({
   const isSaving = createPaymentMut.isPending || createPayeeMut.isPending;
 
   // Calc for single mode
-  const vatCalc = form.hasVat ? (form.totalAmount / 1.07) * 0.07 : 0;
+  // PUR-02: VAT ตามใบ (ถ้ากรอก/OCR อ่านได้) แทน 7% ที่คิดย้อนจากยอดรวม
+  const vatAuto = form.hasVat ? Math.round((form.totalAmount / 1.07) * 0.07 * 100) / 100 : 0;
+  const vatFromInvoice =
+    form.hasVat && form.vatOverride.trim() !== "" && Number.isFinite(parseFloat(form.vatOverride))
+      ? Math.round(parseFloat(form.vatOverride) * 100) / 100
+      : null;
+  const vatCalc = form.hasVat ? (vatFromInvoice ?? vatAuto) : 0;
   const subtotalCalc = form.hasVat ? form.totalAmount - vatCalc : form.totalAmount;
   const wthAmount = (subtotalCalc * effectiveWthRate) / 100;
   const netPayment = form.totalAmount - wthAmount;
@@ -925,6 +940,18 @@ export function UploadInvoiceModal({
                 />
               </div>
               <div className="app-form-group">
+                <label className="app-label">ประเภทเอกสาร</label>
+                <select
+                  value={form.documentType}
+                  onChange={(e) => setForm({ ...form, documentType: e.target.value as typeof form.documentType })}
+                  className="app-select"
+                >
+                  <option value="">ใบแจ้งหนี้ (ยังไม่ใช่ใบกำกับภาษี)</option>
+                  <option value="tax_invoice">ใบแจ้งหนี้/ใบกำกับภาษี (เต็มรูป)</option>
+                </select>
+                <p className="app-hint">ภาษีซื้อนับเฉพาะใบกำกับภาษีเต็มรูป — ถ้ายังไม่ได้ ให้แนบใบกำกับตอนได้รับ</p>
+              </div>
+              <div className="app-form-group">
                 <label className="app-label app-label-required">📅 Due Date</label>
                 <DateInput
                   value={form.dueDate}
@@ -1036,6 +1063,26 @@ export function UploadInvoiceModal({
                       มี VAT 7% (รวมในยอด)
                     </label>
                   </div>
+                  {form.hasVat && (
+                    <div className="app-form-group" style={{ marginBottom: "0.625rem" }}>
+                      <label className="app-label" style={{ fontSize: "0.75rem" }}>
+                        VAT ตามใบกำกับ (บาท)
+                      </label>
+                      <input
+                        type="number"
+                        inputMode="decimal"
+                        min={0}
+                        step={0.01}
+                        value={form.vatOverride}
+                        placeholder={vatAuto.toFixed(2)}
+                        onChange={(e) => setForm({ ...form, vatOverride: e.target.value })}
+                        className="app-input num"
+                      />
+                      <p className="app-hint">
+                        เว้นว่าง = คิด 7% จากยอดรวม · ใบที่มีสินค้ายกเว้น VAT ปน ให้กรอกยอด VAT ตามที่พิมพ์บนใบ
+                      </p>
+                    </div>
+                  )}
 
                   <div className="app-form-grid cols-2" style={{ gap: "0.625rem" }}>
                     <div>
@@ -1081,7 +1128,7 @@ export function UploadInvoiceModal({
                     {form.hasVat && (
                       <>
                         <Row label="ยอดก่อน VAT" value={subtotalCalc} />
-                        <Row label="VAT 7%" value={vatCalc} color="#2563eb" />
+                        <Row label={vatFromInvoice != null ? "VAT ตามใบ" : "VAT 7%"} value={vatCalc} color="#2563eb" />
                       </>
                     )}
                     {effectiveWthRate > 0 && (

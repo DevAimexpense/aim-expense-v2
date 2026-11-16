@@ -608,6 +608,9 @@ export const quotationRouter = router({
       const grandTotal = parseFloat(q.GrandTotal) || 0;
       const vatIncluded = q.VATIncluded === "TRUE" || q.VATIncluded === "true";
       const isVat = q.IsVAT !== "FALSE";
+      // SALE-12: ด่าน VAT เดียวกับ create/update (DOC-06) — org ที่ไม่ได้จด VAT แปลงใบเสนอราคาที่มี VAT
+      // (รวมแถวเก่าที่ IsVAT ว่าง = มี VAT) เป็นใบวางบิล/ใบเสร็จที่เก็บ VAT ไม่ได้ (ม.86/13, ม.90/4)
+      await assertVatAllowed(ctx.org.orgId, isVat, "ใบวางบิล");
       // parseFloat("") = NaN และ `NaN ?? 0` ยังเป็น NaN → กันด้วย Number.isFinite (DOC-07)
       const customerWht = parseFloat(customer.DefaultWHTPercent);
       const whtPercent =

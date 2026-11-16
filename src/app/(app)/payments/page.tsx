@@ -318,7 +318,8 @@ export default function PaymentsPage() {
                     <td className="text-center">
                       {(() => {
                         const canGen = p.status === "paid" || p.status === "approved" || p.status === "cleared";
-                        const showWht = canGen && p.wthAmount > 0;
+                        // WHT-18: 50 ทวิ ออกได้เมื่อจ่ายเงินแล้วเท่านั้น (เปิดดู = ออกเลขถาวร)
+                        const showWht = (p.status === "paid" || p.status === "cleared") && p.wthAmount > 0;
                         const showSub = canGen && (
                           p.documentType === "substitute_receipt" || p.documentType === "id_card" ||
                           (!p.receiptUrl && !p.invoiceFileUrl && p.vatAmount === 0)

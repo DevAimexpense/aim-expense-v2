@@ -254,6 +254,7 @@ export const SHEET_HEADERS: Record<string, string[]> = {
     "PdfFor", // UpdatedAt ของข้อมูลที่ใช้สร้าง PdfUrl (ใบวางบิล)
     "ReceiptPdfUrl", // ใบเสร็จรับเงิน PDF ใน Drive (บันทึกอัตโนมัติ)
     "ReceiptPdfFor", // UpdatedAt ของข้อมูลที่ใช้สร้าง ReceiptPdfUrl
+    "TaxDocMode", // SALE-01: ใบเสร็จออกตรงที่มี VAT — "combined" = ใบเสร็จ/ใบกำกับ · "separate" = มีใบกำกับคู่ (snapshot ตอนออก)
   ],
   [SHEET_TABS.BILLING_LINES]: [
     "LineID",

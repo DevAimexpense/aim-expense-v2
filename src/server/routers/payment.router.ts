@@ -8,7 +8,7 @@ import { router, orgProcedure, permissionProcedure } from "../trpc";
 import { getSheetsService, ensureTabsCached } from "../lib/sheets-context";
 import { GoogleSheetsService, SHEET_TABS } from "../services/google-sheets.service";
 import { prisma } from "@/lib/prisma";
-import { calculatePayment } from "@/lib/calculations";
+import { calculatePayment, assertVatOverride } from "@/lib/calculations";
 import { TRPCError } from "@trpc/server";
 import { scopedEventIds } from "@/lib/permissions";
 import { todayBangkok } from "@/lib/utils/date";
@@ -27,6 +27,8 @@ const PaymentInputSchema = z.object({
   numberOfPeople: z.number().min(1).default(1),
   pctWTH: z.number().min(0).max(100).default(0),
   isVatPayee: z.boolean().default(false),
+  // PUR-02: VAT ตามใบกำกับจริง (ไม่ส่ง = 7% ของฐาน)
+  vatAmount: z.number().min(0).optional(),
   dueDate: z.string().min(1),
   notes: z.string().max(1000).optional(),
   // ===== R5: Tax compliance fields =====
@@ -241,7 +243,9 @@ export const paymentRouter = router({
         numberOfPeople: input.numberOfPeople,
         pctWTH: input.pctWTH,
         isVatPayee: input.isVatPayee,
+        vatOverride: input.isVatPayee ? input.vatAmount : undefined,
       });
+      if (input.isVatPayee && input.vatAmount !== undefined) assertVatOverride(calc.ttlAmount, input.vatAmount);
 
       // R5: snapshot vendor info from Payee (กันข้อมูลเปลี่ยนภายหลัง)
       let vendorTaxIdSnapshot = "";
@@ -388,16 +392,34 @@ export const paymentRouter = router({
         input.days !== undefined ||
         input.numberOfPeople !== undefined ||
         input.pctWTH !== undefined ||
-        input.isVatPayee !== undefined;
+        input.isVatPayee !== undefined ||
+        input.vatAmount !== undefined;
 
       if (needsRecalc) {
-        const calc = calculatePayment({
+        const existingVat = parseFloat(existing.VATAmount) || 0;
+        const isVatPayee = input.isVatPayee ?? existingVat > 0;
+        const base = {
           costPerUnit: input.costPerUnit ?? parseFloat(existing.CostPerUnit) ?? 0,
           days: input.days ?? parseInt(existing.Days, 10) ?? 1,
           numberOfPeople: input.numberOfPeople ?? parseInt(existing.NoOfPPL, 10) ?? 1,
           pctWTH: input.pctWTH ?? parseFloat(existing.PctWTH) ?? 0,
-          isVatPayee: input.isVatPayee ?? (parseFloat(existing.VATAmount) > 0),
-        });
+          isVatPayee,
+        };
+        // PUR-02: ส่ง VAT ตามใบมา → ใช้ตามนั้น · ไม่ส่งและฐานเดิม + ยังเป็นผู้จด VAT
+        // (เช่นแก้แค่ % หัก ณ ที่จ่าย) → คง VAT เดิมไว้ (VAT จริงจากใบเสร็จ LINE ไม่ถูกทับด้วย 7%)
+        const ttlBefore = parseFloat(existing.TTLAmount) || 0;
+        const ttlAfter = Math.round(base.costPerUnit * base.days * base.numberOfPeople * 100) / 100;
+        const sameBase = Math.abs(ttlAfter - ttlBefore) < 0.005;
+        const vatOverride =
+          !isVatPayee
+            ? undefined
+            : input.vatAmount !== undefined
+              ? input.vatAmount
+              : sameBase && existingVat > 0
+                ? existingVat
+                : undefined;
+        const calc = calculatePayment({ ...base, vatOverride });
+        if (isVatPayee && input.vatAmount !== undefined) assertVatOverride(calc.ttlAmount, input.vatAmount);
         updates.TTLAmount = calc.ttlAmount;
         updates.WTHAmount = calc.wthAmount;
         updates.VATAmount = calc.vatAmount;
@@ -472,6 +494,8 @@ export const paymentRouter = router({
         receiptUrl: z.string().url().optional().or(z.literal("")),
         receiptNumber: z.string().max(50).optional(),
         receiptDate: z.string().optional(), // ISO YYYY-MM-DD
+        // PUR-01/07: แนบใบกำกับภาษีจริงทีหลัง → เปลี่ยนประเภทเอกสารให้เข้าภาษีซื้อได้
+        documentType: z.enum(["receipt", "tax_invoice"]).optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -495,6 +519,7 @@ export const paymentRouter = router({
       if (input.receiptUrl !== undefined) updates.ReceiptURL = input.receiptUrl;
       if (input.receiptNumber !== undefined) updates.ReceiptNumber = input.receiptNumber;
       if (input.receiptDate !== undefined) updates.ReceiptDate = input.receiptDate;
+      if (input.documentType !== undefined) updates.DocumentType = input.documentType;
 
       const ok = await sheets.updateById(SHEET_TABS.PAYMENTS, "PaymentID", input.paymentId, updates);
       if (!ok) throw new Error("บันทึกไม่สำเร็จ");
@@ -804,6 +829,13 @@ export const paymentRouter = router({
       const isAdmin = ctx.org.role === "admin";
       if (!isAdmin && existing.Status !== "pending" && existing.Status !== "rejected") {
         throw new Error("ลบได้เฉพาะรายการที่ยังไม่อนุมัติ (รายการที่อนุมัติ/จ่ายแล้ว ให้ Admin เป็นผู้ลบ)");
+      }
+      // CTRL-02: ออกเลข 50 ทวิ ไปแล้ว → ห้ามลบถาวรแม้เป็น Admin (เลขที่ออกแล้วจะถูกใช้ซ้ำ + สำเนา
+      // หนังสือรับรองต้องเก็บไว้ ม.50 ทวิ / พ.ร.บ.การบัญชี ม.14) → ใช้ "ยกเลิก" แทน (เก็บแถว+เลขไว้)
+      if (existing.WhtCertNo) {
+        throw new Error(
+          "รายการนี้ออกหนังสือรับรองหัก ณ ที่จ่าย (50 ทวิ) แล้ว ลบไม่ได้ — ให้ใช้ \"ยกเลิกรายการ\" แทน เพื่อเก็บเลขที่และหลักฐานไว้",
+        );
       }
 
       // PM may only delete team expenses inside their assigned events.

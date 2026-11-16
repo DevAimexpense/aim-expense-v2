@@ -24,11 +24,12 @@
 //   - All amounts use GTTLAmount (gross total = TTL - WTH + VAT). This is
 //     the "actual money out the door" number used everywhere else in the app.
 
+import { receiptOutputVatRows } from "@/server/lib/receipt-output-vat";
 import { z } from "zod";
 import { router, orgProcedure } from "../trpc";
 import { scopedEventIds } from "@/lib/permissions";
 import { isSettled } from "@/lib/payment-status";
-import { getPndForm } from "@/lib/wht-doc-utils";
+import { getPndForm, whtPeriodDate } from "@/lib/wht-doc-utils";
 import { getSheetsService } from "../lib/sheets-context";
 import { SHEET_TABS } from "../services/google-sheets.service";
 
@@ -958,11 +959,9 @@ export const reportRouter = router({
         ]),
       );
 
-      /** Pick the date money went out (PaymentDate preferred, PaidAt fallback). */
+      /** WHT-12: งวด ภ.ง.ด. = วันเดียวกับที่พิมพ์บน 50 ทวิ (resolveWhtCertDate) */
       function paidDateOf(p: Record<string, string>): string {
-        if (p.PaymentDate) return p.PaymentDate;
-        if (p.PaidAt && p.PaidAt.length >= 10) return p.PaidAt.slice(0, 10);
-        return "";
+        return whtPeriodDate(p);
       }
 
       /**
@@ -1348,6 +1347,7 @@ export const reportRouter = router({
       const batch = await sheets.getAllBatch([
         SHEET_TABS.TAX_INVOICES,
         SHEET_TABS.TAX_INVOICE_LINES,
+        SHEET_TABS.BILLINGS,
       ]);
       const headers = batch[SHEET_TABS.TAX_INVOICES] || [];
       const allLines = batch[SHEET_TABS.TAX_INVOICE_LINES] || [];
@@ -1356,6 +1356,8 @@ export const reportRouter = router({
 
       type SalesRow = {
         taxInvoiceId: string;
+        /** SALE-01: tax_invoice = แท็บใบกำกับ · receipt = ใบเสร็จออกตรงที่มี VAT (ใบเสร็จ/ใบกำกับ หรือยังไม่มีใบกำกับคู่) */
+        kind?: "tax_invoice" | "receipt";
         docNumber: string;
         docDate: string;
         customerId: string;
@@ -1404,6 +1406,28 @@ export const reportRouter = router({
           vatAmount: num(h.VATAmount),
           goodsBase,
           serviceBase,
+        });
+      }
+
+      // SALE-01: ใบเสร็จออกตรงที่มี VAT ที่ยังไม่มีใบกำกับคู่ (นับครั้งเดียว — ดู receipt-output-vat.ts)
+      for (const r of receiptOutputVatRows(batch[SHEET_TABS.BILLINGS] || [], headers)) {
+        if (scope !== null && !scope.includes(r.eventId)) continue;
+        if (r.date < input.from || r.date > input.to) continue;
+        if (input.customerId && r.customerId !== input.customerId) continue;
+        rows.push({
+          taxInvoiceId: r.billingId,
+          kind: "receipt",
+          docNumber: r.docNumber,
+          docDate: r.date,
+          customerId: r.customerId,
+          customerName: r.customerName,
+          customerTaxId: r.customerTaxId,
+          customerBranch: "",
+          projectName: r.projectName,
+          baseAmount: r.baseAmount,
+          vatAmount: r.vatAmount,
+          goodsBase: 0,
+          serviceBase: r.baseAmount,
         });
       }
 
@@ -1463,6 +1487,7 @@ export const reportRouter = router({
         sheets.getAllBatch([
           SHEET_TABS.TAX_INVOICES,
           SHEET_TABS.TAX_INVOICE_LINES,
+          SHEET_TABS.BILLINGS,
         ]),
       ]);
 
@@ -1530,6 +1555,9 @@ export const reportRouter = router({
       const tiHeaders = batch[SHEET_TABS.TAX_INVOICES] || [];
       type OutputRow = {
         taxInvoiceId: string;
+        /** SALE-01: receipt = ใบเสร็จออกตรงที่มี VAT (ใบเสร็จ/ใบกำกับ หรือยังไม่มีใบกำกับคู่) */
+        kind?: "tax_invoice" | "receipt";
+        receiptMode?: "combined" | "separate";
         docNumber: string;
         date: string;
         customerName: string;
@@ -1551,6 +1579,22 @@ export const reportRouter = router({
           customerTaxId: h.CustomerTaxIdSnapshot || "",
           baseAmount: num(h.Subtotal),
           vatAmount: num(h.VATAmount),
+        });
+      }
+      // SALE-01: ใบเสร็จออกตรงที่มี VAT ที่ยังไม่มีใบกำกับคู่ที่ออกเลขแล้ว
+      for (const r of receiptOutputVatRows(batch[SHEET_TABS.BILLINGS] || [], tiHeaders)) {
+        if (scope !== null && !scope.includes(r.eventId)) continue;
+        if (r.date < input.from || r.date > input.to) continue;
+        outputRows.push({
+          taxInvoiceId: r.billingId,
+          kind: "receipt",
+          receiptMode: r.mode,
+          docNumber: r.docNumber,
+          date: r.date,
+          customerName: r.customerName,
+          customerTaxId: r.customerTaxId,
+          baseAmount: r.baseAmount,
+          vatAmount: r.vatAmount,
         });
       }
       outputRows.sort((a, b) =>

@@ -662,6 +662,18 @@ export const taxInvoiceRouter = router({
   convertFromBilling: featureProcedure("revenueModule", "manageTaxInvoices")
     .input(z.object({ billingId: z.string(), docDate: z.string().optional() }))
     .mutation(async ({ ctx, input }) => {
+      // SALE-05: ออกใบกำกับภาษีจากใบวางบิลเดียวกันได้ใบเดียว — มีใบที่ยังไม่ยกเลิกอยู่แล้ว (draft/issued)
+      // คืนใบเดิมแทนการสร้างใหม่ (กดซ้ำ/รีเฟรชหน้า = draft ซ้ำ → issue ทั้งคู่ = ภาษีขายนับซ้ำ)
+      return withLock(`ti-from-src:${ctx.org.orgId}:${input.billingId}`, async () => {
+      if (ctx.org.googleSpreadsheetId) {
+        await invalidateTab(ctx.org.googleSpreadsheetId, SHEET_TABS.TAX_INVOICES);
+      }
+      const existingTi = (await (await getSheetsService(ctx.org.orgId)).getAll(SHEET_TABS.TAX_INVOICES)).find(
+        (t) => t.SourceBillingID === input.billingId && t.Status !== "void",
+      );
+      if (existingTi) {
+        return { success: true, taxInvoiceId: existingTi.TaxInvoiceID, existing: true as boolean };
+      }
       const sheets = await getSheetsService(ctx.org.orgId);
       await ensureTabsCached(sheets, ctx.org.orgId);
 
@@ -789,7 +801,8 @@ export const taxInvoiceRouter = router({
         },
       });
 
-      return { success: true, taxInvoiceId };
+      return { success: true, taxInvoiceId, existing: false as boolean };
+      }, { ttlMs: 60_000 });
     }),
 
   /**
@@ -799,6 +812,18 @@ export const taxInvoiceRouter = router({
   convertFromQuotation: featureProcedure("revenueModule", "manageTaxInvoices")
     .input(z.object({ quotationId: z.string(), docDate: z.string().optional() }))
     .mutation(async ({ ctx, input }) => {
+      // SALE-05: ออกใบกำกับภาษีจากใบเสนอราคาเดียวกันได้ใบเดียว — มีใบที่ยังไม่ยกเลิกอยู่แล้ว (draft/issued)
+      // คืนใบเดิมแทนการสร้างใหม่ (กดซ้ำ/รีเฟรชหน้า = draft ซ้ำ → issue ทั้งคู่ = ภาษีขายนับซ้ำ)
+      return withLock(`ti-from-src:${ctx.org.orgId}:${input.quotationId}`, async () => {
+      if (ctx.org.googleSpreadsheetId) {
+        await invalidateTab(ctx.org.googleSpreadsheetId, SHEET_TABS.TAX_INVOICES);
+      }
+      const existingTi = (await (await getSheetsService(ctx.org.orgId)).getAll(SHEET_TABS.TAX_INVOICES)).find(
+        (t) => t.SourceQuotationID === input.quotationId && t.Status !== "void",
+      );
+      if (existingTi) {
+        return { success: true, taxInvoiceId: existingTi.TaxInvoiceID, existing: true as boolean };
+      }
       const sheets = await getSheetsService(ctx.org.orgId);
       await ensureTabsCached(sheets, ctx.org.orgId);
 
@@ -929,7 +954,8 @@ export const taxInvoiceRouter = router({
         },
       });
 
-      return { success: true, taxInvoiceId };
+      return { success: true, taxInvoiceId, existing: false as boolean };
+      }, { ttlMs: 60_000 });
     }),
 
   /**

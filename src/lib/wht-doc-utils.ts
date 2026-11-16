@@ -89,6 +89,23 @@ export function resolveWhtCertDate(p: {
 }
 
 /**
+ * WHT-12: วันที่ที่ใช้จัดงวด ภ.ง.ด.3/53 — ต้องเป็นวันเดียวกับที่พิมพ์บน 50 ทวิ (resolveWhtCertDate)
+ * ไม่งั้น 50 ทวิ ลงเดือนหนึ่ง แต่ใบแนบ ภ.ง.ด. ไปอยู่อีกเดือน (นำส่งช้า/เทียบกับผู้รับเงินไม่ตรง)
+ * fallback PaidAt เฉพาะแถวเก่าที่ไม่มีทั้งวันที่จ่ายและวันที่ใบเสร็จ
+ */
+export function whtPeriodDate(p: {
+  PaymentDate?: string;
+  ReceiptDate?: string;
+  CreatedAt?: string;
+  ApprovedAt?: string;
+  PaidAt?: string;
+}): string {
+  const d = resolveWhtCertDate(p);
+  if (d) return d;
+  return p.PaidAt && p.PaidAt.length >= 10 ? p.PaidAt.slice(0, 10) : "";
+}
+
+/**
  * ตัดสิน ภ.ง.ด. form จากประเภทผู้ถูกหัก (payee)
  *   - ภ.ง.ด.3 = บุคคลธรรมดา (TaxID ขึ้นต้น 1-8 = เลขบัตรประชาชน)
  *   - ภ.ง.ด.53 = นิติบุคคล (TaxID ขึ้นต้น 0 = เลขผู้เสียภาษีนิติบุคคล)
@@ -118,7 +135,7 @@ export function getPndForm(payeeTaxId: string, payeeBranchType?: string): "3" | 
  *   4a = ดอกเบี้ย ตามมาตรา 40(4)(ก)
  *   4b = เงินปันผล ตามมาตรา 40(4)(ข)
  *   5 = การจ่ายเงินได้ที่ต้องหักภาษี ณ ที่จ่าย ตามคำสั่ง 3 เตรส (ค่าเช่า/โฆษณา/ขนส่ง/บริการ ฯลฯ)
- *   6 = อื่น ๆ (custom / วิชาชีพอิสระ)
+ *   6 = อื่น ๆ (custom)
  */
 export type WhtIncomeSection = "1" | "2" | "3" | "4a" | "4b" | "5" | "6";
 
@@ -127,14 +144,14 @@ export function mapWhtToIncomeSection(wthTypeId: string): {
   label: string;
 } {
   const MAP: Record<string, { section: WhtIncomeSection; label: string }> = {
-    "service-1": { section: "5", label: "ค่ารับเหมา/บริการ" },
     "transport-1": { section: "5", label: "ค่าขนส่ง" },
     "ad-2": { section: "5", label: "ค่าโฆษณา" },
     "service-3": { section: "5", label: "ค่าบริการ" },
-    "contract-3": { section: "5", label: "ค่ารับเหมา" },
+    "contract-3": { section: "5", label: "ค่าจ้างทำของ/รับเหมา" },
     "commission-3": { section: "2", label: "ค่านายหน้า" },
     "rental-5": { section: "5", label: "ค่าเช่า" },
-    "professional-5": { section: "6", label: "ค่าวิชาชีพอิสระ" },
+    // 40(6) วิชาชีพอิสระ อยู่ใต้คำสั่ง 3 เตรส (ข้อ 5 ของ 50 ทวิ) เช่นเดียวกับค่าบริการ
+    "professional-3": { section: "5", label: "ค่าวิชาชีพอิสระ" },
     "show-5": { section: "5", label: "ค่าแสดงของนักแสดงสาธารณะ" },
   };
   return MAP[wthTypeId] || { section: "6", label: "อื่น ๆ" };

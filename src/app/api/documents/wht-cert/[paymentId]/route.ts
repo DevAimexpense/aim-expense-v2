@@ -7,7 +7,7 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session";
 import { getOrgContext } from "@/lib/auth/middleware";
-import { loadWhtCertData, WhtCertNoDateError } from "@/server/lib/wht-cert-data";
+import { loadWhtCertData, WhtCertNoDateError, WhtCertNotPaidError } from "@/server/lib/wht-cert-data";
 import { buildWhtCertPdf } from "@/server/lib/wht-cert-pdf";
 
 export const dynamic = "force-dynamic";
@@ -52,7 +52,7 @@ export async function GET(
       },
     });
   } catch (err) {
-    if (err instanceof WhtCertNoDateError) {
+    if (err instanceof WhtCertNoDateError || err instanceof WhtCertNotPaidError) {
       return NextResponse.json({ error: err.message }, { status: 409 });
     }
     // route ที่ client อ่านผลเป็นไฟล์ — ห้ามปล่อย exception หลุดเป็น 500 body ว่าง

@@ -277,54 +277,54 @@ export class GoogleDriveService {
   }
 
   /**
-   * บันทึกเอกสารขาย (ใบเสนอราคา/ใบวางบิล/ใบกำกับภาษี/ใบเสร็จ) ลง Documents/{YYYY}/{MM}/
-   * มีไฟล์เดิม (existingUrl) → เขียนทับเนื้อหาไฟล์เดิม ลิงก์เดิมใช้ต่อได้ · ทับไม่ได้ (ถูกลบ/ไม่มีสิทธิ์) → สร้างใหม่
+   * บันทึกเอกสารระบบ (ใบเสนอราคา/ใบวางบิล/ใบกำกับภาษี/ใบเสร็จ/50 ทวิ) ลง Documents/{YYYY}/{MM}/
+   * CTRL-09 (ตัดสินใจ 16/11/2569): เอกสารที่เคยบันทึกแล้วถูกแก้ → **สร้างไฟล์เวอร์ชันใหม่ ห้ามเขียนทับ**
+   * (ฉบับที่ส่งให้ลูกค้า/ผู้รับเงินไปแล้วต้องคงอยู่ · Drive เก็บ revision เก่าแค่ ~30 วัน)
+   *   ครั้งแรก → `<ชื่อ>.pdf` · มีไฟล์เดิม (existingUrl) → `<ชื่อ>_v2.pdf`, `_v3` … ไฟล์เดิมไม่ถูกแตะ
    */
-  async uploadOrReplaceDocument(params: {
+  async uploadDocumentVersion(params: {
     documentsFolderId: string;
     docDate: string; // ISO YYYY-MM-DD — ใช้จัดโฟลเดอร์ปี/เดือน
     fileName: string;
     fileBuffer: Buffer;
     existingUrl?: string;
-  }): Promise<{ fileId: string; webViewLink: string; fileName: string; folderPath: string; replaced: boolean }> {
+  }): Promise<{ fileId: string; webViewLink: string; fileName: string; folderPath: string; version: number }> {
     let date = new Date(params.docDate);
     if (isNaN(date.getTime())) date = new Date();
     const year = date.getFullYear();
     const paddedMonth = String(date.getMonth() + 1).padStart(2, "0");
     const folderPath = `Documents/${year}/${paddedMonth}`;
-
     const monthFolderId = await this.getOrCreateYearMonthFolder(params.documentsFolderId, year, date.getMonth() + 1);
-    const existingId = params.existingUrl?.match(/\/d\/([A-Za-z0-9_-]{10,})/)?.[1];
-    if (existingId) {
+
+    let version = 1;
+    let fileName = params.fileName;
+    if (params.existingUrl) {
+      const base = params.fileName.replace(/\.pdf$/i, "");
+      let maxSeen = 1; // ไฟล์เดิมนับเป็นเวอร์ชัน 1
       try {
-        // DOC-01: วันที่เอกสารย้ายข้ามเดือน → ย้ายไฟล์ไปโฟลเดอร์เดือนใหม่ด้วย (ลิงก์เดิมใช้ได้)
-        const current = await this.drive.files.get({ fileId: existingId, fields: "parents" });
-        const oldParents = (current.data.parents || []).filter((p) => p !== monthFolderId);
-        const res = await this.drive.files.update({
-          fileId: existingId,
-          requestBody: { name: params.fileName },
-          media: { mimeType: "application/pdf", body: Readable.from(params.fileBuffer) },
-          ...(oldParents.length > 0 || !(current.data.parents || []).includes(monthFolderId)
-            ? { addParents: monthFolderId, removeParents: oldParents.join(",") || undefined }
-            : {}),
-          fields: "id, webViewLink, trashed",
-        });
-        if (!res.data.trashed) {
-          return {
-            fileId: res.data.id!,
-            webViewLink: res.data.webViewLink || params.existingUrl!,
-            fileName: params.fileName,
-            folderPath,
-            replaced: true,
-          };
+        const q = `'${monthFolderId}' in parents and trashed=false and name contains '${base.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`;
+        const res = await this.drive.files.list({ q, fields: "files(name)", pageSize: 100 });
+        for (const f of res.data.files || []) {
+          const m = (f.name || "").match(/_v(\d+)\.pdf$/i);
+          if (m && (f.name || "").startsWith(base)) maxSeen = Math.max(maxSeen, parseInt(m[1], 10) || 1);
         }
       } catch (err) {
-        console.warn("[drive] replace failed — creating a new file", existingId, err);
+        console.warn("[drive] list versions failed — using timestamp suffix", err);
+        maxSeen = 0;
+      }
+      if (maxSeen === 0) {
+        // อ่านรายการไฟล์ไม่ได้ → ใช้เวลาแทนเลขเวอร์ชัน (กันชื่อชน ไม่ทับไฟล์เดิมแน่นอน)
+        const stamp = new Date().toISOString().replace(/[-:T]/g, "").slice(0, 12);
+        fileName = `${base}_v${stamp}.pdf`;
+        version = 2;
+      } else {
+        version = maxSeen + 1;
+        fileName = `${base}_v${version}.pdf`;
       }
     }
 
-    const result = await this.uploadFile(monthFolderId, params.fileName, "application/pdf", params.fileBuffer);
-    return { ...result, fileName: params.fileName, folderPath, replaced: false };
+    const result = await this.uploadFile(monthFolderId, fileName, "application/pdf", params.fileBuffer);
+    return { ...result, fileName, folderPath, version };
   }
 
   /**

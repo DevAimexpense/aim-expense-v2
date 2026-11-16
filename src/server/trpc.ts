@@ -96,6 +96,8 @@ const t = initTRPC.context<TRPCContext>().create({
  * Export reusable parts
  */
 export const router = t.router;
+/** เรียก procedure ของ router อื่นจากฝั่ง server ด้วย ctx เดิม (สิทธิ์/แพ็กเกจถูกตรวจซ้ำตามปกติ) */
+export const createCallerFactory = t.createCallerFactory;
 export const publicProcedure = t.procedure;
 
 // ===== Middleware =====
