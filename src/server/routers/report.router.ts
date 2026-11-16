@@ -1375,7 +1375,11 @@ export const reportRouter = router({
         // Per-nature base (sums of LineTotals by ExpenseNature, pre-discount)
         goodsBase: number;
         serviceBase: number;
+        /** VAT-21: ใบเสร็จนี้น่าจะซ้ำกับใบกำกับที่ออกแยกไว้ (เลขที่) — ผูกได้ที่หน้า ภ.พ.30 */
+        possibleDuplicateOf?: string[];
       };
+      const scopedHeaders =
+        scope === null ? headers : headers.filter((t) => scope.includes((t.EventID || "").trim()));
 
       const rows: SalesRow[] = [];
 
@@ -1433,8 +1437,20 @@ export const reportRouter = router({
           vatAmount: r.vatAmount,
           goodsBase: 0,
           serviceBase: r.baseAmount,
+          possibleDuplicateOf:
+            r.mode === "combined"
+              ? []
+              : linkableTaxInvoices(r.customerId, r.vatAmount, scopedHeaders).map((c) => c.docNumber),
         });
       }
+      // VAT-21: ใบเสร็จจากใบวางบิลที่มี VAT แต่ยังไม่มีใบกำกับ — ไม่อยู่ในรายงาน (ยังไม่มีใบกำกับ) แต่บอกจำนวนไว้
+      const uncoveredInPeriod = uncoveredBillingReceipts(batch[SHEET_TABS.BILLINGS] || [], headers).filter(
+        (r) =>
+          (scope === null || scope.includes(r.eventId)) &&
+          r.date >= input.from &&
+          r.date <= input.to &&
+          (!input.customerId || r.customerId === input.customerId),
+      );
 
       rows.sort((a, b) => {
         if (a.docDate !== b.docDate) return a.docDate < b.docDate ? -1 : 1;
@@ -1457,6 +1473,10 @@ export const reportRouter = router({
           customerCount,
           totalGoodsBase,
           totalServiceBase,
+          // VAT-21: ตัวเลขเตือนเดียวกับหน้า ภ.พ.30
+          possibleDuplicates: rows.filter((r) => (r.possibleDuplicateOf?.length || 0) > 0).length,
+          uncoveredReceiptCount: uncoveredInPeriod.length,
+          uncoveredReceiptVAT: uncoveredInPeriod.reduce((s, r) => s + r.vatAmount, 0),
         },
         rows,
       };
@@ -1558,6 +1578,8 @@ export const reportRouter = router({
 
       // ===== OUTPUT VAT (sales) =====
       const tiHeaders = batch[SHEET_TABS.TAX_INVOICES] || [];
+      // SCOPE-01: ปุ่ม "ผูก" เสนอเฉพาะใบกำกับในขอบเขตของผู้ดู (หัวหน้าโครงการไม่เห็นเลขของโครงการอื่น)
+      const scopedTis = scope === null ? tiHeaders : tiHeaders.filter((t) => scope.includes((t.EventID || "").trim()));
       type OutputRow = {
         taxInvoiceId: string;
         /** SALE-01: receipt = ใบเสร็จออกตรงที่มี VAT (ใบเสร็จ/ใบกำกับ หรือยังไม่มีใบกำกับคู่) */
@@ -1603,13 +1625,13 @@ export const reportRouter = router({
           baseAmount: r.baseAmount,
           vatAmount: r.vatAmount,
           // โหมดรวม = ตัวใบเสร็จเป็นใบกำกับ → ไม่เสนอผูก (ถ้าซ้ำต้องยกเลิกใบใดใบหนึ่ง)
-          linkCandidates: r.mode === "combined" ? [] : linkableTaxInvoices(r.customerId, r.vatAmount, tiHeaders),
+          linkCandidates: r.mode === "combined" ? [] : linkableTaxInvoices(r.customerId, r.vatAmount, scopedTis),
         });
       }
       // SALE-01d: ใบเสร็จจากใบวางบิลที่มี VAT แต่ยังไม่มีใบกำกับ — ไม่รวมในยอด แสดงเป็นรายการยกเว้น
       const uncovered = uncoveredBillingReceipts(batch[SHEET_TABS.BILLINGS] || [], tiHeaders)
         .filter((r) => (scope === null || scope.includes(r.eventId)) && r.date >= input.from && r.date <= input.to)
-        .map((r) => ({ ...r, linkCandidates: linkableTaxInvoices(r.customerId, r.vatAmount, tiHeaders) }))
+        .map((r) => ({ ...r, linkCandidates: linkableTaxInvoices(r.customerId, r.vatAmount, scopedTis) }))
         .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
       outputRows.sort((a, b) =>
         a.date !== b.date ? (a.date < b.date ? -1 : 1) : 0,

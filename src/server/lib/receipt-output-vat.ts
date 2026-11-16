@@ -122,16 +122,32 @@ export type UncoveredBillingReceipt = {
 export function uncoveredBillingReceipts(billings: Row[], taxInvoices: Row[]): UncoveredBillingReceipt[] {
   const issued = taxInvoices.filter((t) => t.Status === "issued");
   const bySource = new Set(issued.map((t) => t.SourceBillingID).filter(Boolean));
-  const byQuotation = new Set(issued.map((t) => t.SourceQuotationID).filter(Boolean));
+  // SALE-01e: ใบกำกับจากใบเสนอราคา (ไม่ผูกใบวางบิล) ครอบใบวางบิลจากใบเสนอราคาเดียวกันได้ "เท่ายอด VAT ของมัน"
+  // (เช่นใบกำกับมัดจำ 30% ไม่ได้ครอบใบวางบิลเต็มจำนวน) — ใช้ยอดคงเหลือแบบเรียงตามวันที่รับเงิน
+  const quotationVatLeft = new Map<string, number>();
+  for (const t of issued) {
+    if (!t.SourceQuotationID || t.SourceBillingID) continue;
+    quotationVatLeft.set(t.SourceQuotationID, (quotationVatLeft.get(t.SourceQuotationID) || 0) + num(t.VATAmount));
+  }
+  const ordered = [...billings].sort((a, b) =>
+    (a.ReceiptDate || a.PaidDate || "").localeCompare(b.ReceiptDate || b.PaidDate || ""),
+  );
   const out: UncoveredBillingReceipt[] = [];
-  for (const b of billings) {
+  for (const b of ordered) {
     if (b.DocKind === "receipt") continue;
     if (!b.ReceiptNumber || b.Status === "void") continue;
     if (b.IsVAT === "FALSE") continue;
     const vat = num(b.VATAmount);
     if (vat <= 0) continue;
     if (bySource.has(b.BillingID)) continue;
-    if (b.SourceQuotationID && byQuotation.has(b.SourceQuotationID)) continue;
+    if (b.SourceQuotationID && quotationVatLeft.has(b.SourceQuotationID)) {
+      const left = quotationVatLeft.get(b.SourceQuotationID) || 0;
+      if (left + 0.005 >= vat) {
+        quotationVatLeft.set(b.SourceQuotationID, left - vat);
+        continue; // ครอบเต็ม
+      }
+      quotationVatLeft.set(b.SourceQuotationID, 0); // ครอบบางส่วน → ยังต้องตามออกใบกำกับ (แสดงทั้งใบ)
+    }
     const date = (b.ReceiptDate || b.PaidDate || "").slice(0, 10);
     if (!date) continue;
     out.push({

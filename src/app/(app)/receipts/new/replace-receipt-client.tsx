@@ -62,7 +62,7 @@ export function ReplaceReceiptClient({ replacesBillingId }: { replacesBillingId:
       replacesBillingId={replacesBillingId}
       notice={`ออกแทนใบเสร็จเลขที่ ${header.receiptNumber || header.docNumber} ที่ยกเลิกแล้ว${
         header.voidReason ? ` (เหตุผล: ${header.voidReason})` : ""
-      } — ระบบจะเติมหมายเหตุอ้างฉบับเดิมให้อัตโนมัติ`}
+      } — ระบบจะเติมหมายเหตุอ้างฉบับเดิมให้อัตโนมัติ · ลงวันที่เดิมไว้ให้ ถ้างวด ภ.พ.30 ของเดือนนั้นยื่นไปแล้ว ต้องยื่นเพิ่มเติม`}
     />
   );
 }

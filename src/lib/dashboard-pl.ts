@@ -27,6 +27,10 @@ export type PlBilling = {
   docDate: string;
   subtotal: number;
   sourceQuotationId?: string;
+  /** RPT-03: จับคู่กับใบกำกับที่ออกแยก (ลูกค้า + VAT เดียวกัน) */
+  billingId?: string;
+  customerId?: string;
+  vatAmount?: number;
 };
 
 /** RPT-02: ใบกำกับภาษี — นับเป็นรายได้เฉพาะใบที่ไม่มีใบวางบิล/ใบเสร็จต้นทาง (ไม่งั้นนับซ้ำ) */
@@ -37,6 +41,8 @@ export type PlTaxInvoice = {
   subtotal: number;
   sourceBillingId: string;
   sourceQuotationId: string;
+  customerId?: string;
+  vatAmount?: number;
 };
 
 /** สถานะค่าใช้จ่ายที่ถือว่าเกิดขึ้นแล้ว (ไม่นับ รออนุมัติ / ไม่อนุมัติ / ยกเลิก) */
@@ -80,11 +86,37 @@ export function computeDashboardPL(params: {
     if (!inEvent(b.eventId, eventId) || !inPeriod(b.docDate, month)) continue;
     revenue += b.subtotal || 0;
   }
+  // RPT-03: ใบกำกับที่ออกแยก (ไม่ผูก) ของลูกค้าเดียวกัน VAT เท่ากับใบวางบิล/ใบเสร็จที่ยังไม่มีใบกำกับผูก
+  // = น่าจะเป็นรายการขายเดียวกัน (เช่นลูกค้าเคยออกใบกำกับเองให้ใบเสร็จออกตรง) → ไม่นับซ้ำ
+  // จับคู่ 1:1 ทั้งองค์กร (ไม่จำกัดเดือน/โปรเจกต์ — ใบกำกับอาจลงคนละเดือนกับใบวางบิล)
+  const taxInvoices = params.taxInvoices || [];
+  const linkedBillings = new Set(
+    taxInvoices.filter((t) => t.status === "issued" && t.sourceBillingId).map((t) => t.sourceBillingId),
+  );
+  const pairKey = (customerId?: string, vat?: number) =>
+    customerId && (vat || 0) > 0 ? `${customerId}|${Math.round((vat || 0) * 100)}` : "";
+  const unlinkedDocs = new Map<string, number>();
+  for (const b of billings) {
+    if (NOT_REVENUE.has(b.status)) continue;
+    if (b.billingId && linkedBillings.has(b.billingId)) continue;
+    const k = pairKey(b.customerId, b.vatAmount);
+    if (k) unlinkedDocs.set(k, (unlinkedDocs.get(k) || 0) + 1);
+  }
   let revenueFromTaxInvoices = 0;
-  for (const t of params.taxInvoices || []) {
-    if (t.status !== "issued") continue;
-    if (t.sourceBillingId) continue; // ใบวางบิล/ใบเสร็จต้นทางนับไปแล้ว
+  let possibleDuplicates = 0;
+  // เรียงตามวันที่ให้การจับคู่คงที่ทุกครั้ง (ไม่ขึ้นกับลำดับในชีต)
+  const standalone = taxInvoices
+    .filter((t) => t.status === "issued" && !t.sourceBillingId)
+    .sort((a, b) => (a.docDate < b.docDate ? -1 : a.docDate > b.docDate ? 1 : 0));
+  for (const t of standalone) {
     if (t.sourceQuotationId && billedQuotations.has(t.sourceQuotationId)) continue;
+    const k = pairKey(t.customerId, t.vatAmount);
+    const left = k ? unlinkedDocs.get(k) || 0 : 0;
+    if (left > 0) {
+      unlinkedDocs.set(k, left - 1);
+      if (inEvent(t.eventId, eventId) && inPeriod(t.docDate, month)) possibleDuplicates += 1;
+      continue; // ใบวางบิล/ใบเสร็จคู่กันนับไปแล้ว
+    }
     if (!inEvent(t.eventId, eventId) || !inPeriod(t.docDate, month)) continue;
     revenueFromTaxInvoices += t.subtotal || 0;
   }
@@ -113,6 +145,8 @@ export function computeDashboardPL(params: {
     revenue,
     /** RPT-02: ส่วนของรายได้ที่มาจากใบกำกับภาษีที่ไม่มีใบวางบิล (แสดงใต้การ์ด) */
     revenueFromTaxInvoices: round2(revenueFromTaxInvoices),
+    /** RPT-03: ใบกำกับที่ไม่นับเพราะน่าจะซ้ำกับใบวางบิล/ใบเสร็จ (ควรผูก) */
+    possibleDuplicates,
     expense,
     profit,
     margin: revenue > 0 ? (profit / revenue) * 100 : null,

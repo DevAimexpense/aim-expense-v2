@@ -224,9 +224,13 @@ export function DashboardClient({
               label="รายได้ (ออกเอกสารแล้ว)"
               value={`฿${formatNumber(totalInvoiced)}`}
               sub={
-                pl.revenueFromTaxInvoices > 0
+                (pl.revenueFromTaxInvoices > 0
                   ? `ใบวางบิล/ใบเสร็จ + ใบกำกับที่ไม่มีใบวางบิล ฿${formatNumber(pl.revenueFromTaxInvoices)} · ก่อน VAT`
-                  : "ใบวางบิล/ใบเสร็จ/ใบกำกับ ก่อน VAT"
+                  : "ใบวางบิล/ใบเสร็จ/ใบกำกับ ก่อน VAT") +
+                // RPT-03: ใบกำกับที่ไม่นับเพราะน่าจะซ้ำ — ให้ไปผูก (หน้า ภ.พ.30 / หน้าใบวางบิล)
+                (pl.possibleDuplicates > 0
+                  ? ` · ไม่นับใบกำกับที่น่าจะซ้ำ ${pl.possibleDuplicates} ใบ (ผูกได้ที่หน้า ภ.พ.30)`
+                  : "")
               }
               compact
             />

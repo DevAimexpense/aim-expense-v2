@@ -44,6 +44,9 @@ export function BillingDetailClient({ billingId }: { billingId: string }) {
   const receiptMut = trpc.billing.issueReceipt.useMutation();
   const receiptDateMut = trpc.billing.updateReceiptDate.useMutation();
   const orgQuery = trpc.org.get.useQuery();
+  // SALE-20 / RPT-03: ใบกำกับที่ผูกกับใบนี้ + ใบกำกับที่ออกแยกไว้ซึ่งน่าจะเป็นรายการเดียวกัน
+  const tiInfo = trpc.taxInvoice.forBilling.useQuery({ billingId });
+  const linkMut = trpc.taxInvoice.linkSource.useMutation();
 
   const [error, setError] = useState<string | null>(null);
   const [showPayment, setShowPayment] = useState(false);
@@ -182,6 +185,54 @@ export function BillingDetailClient({ billingId }: { billingId: string }) {
       </div>
 
       {error && <div className="app-error-msg">{error}</div>}
+      {/* RPT-03 / SALE-01c: ใบกำกับที่ออกแยกไว้ (ลูกค้า + VAT ตรงกัน) — ผูกให้นับครั้งเดียว */}
+      {header.status !== "void" && !tiInfo.data?.linked && (tiInfo.data?.candidates.length || 0) > 0 && (
+        <div
+          role="status"
+          style={{
+            padding: "0.625rem 0.875rem",
+            background: "#fffbeb",
+            border: "1px solid #fde68a",
+            borderRadius: "0.5rem",
+            color: "#92400e",
+            fontSize: "0.875rem",
+            marginBottom: "1rem",
+          }}
+        >
+          ⚠️ มีใบกำกับภาษีที่ออกแยกไว้ของลูกค้านี้ ยอด VAT เท่ากัน — ถ้าเป็นการขายรายการเดียวกัน ให้ผูกไว้
+          (ไม่งั้นรายได้บน Dashboard และภาษีขายจะนับซ้ำ):{" "}
+          {tiInfo.data!.candidates.map((c) => (
+            <button
+              key={c.taxInvoiceId}
+              type="button"
+              className="app-btn app-btn-secondary app-btn-sm"
+              style={{ marginLeft: "0.375rem" }}
+              disabled={linkMut.isPending}
+              onClick={async () => {
+                if (!window.confirm(`ผูกใบกำกับภาษี ${c.docNumber} กับใบวางบิล ${header.docNumber}?\nยืนยันเมื่อเป็นการขายรายการเดียวกันเท่านั้น`)) return;
+                setError(null);
+                try {
+                  await linkMut.mutateAsync({ taxInvoiceId: c.taxInvoiceId, billingId });
+                  await Promise.all([tiInfo.refetch(), utils.taxInvoice.list.invalidate()]);
+                } catch (e) {
+                  setError(e instanceof Error ? e.message : "ผูกไม่สำเร็จ");
+                }
+              }}
+            >
+              🔗 ผูก {c.docNumber}
+            </button>
+          ))}
+        </div>
+      )}
+      {tiInfo.data?.linked && (
+        <p style={{ fontSize: "0.8125rem", color: "#475569", margin: "0 0 0.75rem" }}>
+          ใบกำกับภาษีของใบนี้:{" "}
+          <Link href={`/tax-invoices/${tiInfo.data.linked.taxInvoiceId}`} style={{ color: "#2563eb" }}>
+            {tiInfo.data.linked.docNumber}
+          </Link>{" "}
+          · แก้ไขใบวางบิลไม่ได้ (ต้องยกเลิกใบกำกับก่อน)
+        </p>
+      )}
       {notice && (
         <div
           role="status"
@@ -236,12 +287,13 @@ export function BillingDetailClient({ billingId }: { billingId: string }) {
             </button>
           </>
         )}
-        {/* แก้ไขได้หลังส่ง/รับเงินแล้วด้วย — SALE-19: แต่ไม่ได้เมื่อออกใบเสร็จแล้ว (ต้องยกเลิกใบเสร็จก่อน) */}
+        {/* แก้ไขได้หลังส่ง/รับเงินแล้วด้วย — SALE-19/20: แต่ไม่ได้เมื่อออกใบเสร็จ หรือมีใบกำกับออกเลขแล้ว */}
         {(header.status === "sent" ||
           header.status === "partial" ||
           header.status === "paid") &&
           !!header.customerId &&
           !header.receiptNumber &&
+          !tiInfo.data?.linked &&
           header.docKind !== "receipt" && (
             <Link
               href={`/billings/${billingId}/edit`}

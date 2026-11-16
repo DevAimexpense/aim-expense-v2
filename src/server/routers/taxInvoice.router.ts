@@ -28,7 +28,7 @@ import { prisma } from "@/lib/prisma";
 import { safeAuditLog } from "@/server/lib/audit";
 import { replacementNote, withReplacementNote } from "../lib/ti-replacement";
 import { filedVatPeriodWarning } from "../lib/vat-period";
-import { linkSourceBlockReason } from "../lib/receipt-output-vat";
+import { linkSourceBlockReason, linkableTaxInvoices, type LinkCandidate } from "../lib/receipt-output-vat";
 
 // ===== Schemas =====
 
@@ -668,6 +668,31 @@ export const taxInvoiceRouter = router({
       });
 
       return { success: true };
+    }),
+
+  /**
+   * SALE-20 / RPT-03: ใบกำกับของใบวางบิลนี้ — ที่ผูกแล้ว (ออกเลข) และที่ออกแยกไว้ซึ่งน่าจะเป็นรายการเดียวกัน
+   * (ลูกค้าเดียวกัน VAT เท่ากัน ยังไม่ผูก) · ผู้ดูเห็นเฉพาะใบกำกับในขอบเขตตัวเอง (SCOPE-01)
+   */
+  forBilling: featureProcedure("revenueModule")
+    .input(z.object({ billingId: z.string() }))
+    .query(async ({ ctx, input }) => {
+      const sheets = await getSheetsService(ctx.org.orgId);
+      const [doc, all] = await Promise.all([
+        sheets.getBillingById(input.billingId),
+        sheets.getAll(SHEET_TABS.TAX_INVOICES),
+      ]);
+      if (!doc) return { linked: null, candidates: [] as LinkCandidate[] };
+      const visible = all.filter((t) => isDocInScope(ctx.org, ctx.session.userId, t.EventID, t.PreparedByUserId));
+      const linkedRow = visible.find((t) => t.SourceBillingID === input.billingId && t.Status === "issued");
+      const vat = parseFloat(doc.VATAmount) || 0;
+      return {
+        linked: linkedRow ? { taxInvoiceId: linkedRow.TaxInvoiceID, docNumber: linkedRow.DocNumber || "" } : null,
+        candidates:
+          linkedRow || doc.Status === "void" || doc.IsVAT === "FALSE" || doc.TaxDocMode === "combined"
+            ? []
+            : linkableTaxInvoices(doc.CustomerID || "", vat, visible),
+      };
     }),
 
   /**

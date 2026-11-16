@@ -9,8 +9,11 @@ import {
 
 export function EditBillingClient({ billingId }: { billingId: string }) {
   const detail = trpc.billing.getById.useQuery({ billingId });
+  // SALE-20: มีใบกำกับออกเลขแล้ว → ล็อกก่อนกรอก (server ปฏิเสธอยู่แล้ว)
+  const tiInfo = trpc.taxInvoice.forBilling.useQuery({ billingId });
+  const linkedTi = tiInfo.data?.linked;
 
-  if (detail.isLoading) {
+  if (detail.isLoading || tiInfo.isLoading) {
     return <div className="app-page">กำลังโหลด...</div>;
   }
   if (!detail.data) {
@@ -33,7 +36,8 @@ export function EditBillingClient({ billingId }: { billingId: string }) {
     detail.data.header.status === "void" ||
     detail.data.header.docKind === "receipt" ||
     !detail.data.header.customerId ||
-    !!detail.data.header.receiptNumber
+    !!detail.data.header.receiptNumber ||
+    !!linkedTi
   ) {
     return (
       <div className="app-page">
@@ -47,7 +51,9 @@ export function EditBillingClient({ billingId }: { billingId: string }) {
                 : detail.data.header.receiptNumber
                   ? // SALE-19: ใบเสร็จที่ส่งลูกค้าแล้วต้องไม่เปลี่ยน (server ปฏิเสธด้วย)
                     `ออกใบเสร็จรับเงิน ${detail.data.header.receiptNumber} แล้ว — ถ้าต้องแก้ ให้กด "ยกเลิกใบเสร็จ" ที่เมนูใบเสร็จรับเงิน (ระบุเหตุผล) แล้วกลับมาแก้และออกใบเสร็จใหม่`
-                  : "เอกสารนี้แก้ไขจากหน้านี้ไม่ได้"}
+                  : linkedTi
+                    ? `มีใบกำกับภาษี ${linkedTi.docNumber} แล้ว — ถ้าต้องแก้ ให้ยกเลิกใบกำกับภาษีก่อน (ระบุเหตุผล) หรือออกใบลดหนี้/เพิ่มหนี้`
+                    : "เอกสารนี้แก้ไขจากหน้านี้ไม่ได้"}
             </p>
             <Link
               href={`/billings/${billingId}`}

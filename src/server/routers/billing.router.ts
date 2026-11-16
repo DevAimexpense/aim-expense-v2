@@ -16,6 +16,7 @@ import {
   settledAmountAfterEdit,
 } from "../lib/receipt-output-vat";
 import { withReplacementNote, receiptReplacementNote } from "../lib/ti-replacement";
+import { filedVatPeriodWarning } from "../lib/vat-period";
 import { getSheetsService, ensureTabsCached } from "../lib/sheets-context";
 import {
   GoogleSheetsService,
@@ -1016,6 +1017,9 @@ export const billingRouter = router({
         taxInvoiceId = paired.taxInvoiceId;
         taxInvoiceNumber = paired.docNumber;
         warning = paired.warning;
+      } else if (taxDocMode === "combined") {
+        // CTRL-13b: ใบเสร็จ/ใบกำกับ ลงวันที่ในงวด ภ.พ.30 ที่เลยกำหนด (เช่นออกใหม่แทนใบเดือนก่อน) → เตือนยื่นเพิ่มเติม
+        warning = filedVatPeriodWarning(input.docDate, todayBangkok());
       }
 
       return { success: true, billingId, receiptNumber, taxInvoiceId, taxInvoiceNumber, warning };
